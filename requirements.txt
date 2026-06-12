@@ -1,0 +1,36 @@
+# Core Django
+django==6.0.5
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+
+# Database (psycopg v3)
+psycopg[binary]==3.3.4
+
+# Environment / config
+python-dotenv==1.2.2
+
+# HTTP client
+httpx==0.28.1
+tenacity==9.1.2
+
+# Spreadsheet / data
+pandas==2.2.3
+numpy==2.2.6
+openpyxl==3.1.5
+xlsxwriter==3.2.3
+pyxlsb==1.0.10
+
+# AI / LLM
+anthropic==0.52.0
+
+# Task queue
+celery==5.6.3
+redis==8.0.0
+
+# System
+psutil==7.0.0
+
+# Production server
+gunicorn==23.0.0
+whitenoise==6.12.0

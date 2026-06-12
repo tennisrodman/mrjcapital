@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "python",
+  "packages": {
+    "python": "3.12",
+    "node": "22"
+  },
+  "steps": {
+    "build": {
+      "inputs": [
+        { "step": "install" },
+        { "local": true, "include": ["."] }
+      ],
+      "commands": ["./build.sh"]
+    }
+  },
+  "deploy": {
+    "startCommand": "./start.sh"
+  }
+}

@@ -1,0 +1,44 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+*.so
+.env
+.env.*
+!.env.example
+
+# Django
+staticfiles/
+media/
+django_cache/
+db.sqlite3
+
+# Build artifacts
+build/
+frontend/build/
+
+# Node
+frontend/node_modules/
+frontend/.eslintcache
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# CodeGraph index
+.codegraph/
+
+# Test caches
+.pytest_cache/
