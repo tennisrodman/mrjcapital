@@ -1,1 +1,64 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Karla", system-ui, sans-serif;
+}
+
+:root {
+  --ink: #141820;
+  --ink-muted: #2a3142;
+  --paper: #f7f4ef;
+  --paper-elevated: #ffffff;
+  --brass: #b8956a;
+  --brass-light: #d4bc94;
+  --slate: #5c6370;
+  --border: #e8e4dc;
+  --header-bg: #141820;
+  --header-fg: #f3efe8;
+  --header-muted: #9aa3b2;
+  --header-border: rgba(196, 165, 116, 0.22);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+  }
+}
+
+.header-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  background-size: 128px 128px;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.55s ease-out both;
+}
+
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.12s; }
+.stagger-3 { animation-delay: 0.19s; }
+.stagger-4 { animation-delay: 0.26s; }
