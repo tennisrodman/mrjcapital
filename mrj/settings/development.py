@@ -1,6 +1,7 @@
 from .base import *
 
 SECRET_KEY = 'django-insecure-replace-this-in-development'
+FIELD_ENCRYPTION_KEY = os.environ.get('FIELD_ENCRYPTION_KEY', 'development-only-field-encryption-key')
 
 DEBUG = True
 

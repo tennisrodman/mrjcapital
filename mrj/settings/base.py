@@ -8,6 +8,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in ('1', 'true', 'yes', 'on')
+
+
 def _database_config():
     url = os.environ.get('DATABASE_URL')
     if url:
@@ -33,6 +40,9 @@ def _database_config():
     }
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+FIELD_ENCRYPTION_KEY = os.environ.get('FIELD_ENCRYPTION_KEY', '')
+FORWARDED_FOR_TRUSTED_PROXY_COUNT = int(os.environ.get('FORWARDED_FOR_TRUSTED_PROXY_COUNT', '0'))
+AUDIT_LOG_ADMIN_IMMUTABLE = _env_bool('AUDIT_LOG_ADMIN_IMMUTABLE', False)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -40,6 +50,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'django.contrib.postgres',
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
@@ -98,6 +109,8 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
         'rest_framework.parsers.MultiPartParser',
     ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 50,
 }
 
 CSRF_USE_SESSIONS = False

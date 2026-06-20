@@ -2,11 +2,17 @@ import os
 from datetime import timedelta
 
 from .base import *
-from .base import _database_config
+from .base import _database_config, _env_bool
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 if not SECRET_KEY:
     raise ValueError("No SECRET_KEY set for Django application in production")
+
+FIELD_ENCRYPTION_KEY = os.environ.get('FIELD_ENCRYPTION_KEY')
+if not FIELD_ENCRYPTION_KEY:
+    raise ValueError("No FIELD_ENCRYPTION_KEY set for encrypted PII fields in production")
+FORWARDED_FOR_TRUSTED_PROXY_COUNT = int(os.environ.get('FORWARDED_FOR_TRUSTED_PROXY_COUNT', '1'))
+AUDIT_LOG_ADMIN_IMMUTABLE = _env_bool('AUDIT_LOG_ADMIN_IMMUTABLE', True)
 
 DEBUG = False
 
