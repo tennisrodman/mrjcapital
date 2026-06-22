@@ -45,6 +45,27 @@ SYNDICATION_START_PIPELINE_STATUSES = {
 SYNDICATION_TERMINAL_PIPELINE_STATUSES = {PipelineStatus.DEAD, PipelineStatus.EXITED}
 
 
+def allowed_pipeline_statuses(deal):
+    if deal.pipeline_status == PipelineStatus.ON_HOLD and deal.paused_from_status:
+        return [deal.paused_from_status, PipelineStatus.DEAD]
+    return sorted(PIPELINE_TRANSITIONS.get(deal.pipeline_status, set()))
+
+
+def allowed_syndication_statuses(deal):
+    allowed = SYNDICATION_TRANSITIONS.get(deal.syndication_status, set())
+    if (
+        deal.syndication_status == SyndicationStatus.NOT_STARTED
+        and deal.pipeline_status not in SYNDICATION_START_PIPELINE_STATUSES
+    ):
+        return []
+    if (
+        deal.syndication_status != SyndicationStatus.NOT_STARTED
+        and deal.pipeline_status in SYNDICATION_TERMINAL_PIPELINE_STATUSES
+    ):
+        return []
+    return sorted(allowed)
+
+
 def transition_pipeline_status(deal, to_status, performed_by, reason, ip_address=None):
     _require_reason(reason)
     _validate_choice(to_status, PipelineStatus.values, 'to_status')

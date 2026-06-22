@@ -392,6 +392,7 @@ class DealSpineApiTests(APITestCase):
         initial = self.client.get(f'/api/deals/{deal.pk}/allowed-transitions/')
         self.assertEqual(initial.status_code, status.HTTP_200_OK)
         self.assertEqual(set(initial.data['pipeline_status']), {'screening', 'on_hold', 'dead'})
+        self.assertEqual(initial.data['syndication_status'], [])
 
         self.client.post(
             f'/api/deals/{deal.pk}/transition/',
@@ -407,6 +408,36 @@ class DealSpineApiTests(APITestCase):
         paused = self.client.get(f'/api/deals/{deal.pk}/allowed-transitions/')
         self.assertEqual(paused.status_code, status.HTTP_200_OK)
         self.assertEqual(paused.data['pipeline_status'], ['screening', 'dead'])
+
+    def test_allowed_syndication_transitions_reflect_pipeline_window(self):
+        deal = self.create_deal()
+
+        sourced = self.client.get(f'/api/deals/{deal.pk}/allowed-transitions/')
+        self.assertEqual(sourced.status_code, status.HTTP_200_OK)
+        self.assertEqual(sourced.data['syndication_status'], [])
+
+        self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {'to_status': 'screening', 'reason': 'Start screening'},
+            format='json',
+        )
+        self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {'to_status': 'quoting', 'reason': 'Ready to quote'},
+            format='json',
+        )
+
+        quoting = self.client.get(f'/api/deals/{deal.pk}/allowed-transitions/')
+        self.assertEqual(quoting.status_code, status.HTTP_200_OK)
+        self.assertEqual(quoting.data['syndication_status'], ['raising'])
+
+        Deal.objects.filter(pk=deal.pk).update(
+            pipeline_status=PipelineStatus.DEAD,
+            syndication_status='raising',
+        )
+        dead = self.client.get(f'/api/deals/{deal.pk}/allowed-transitions/')
+        self.assertEqual(dead.status_code, status.HTTP_200_OK)
+        self.assertEqual(dead.data['syndication_status'], [])
 
     def test_invalid_pipeline_transition_is_rejected(self):
         deal = self.create_deal()

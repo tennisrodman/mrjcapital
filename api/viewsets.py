@@ -38,8 +38,8 @@ from api.serializers import (
     SyndicationTransitionSerializer,
 )
 from api.services import (
-    PIPELINE_TRANSITIONS,
-    SYNDICATION_TRANSITIONS,
+    allowed_pipeline_statuses,
+    allowed_syndication_statuses,
     log_sensitive_field_read,
     normalize_address,
     transition_pipeline_status,
@@ -264,12 +264,10 @@ class DealViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='allowed-transitions')
     def allowed_transitions(self, request, pk=None):
         deal = self.get_object()
-        if deal.pipeline_status == PipelineStatus.ON_HOLD and deal.paused_from_status:
-            pipeline = [deal.paused_from_status, PipelineStatus.DEAD]
-        else:
-            pipeline = sorted(PIPELINE_TRANSITIONS.get(deal.pipeline_status, set()))
-        syndication = sorted(SYNDICATION_TRANSITIONS.get(deal.syndication_status, set()))
-        return Response({'pipeline_status': pipeline, 'syndication_status': syndication})
+        return Response({
+            'pipeline_status': allowed_pipeline_statuses(deal),
+            'syndication_status': allowed_syndication_statuses(deal),
+        })
 
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):

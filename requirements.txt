@@ -24,6 +24,7 @@ pyxlsb==1.0.10
 
 # AI / LLM
 anthropic==0.52.0
+mcp[cli]>=1.28,<2
 
 # Task queue
 celery==5.6.3

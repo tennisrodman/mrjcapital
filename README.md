@@ -38,6 +38,41 @@ cp .env.example .env    # edit values
 
 `setup.sh --with-db` seeds a superuser when `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_EMAIL` / `DJANGO_SUPERUSER_PASSWORD` are set in `.env`.
 
+## Local MCP server
+
+MRJ includes a read-only MCP server for local Codex/admin deal queries. It runs over stdio and requires an active staff or superuser account.
+
+```bash
+export DJANGO_SETTINGS_MODULE=mrj.settings.development
+export MRJ_MCP_USERNAME=staff
+# or: export MRJ_MCP_USER_ID=1
+python3 manage.py run_mcp
+```
+
+Example local MCP config:
+
+```json
+{
+  "mcpServers": {
+    "mrj": {
+      "command": "python3",
+      "args": ["manage.py", "run_mcp"],
+      "cwd": "/absolute/path/to/mrj",
+      "env": {
+        "DJANGO_SETTINGS_MODULE": "mrj.settings.development",
+        "MRJ_MCP_USERNAME": "staff"
+      }
+    }
+  }
+}
+```
+
+V1 exposes read-only tools for searching deals, reading one deal, listing status vocabularies, checking allowed transitions, and summarizing the pipeline.
+
+Local MCP trust boundary: any local process that can launch this command with `MRJ_MCP_USER_ID` or `MRJ_MCP_USERNAME` acts as that staff user, so configure it only on trusted developer/admin machines.
+
+Deal detail policy: `mrj_get_deal` omits `Deal.details` by default; callers can request it with `include_details=true`, so `Deal.details` should remain free of PII or sensitive identifiers unless audit logging is added for those reads.
+
 ## Environment variables
 
 | Var | Purpose |
@@ -49,6 +84,7 @@ cp .env.example .env    # edit values
 | `ALLOWED_HOSTS` | Comma-separated hostnames (no scheme). |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated origins with `https://`. |
 | `DJANGO_SUPERUSER_*` | Auto superuser on `setup.sh --with-db`. |
+| `MRJ_MCP_USER_ID`, `MRJ_MCP_USERNAME` | Local MCP staff user selector. `MRJ_MCP_USER_ID` takes precedence. |
 
 ## Testing
 

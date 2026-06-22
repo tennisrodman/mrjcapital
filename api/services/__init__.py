@@ -3,6 +3,8 @@ from .audit import log_sensitive_field_read
 from .deals import (
     PIPELINE_TRANSITIONS,
     SYNDICATION_TRANSITIONS,
+    allowed_pipeline_statuses,
+    allowed_syndication_statuses,
     transition_pipeline_status,
     transition_syndication_status,
 )
@@ -10,6 +12,8 @@ from .deals import (
 __all__ = [
     'PIPELINE_TRANSITIONS',
     'SYNDICATION_TRANSITIONS',
+    'allowed_pipeline_statuses',
+    'allowed_syndication_statuses',
     'log_sensitive_field_read',
     'normalize_address',
     'transition_pipeline_status',
