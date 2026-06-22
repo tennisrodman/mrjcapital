@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/deals', label: 'Deals', icon: Scale, disabled: true },
+  { to: '/deals', label: 'Deals', icon: Scale },
   { to: '/documents', label: 'Documents', icon: FileText, disabled: true },
 ] as const;
 
@@ -75,15 +75,13 @@ const AppHeader = () => {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          <button
-            type="button"
-            disabled
-            title="Coming soon"
-            className="hidden items-center gap-2 rounded-sm border border-[var(--brass)]/30 bg-[var(--brass)]/10 px-3 py-1.5 text-sm font-medium text-[var(--brass-light)] opacity-60 lg:inline-flex"
+          <NavLink
+            to="/deals/new"
+            className="hidden items-center gap-2 rounded-sm border border-[var(--brass)]/30 bg-[var(--brass)]/10 px-3 py-1.5 text-sm font-medium text-[var(--brass-light)] transition-colors hover:border-[var(--brass)]/60 hover:bg-[var(--brass)]/15 lg:inline-flex"
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
             New deal
-          </button>
+          </NavLink>
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>

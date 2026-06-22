@@ -1,3 +1,8 @@
+import { MOCKS_ENABLED, mockApiRequest } from '@/mocks';
+import { ApiError } from '@/lib/apiError';
+
+export { ApiError, apiErrorMessage, fieldErrors } from '@/lib/apiError';
+
 export const API_URL =
   process.env.REACT_APP_API_URL ||
   (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : '') ||
@@ -76,6 +81,8 @@ const refreshAccessToken = async (): Promise<string> => {
 };
 
 export const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
+  if (MOCKS_ENABLED) return mockApiRequest<T>(path, options);
+
   const url = endpoint(path);
   let fetchOptions: RequestInit = {
     mode: 'cors',
@@ -110,14 +117,22 @@ export const apiRequest = async <T>(path: string, options: RequestInit = {}): Pr
       }
     } else {
       // Non-token 401 (e.g. custom permission denied) — body already consumed, throw now
-      throw new Error(errorData?.error || `API request failed: ${response.status}`);
+      throw new ApiError(
+        errorData?.error || `API request failed: ${response.status}`,
+        response.status,
+        errorData,
+      );
     }
   }
 
   if (!response.ok) {
     let errorData;
     try { errorData = await response.json(); } catch { /* ignore */ }
-    throw new Error(errorData?.error || `API request failed: ${response.status}`);
+    throw new ApiError(
+      errorData?.error || errorData?.detail || `API request failed: ${response.status}`,
+      response.status,
+      errorData,
+    );
   }
 
   if (response.status === 204) return {} as T;
