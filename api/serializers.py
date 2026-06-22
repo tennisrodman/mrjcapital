@@ -193,6 +193,13 @@ class DealPropertySummarySerializer(serializers.ModelSerializer):
         fields = ['id', 'property', 'is_primary']
 
 
+class AnalystSummarySerializer(serializers.Serializer):
+    """Minimal, read-only view of the assigned analyst (no PII beyond username)."""
+
+    id = serializers.IntegerField(read_only=True)
+    username = serializers.CharField(read_only=True)
+
+
 class DealSerializer(serializers.ModelSerializer):
     investment_category = serializers.CharField(read_only=True)
     properties = DealPropertySummarySerializer(source='deal_properties', many=True, read_only=True)
@@ -203,6 +210,13 @@ class DealSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     assigned_analyst = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Read-only expansions so list/detail views can render names without N+1 lookups.
+    # The writable FK fields above remain the canonical inputs; encrypted sponsor
+    # fields stay write-only and never surface through sponsor_detail.
+    sponsor_detail = SponsorSerializer(source='sponsor', read_only=True)
+    broker_detail = BrokerSerializer(source='broker', read_only=True)
+    fund_detail = FundSerializer(source='fund', read_only=True)
+    assigned_analyst_detail = AnalystSummarySerializer(source='assigned_analyst', read_only=True)
     pipeline_status = serializers.CharField(read_only=True)
     syndication_status = serializers.CharField(read_only=True)
     paused_from_status = serializers.CharField(read_only=True)
@@ -218,9 +232,13 @@ class DealSerializer(serializers.ModelSerializer):
             'syndication_status',
             'paused_from_status',
             'sponsor',
+            'sponsor_detail',
             'broker',
+            'broker_detail',
             'assigned_analyst',
+            'assigned_analyst_detail',
             'fund',
+            'fund_detail',
             'source_channel',
             'source_date',
             'requested_amount',
