@@ -1,5 +1,4 @@
 // Sample data for the mock API layer. Source of truth: shared/demo_seed.json
-// (also loaded into Postgres via `python manage.py seed_demo_data`).
 
 import demoSeed from '@shared/demo_seed.json';
 import type {

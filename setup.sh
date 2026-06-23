@@ -44,7 +44,6 @@ if [ "$WITH_DB" = true ]; then
       --username "${DJANGO_SUPERUSER_USERNAME:-admin}" \
       --email "${DJANGO_SUPERUSER_EMAIL:-admin@example.com}"
   fi
-  python manage.py seed_demo_data
 fi
 
 cd frontend && npm install && cd ..
