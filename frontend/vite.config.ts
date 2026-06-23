@@ -10,7 +10,10 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
-      alias: { "@": path.resolve(__dirname, "./src") },
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
+        "@shared": path.resolve(__dirname, "../shared"),
+      },
     },
     base: mode === "production" ? "/static/" : "/",
     define: {

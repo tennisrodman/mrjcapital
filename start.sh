@@ -16,6 +16,10 @@ fi
 
 python3 manage.py migrate
 
+if [ "${SEED_DEMO_DATA:-false}" = "true" ]; then
+  python3 manage.py seed_demo_data
+fi
+
 if [ "$SERVICE_TYPE" = "web" ]; then
   gunicorn \
     --workers "${GUNICORN_WORKERS:-3}" \

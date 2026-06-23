@@ -1,0 +1,541 @@
+{
+  "funds": [
+    { "id": "fund-credit-2", "name": "MRJ Credit Fund II", "status": "open" },
+    { "id": "fund-equity-1", "name": "MRJ Equity Opportunities I", "status": "forming" }
+  ],
+  "sponsors": [
+    {
+      "id": "sp-larkspur",
+      "entity_name": "Larkspur Capital Partners",
+      "entity_type": "llc",
+      "primary_contact_name": "Dana Reyes",
+      "primary_contact_email": "dana@larkspurcap.com",
+      "primary_contact_phone": "(512) 555-0142",
+      "relationship_rating": "strategic"
+    },
+    {
+      "id": "sp-cobalt",
+      "entity_name": "Cobalt Real Estate Group",
+      "entity_type": "lp",
+      "primary_contact_name": "Marcus Hale",
+      "primary_contact_email": "mhale@cobaltreg.com",
+      "primary_contact_phone": "(214) 555-0188",
+      "relationship_rating": "established"
+    },
+    {
+      "id": "sp-marisol",
+      "entity_name": "Marisol Holdings",
+      "entity_type": "llc",
+      "primary_contact_name": "Elena Park",
+      "primary_contact_email": "elena@marisolhold.com",
+      "primary_contact_phone": "(602) 555-0119",
+      "relationship_rating": "developing"
+    },
+    {
+      "id": "sp-harbor",
+      "entity_name": "Harbor Point Ventures",
+      "entity_type": "corp",
+      "primary_contact_name": "Will Tanaka",
+      "primary_contact_email": "will@harborpoint.vc",
+      "primary_contact_phone": "(206) 555-0173",
+      "relationship_rating": "new"
+    },
+    {
+      "id": "sp-vista",
+      "entity_name": "Vista Ridge Partners",
+      "entity_type": "lp",
+      "primary_contact_name": "Sofia Mendez",
+      "primary_contact_email": "sofia@vistaridge.com",
+      "primary_contact_phone": "(303) 555-0150",
+      "relationship_rating": "established"
+    },
+    {
+      "id": "sp-riverside",
+      "entity_name": "Riverside Development Co",
+      "entity_type": "llc",
+      "primary_contact_name": "Grant Whitman",
+      "primary_contact_email": "grant@riversidedev.com",
+      "primary_contact_phone": "(813) 555-0136",
+      "relationship_rating": "strategic"
+    }
+  ],
+  "brokers": [
+    {
+      "id": "bk-eastdil",
+      "company_name": "Eastdil Secured",
+      "contact_name": "Jane Whitfield",
+      "email": "jwhitfield@eastdil.com",
+      "phone": "(212) 555-0101",
+      "status": "active"
+    },
+    {
+      "id": "bk-cbre",
+      "company_name": "CBRE Capital Markets",
+      "contact_name": "Marcus Lee",
+      "email": "marcus.lee@cbre.com",
+      "phone": "(312) 555-0166",
+      "status": "active"
+    },
+    {
+      "id": "bk-jll",
+      "company_name": "JLL Capital Markets",
+      "contact_name": "Priya Nair",
+      "email": "priya.nair@jll.com",
+      "phone": "(404) 555-0124",
+      "status": "active"
+    },
+    {
+      "id": "bk-walker",
+      "company_name": "Walker & Dunlop",
+      "contact_name": "Tom Ramsey",
+      "email": "tramsey@walkerdunlop.com",
+      "phone": "(301) 555-0190",
+      "status": "inactive"
+    }
+  ],
+  "properties": [
+    {
+      "id": "pr-larkspur",
+      "address": "1400 Larkspur Lane",
+      "city": "Austin",
+      "state": "TX",
+      "zip": "78745",
+      "property_type": "multifamily",
+      "msa": "Austin-Round Rock"
+    },
+    {
+      "id": "pr-cobalt-1",
+      "address": "900 Distribution Pkwy",
+      "city": "Dallas",
+      "state": "TX",
+      "zip": "75212",
+      "property_type": "industrial",
+      "msa": "Dallas-Fort Worth"
+    },
+    {
+      "id": "pr-cobalt-2",
+      "address": "950 Distribution Pkwy",
+      "city": "Dallas",
+      "state": "TX",
+      "zip": "75212",
+      "property_type": "industrial",
+      "msa": "Dallas-Fort Worth"
+    },
+    {
+      "id": "pr-marisol",
+      "address": "88 Roosevelt Row",
+      "city": "Phoenix",
+      "state": "AZ",
+      "zip": "85004",
+      "property_type": "mixed_use",
+      "msa": "Phoenix-Mesa"
+    },
+    {
+      "id": "pr-harbor",
+      "address": "500 Elliott Ave W",
+      "city": "Seattle",
+      "state": "WA",
+      "zip": "98119",
+      "property_type": "office",
+      "msa": "Seattle-Tacoma"
+    },
+    {
+      "id": "pr-vista",
+      "address": "2200 Ridge Rd",
+      "city": "Denver",
+      "state": "CO",
+      "zip": "80211",
+      "property_type": "self_storage",
+      "msa": "Denver-Aurora"
+    },
+    {
+      "id": "pr-sterling",
+      "address": "310 Broadway",
+      "city": "Nashville",
+      "state": "TN",
+      "zip": "37201",
+      "property_type": "hotel",
+      "msa": "Nashville-Davidson"
+    },
+    {
+      "id": "pr-oakmont",
+      "address": "4750 Sharon Rd",
+      "city": "Charlotte",
+      "state": "NC",
+      "zip": "28210",
+      "property_type": "retail",
+      "msa": "Charlotte-Concord"
+    },
+    {
+      "id": "pr-riverside",
+      "address": "700 Bayshore Blvd",
+      "city": "Tampa",
+      "state": "FL",
+      "zip": "33606",
+      "property_type": "multifamily",
+      "msa": "Tampa-St. Petersburg"
+    },
+    {
+      "id": "pr-granite",
+      "address": "1200 Logistics Way",
+      "city": "Columbus",
+      "state": "OH",
+      "zip": "43228",
+      "property_type": "industrial",
+      "msa": "Columbus"
+    },
+    {
+      "id": "pr-beacon",
+      "address": "210 N Wacker Dr",
+      "city": "Chicago",
+      "state": "IL",
+      "zip": "60606",
+      "property_type": "office",
+      "msa": "Chicago-Naperville"
+    },
+    {
+      "id": "pr-summit",
+      "address": "0 Highway 44",
+      "city": "Boise",
+      "state": "ID",
+      "zip": "83709",
+      "property_type": "land",
+      "msa": "Boise City"
+    },
+    {
+      "id": "pr-pinewood",
+      "address": "1801 Sunrise Valley Dr",
+      "city": "Reston",
+      "state": "VA",
+      "zip": "20191",
+      "property_type": "data_center",
+      "msa": "Washington-Arlington"
+    },
+    {
+      "id": "pr-maple",
+      "address": "125 NW Maple Ct",
+      "city": "Portland",
+      "state": "OR",
+      "zip": "97209",
+      "property_type": "condo",
+      "msa": "Portland-Vancouver"
+    },
+    {
+      "id": "pr-ironwood",
+      "address": "3400 Channel Ave",
+      "city": "Memphis",
+      "state": "TN",
+      "zip": "38106",
+      "property_type": "industrial",
+      "msa": "Memphis"
+    }
+  ],
+  "deals": [
+    {
+      "id": "deal-larkspur",
+      "name": "Larkspur Apartments Bridge",
+      "investment_type": "whole_loan_bridge",
+      "pipeline_status": "quoting",
+      "syndication_status": "raising",
+      "sponsor": "sp-larkspur",
+      "broker": "bk-eastdil",
+      "fund": "fund-credit-2",
+      "source_channel": "broker",
+      "source_date": "2026-05-18",
+      "requested_amount": "12400000.00",
+      "properties": [["pr-larkspur", true]]
+    },
+    {
+      "id": "deal-cobalt",
+      "name": "Cobalt Industrial Portfolio",
+      "investment_type": "whole_loan_permanent",
+      "pipeline_status": "negotiating",
+      "syndication_status": "not_started",
+      "sponsor": "sp-cobalt",
+      "broker": "bk-cbre",
+      "fund": "fund-credit-2",
+      "source_channel": "repeat_sponsor",
+      "source_date": "2026-04-30",
+      "requested_amount": "28000000.00",
+      "properties": [["pr-cobalt-1", true], ["pr-cobalt-2", false]]
+    },
+    {
+      "id": "deal-marisol",
+      "name": "Marisol Mixed-Use",
+      "investment_type": "mezzanine",
+      "pipeline_status": "screening",
+      "syndication_status": "not_started",
+      "sponsor": "sp-marisol",
+      "broker": "bk-jll",
+      "source_channel": "broker",
+      "source_date": "2026-06-02",
+      "requested_amount": "8500000.00",
+      "properties": [["pr-marisol", true]]
+    },
+    {
+      "id": "deal-harbor",
+      "name": "Harbor Point Office",
+      "investment_type": "preferred_equity",
+      "pipeline_status": "sourced",
+      "syndication_status": "not_started",
+      "sponsor": "sp-harbor",
+      "source_channel": "direct",
+      "source_date": "2026-06-12",
+      "requested_amount": "15000000.00",
+      "properties": [["pr-harbor", true]]
+    },
+    {
+      "id": "deal-vista",
+      "name": "Vista Ridge Self-Storage",
+      "investment_type": "lp_equity",
+      "pipeline_status": "closing",
+      "syndication_status": "fully_subscribed",
+      "sponsor": "sp-vista",
+      "broker": "bk-walker",
+      "fund": "fund-equity-1",
+      "source_channel": "referral",
+      "source_date": "2026-03-21",
+      "requested_amount": "6200000.00",
+      "properties": [["pr-vista", true]]
+    },
+    {
+      "id": "deal-sterling",
+      "name": "Sterling Hotel Refi",
+      "investment_type": "whole_loan_bridge",
+      "pipeline_status": "signed",
+      "syndication_status": "raising",
+      "sponsor": "sp-larkspur",
+      "broker": "bk-eastdil",
+      "fund": "fund-credit-2",
+      "source_channel": "repeat_sponsor",
+      "source_date": "2026-04-08",
+      "requested_amount": "34000000.00",
+      "properties": [["pr-sterling", true]]
+    },
+    {
+      "id": "deal-oakmont",
+      "name": "Oakmont Retail Center",
+      "investment_type": "co_gp_equity",
+      "pipeline_status": "closed",
+      "syndication_status": "closed",
+      "sponsor": "sp-cobalt",
+      "broker": "bk-cbre",
+      "fund": "fund-equity-1",
+      "source_channel": "broker",
+      "source_date": "2026-01-15",
+      "requested_amount": "19750000.00",
+      "properties": [["pr-oakmont", true]]
+    },
+    {
+      "id": "deal-riverside",
+      "name": "Riverside Multifamily Dev",
+      "investment_type": "co_gp_equity",
+      "pipeline_status": "servicing",
+      "syndication_status": "closed",
+      "sponsor": "sp-riverside",
+      "fund": "fund-equity-1",
+      "source_channel": "internal_prospecting",
+      "source_date": "2025-11-03",
+      "requested_amount": "42000000.00",
+      "properties": [["pr-riverside", true]]
+    },
+    {
+      "id": "deal-granite",
+      "name": "Granite Logistics Hub",
+      "investment_type": "whole_loan_bridge",
+      "pipeline_status": "on_hold",
+      "syndication_status": "not_started",
+      "paused_from_status": "quoting",
+      "sponsor": "sp-marisol",
+      "broker": "bk-jll",
+      "source_channel": "broker",
+      "source_date": "2026-02-26",
+      "requested_amount": "22000000.00",
+      "properties": [["pr-granite", true]]
+    },
+    {
+      "id": "deal-beacon",
+      "name": "Beacon Tower Mezz",
+      "investment_type": "mezzanine",
+      "pipeline_status": "dead",
+      "syndication_status": "not_started",
+      "sponsor": "sp-harbor",
+      "broker": "bk-cbre",
+      "source_channel": "direct",
+      "source_date": "2026-02-10",
+      "requested_amount": "11000000.00",
+      "properties": [["pr-beacon", true]]
+    },
+    {
+      "id": "deal-summit",
+      "name": "Summit Land Assemblage",
+      "investment_type": "preferred_equity",
+      "pipeline_status": "exited",
+      "syndication_status": "closed",
+      "sponsor": "sp-vista",
+      "source_channel": "referral",
+      "source_date": "2025-09-19",
+      "requested_amount": "9400000.00",
+      "properties": [["pr-summit", true]]
+    },
+    {
+      "id": "deal-pinewood",
+      "name": "Pinewood Data Center",
+      "investment_type": "preferred_equity",
+      "pipeline_status": "quoting",
+      "syndication_status": "raising",
+      "sponsor": "sp-riverside",
+      "broker": "bk-eastdil",
+      "fund": "fund-credit-2",
+      "source_channel": "repeat_sponsor",
+      "source_date": "2026-05-29",
+      "requested_amount": "55000000.00",
+      "properties": [["pr-pinewood", true]]
+    },
+    {
+      "id": "deal-maple",
+      "name": "Maple Court Condos",
+      "investment_type": "lp_equity",
+      "pipeline_status": "sourced",
+      "syndication_status": "not_started",
+      "sponsor": "sp-larkspur",
+      "source_channel": "direct",
+      "source_date": "2026-06-15",
+      "requested_amount": "7800000.00",
+      "properties": [["pr-maple", true]]
+    },
+    {
+      "id": "deal-ironwood",
+      "name": "Ironwood Industrial",
+      "investment_type": "whole_loan_permanent",
+      "pipeline_status": "screening",
+      "syndication_status": "not_started",
+      "sponsor": "sp-cobalt",
+      "broker": "bk-walker",
+      "source_channel": "repeat_sponsor",
+      "source_date": "2026-06-06",
+      "requested_amount": "16300000.00",
+      "properties": [["pr-ironwood", true]]
+    }
+  ],
+  "documents": [
+    {
+      "id": "doc-1",
+      "deal": "deal-larkspur",
+      "document_name": "Larkspur OM.pdf",
+      "category": "offering_memo",
+      "version": 1,
+      "file_type": "pdf",
+      "is_executed": true,
+      "expiry_date": null
+    },
+    {
+      "id": "doc-2",
+      "deal": "deal-larkspur",
+      "document_name": "T-12 Operating Statement.xlsx",
+      "category": "financials",
+      "version": 2,
+      "file_type": "xlsx",
+      "is_executed": false,
+      "expiry_date": null
+    },
+    {
+      "id": "doc-3",
+      "deal": "deal-larkspur",
+      "document_name": "Rent Roll - May 2026.xlsx",
+      "category": "rent_roll",
+      "version": 1,
+      "file_type": "xlsx",
+      "is_executed": false,
+      "expiry_date": null
+    },
+    {
+      "id": "doc-4",
+      "deal": "deal-larkspur",
+      "document_name": "Phase I ESA.pdf",
+      "category": "environmental",
+      "version": 1,
+      "file_type": "pdf",
+      "is_executed": false,
+      "expiry_date": "2027-05-01"
+    },
+    {
+      "id": "doc-5",
+      "deal": "deal-oakmont",
+      "document_name": "Executed Loan Agreement.pdf",
+      "category": "closing_docs",
+      "version": 3,
+      "file_type": "pdf",
+      "is_executed": true,
+      "expiry_date": null
+    },
+    {
+      "id": "doc-6",
+      "deal": "deal-oakmont",
+      "document_name": "Title Commitment.pdf",
+      "category": "title",
+      "version": 1,
+      "file_type": "pdf",
+      "is_executed": true,
+      "expiry_date": null
+    },
+    {
+      "id": "doc-7",
+      "deal": "deal-oakmont",
+      "document_name": "Property Insurance Binder.pdf",
+      "category": "insurance",
+      "version": 1,
+      "file_type": "pdf",
+      "is_executed": true,
+      "expiry_date": "2027-01-15"
+    },
+    {
+      "id": "doc-8",
+      "deal": "deal-cobalt",
+      "document_name": "Appraisal - Cobalt Portfolio.pdf",
+      "category": "appraisal",
+      "version": 1,
+      "file_type": "pdf",
+      "is_executed": false,
+      "expiry_date": "2027-04-30"
+    }
+  ],
+  "activity": [
+    {
+      "id": "act-1",
+      "deal": "deal-larkspur",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Term sheet issued to sponsor",
+      "performed_at": "2026-05-25T14:12:00Z"
+    },
+    {
+      "id": "act-2",
+      "deal": "deal-larkspur",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial credit screen",
+      "performed_at": "2026-05-20T10:02:00Z"
+    },
+    {
+      "id": "act-3",
+      "deal": "deal-oakmont",
+      "description": "Pipeline status changed from closing to closed",
+      "old_value": "closing",
+      "new_value": "closed",
+      "reason": "Funded and recorded",
+      "performed_at": "2026-02-28T19:45:00Z"
+    },
+    {
+      "id": "act-4",
+      "deal": "deal-oakmont",
+      "description": "Pipeline status changed from signed to closing",
+      "old_value": "signed",
+      "new_value": "closing",
+      "reason": "Cleared closing conditions",
+      "performed_at": "2026-02-14T15:20:00Z"
+    }
+  ]
+}

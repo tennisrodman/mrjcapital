@@ -1,6 +1,7 @@
 // Mock API toggle. On by default in `npm run dev` so every deal view renders with
 // realistic example data and no backend. Disable with VITE_USE_MOCKS=false to hit
-// the real Django API. Always off in production builds.
+// the real Django API. Always off in production builds — production uses Postgres
+// data loaded via `python manage.py seed_demo_data` (see shared/demo_seed.json).
 export const MOCKS_ENABLED =
   import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS !== 'false';
 
