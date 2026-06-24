@@ -1,23 +1,75 @@
-import { useContext } from 'react';
+import { useContext, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowUpRight, CircleDollarSign, Clock, FolderOpen, TrendingUp } from 'lucide-react';
 import { AuthContext } from '@/context/AuthContext';
+import { useDeals, useDealSummary } from '@/lib/api/deals';
+import {
+  formatCurrencyCompact,
+  PIPELINE_STATUS_LABELS,
+} from '@/lib/dealChoices';
+import type { Deal, DealFilters, PipelineStatus } from '@/types/deal';
 
-const stats = [
-  { label: 'Active deals', value: '—', hint: 'In underwriting', icon: FolderOpen },
-  { label: 'In review', value: '—', hint: 'Awaiting docs', icon: Clock },
-  { label: 'Funded YTD', value: '—', hint: 'Closed volume', icon: CircleDollarSign },
-  { label: 'Pipeline value', value: '—', hint: 'Total exposure', icon: TrendingUp },
-] as const;
+const DASHBOARD_FILTERS: DealFilters = {};
+const EMPTY_DEALS: Deal[] = [];
 
-const pipelineStages = [
-  { stage: 'Origination', count: 0, tone: 'bg-[var(--ink)]/8' },
-  { stage: 'Underwriting', count: 0, tone: 'bg-[var(--brass)]/15' },
-  { stage: 'Closing', count: 0, tone: 'bg-[var(--brass)]/25' },
-  { stage: 'Funded', count: 0, tone: 'bg-[var(--brass)]/40' },
+const REVIEW_STATUSES: PipelineStatus[] = ['screening', 'quoting', 'negotiating', 'signed'];
+const FUNDED_STATUSES: PipelineStatus[] = ['closed', 'servicing', 'exited'];
+
+const pipelineStageGroups: { stage: string; statuses: PipelineStatus[]; tone: string }[] = [
+  { stage: 'Origination', statuses: ['sourced', 'screening'], tone: 'bg-[var(--ink)]/20' },
+  { stage: 'Underwriting', statuses: ['quoting', 'negotiating', 'signed'], tone: 'bg-[var(--brass)]/35' },
+  { stage: 'Closing', statuses: ['closing'], tone: 'bg-[var(--brass)]/60' },
+  { stage: 'Funded', statuses: FUNDED_STATUSES, tone: 'bg-[var(--brass)]' },
 ] as const;
 
 const HomePage = () => {
   const { user } = useContext(AuthContext);
+  const dealsQuery = useDeals(DASHBOARD_FILTERS);
+  const summaryQuery = useDealSummary(DASHBOARD_FILTERS);
+  const deals = dealsQuery.data ?? EMPTY_DEALS;
+
+  const inReview = useMemo(
+    () => deals.filter((deal) => REVIEW_STATUSES.includes(deal.pipeline_status)).length,
+    [deals],
+  );
+  const fundedVolume = useMemo(
+    () => sumRequestedAmount(deals.filter((deal) => FUNDED_STATUSES.includes(deal.pipeline_status))),
+    [deals],
+  );
+  const featuredDeals = useMemo(
+    () => deals.filter((deal) => !['dead', 'exited'].includes(deal.pipeline_status)).slice(0, 5),
+    [deals],
+  );
+
+  const stats = [
+    {
+      label: 'Active deals',
+      value: summaryQuery.data?.active_deals.toLocaleString('en-US') ?? '—',
+      hint: 'Excludes dead and exited',
+      icon: FolderOpen,
+    },
+    {
+      label: 'In review',
+      value: inReview.toLocaleString('en-US'),
+      hint: 'Screening through signed',
+      icon: Clock,
+    },
+    {
+      label: 'Funded / exited',
+      value: formatCurrencyCompact(fundedVolume),
+      hint: 'Closed, servicing, exited',
+      icon: CircleDollarSign,
+    },
+    {
+      label: 'Pipeline value',
+      value: formatCurrencyCompact(summaryQuery.data?.pipeline_value),
+      hint: 'Active requested amount',
+      icon: TrendingUp,
+    },
+  ];
+
+  const isLoading = dealsQuery.isLoading || summaryQuery.isLoading;
+  const isError = dealsQuery.isError || summaryQuery.isError;
 
   return (
     <div className="space-y-10">
@@ -50,7 +102,9 @@ const HomePage = () => {
               <p className="text-sm font-medium text-[var(--slate)]">{label}</p>
               <Icon className="h-4 w-4 text-[var(--brass)]" strokeWidth={1.75} />
             </div>
-            <p className="font-display mt-3 text-3xl font-medium tracking-tight text-[var(--ink)]">{value}</p>
+            <p className="font-display mt-3 text-3xl font-medium tracking-tight text-[var(--ink)]">
+              {isLoading ? '...' : value}
+            </p>
             <p className="mt-1 text-xs text-[var(--slate)]">{hint}</p>
           </article>
         ))}
@@ -65,36 +119,77 @@ const HomePage = () => {
             </div>
           </div>
 
-          <div className="px-5 py-10 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-sm border border-dashed border-[var(--border)] bg-[var(--paper)]">
-              <FolderOpen className="h-5 w-5 text-[var(--slate)]" strokeWidth={1.5} />
+          {isLoading ? (
+            <div className="px-5 py-10 text-center text-sm text-[var(--slate)]">Loading dashboard...</div>
+          ) : isError ? (
+            <div className="px-5 py-10 text-center">
+              <h3 className="font-medium text-[var(--ink)]">Could not load dashboard data</h3>
+              <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--slate)]">
+                Check the selected data mode and backend connection, then refresh.
+              </p>
             </div>
-            <h3 className="mt-4 font-medium text-[var(--ink)]">No deals yet</h3>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--slate)]">
-              Create your first financing package to track property details, term sheets, and closing milestones.
-            </p>
-            <button
-              type="button"
-              disabled
-              className="mt-6 inline-flex cursor-not-allowed items-center gap-2 rounded-sm border border-[var(--brass)]/30 bg-[var(--brass)]/10 px-4 py-2 text-sm font-medium text-[var(--brass)] opacity-60"
-            >
-              Add deal
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          ) : featuredDeals.length === 0 ? (
+            <div className="px-5 py-10 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-sm border border-dashed border-[var(--border)] bg-[var(--paper)]">
+                <FolderOpen className="h-5 w-5 text-[var(--slate)]" strokeWidth={1.5} />
+              </div>
+              <h3 className="mt-4 font-medium text-[var(--ink)]">No deals yet</h3>
+              <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--slate)]">
+                Create your first financing package to track property details, term sheets, and closing milestones.
+              </p>
+              <Link
+                to="/deals/new"
+                className="mt-6 inline-flex items-center gap-2 rounded-sm border border-[var(--brass)]/30 bg-[var(--brass)]/10 px-4 py-2 text-sm font-medium text-[var(--brass)] transition-colors hover:border-[var(--brass)]/60 hover:bg-[var(--brass)]/15"
+              >
+                Add deal
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--border)]">
+              {featuredDeals.map((deal) => {
+                const location = primaryLocation(deal);
+                return (
+                  <Link
+                    key={deal.id}
+                    to={`/deals/${deal.id}`}
+                    className="grid gap-3 px-5 py-4 transition-colors hover:bg-[var(--paper)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="truncate font-medium text-[var(--ink)]">{deal.name}</h3>
+                        <span className="rounded-sm border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--slate)]">
+                          {PIPELINE_STATUS_LABELS[deal.pipeline_status]}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-sm text-[var(--slate)]">
+                        {deal.sponsor_detail?.entity_name ?? 'Sponsor on file'}
+                        {location ? ` · ${location}` : ''}
+                      </p>
+                    </div>
+                    <div className="font-display text-lg font-medium text-[var(--brass)]">
+                      {formatCurrencyCompact(deal.requested_amount)}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         <aside className="animate-fade-up stagger-3 space-y-6">
           <section className="rounded-md border border-[var(--border)] bg-[var(--paper-elevated)] p-5">
             <h2 className="font-display text-lg font-medium text-[var(--ink)]">By stage</h2>
             <ul className="mt-4 space-y-3">
-              {pipelineStages.map(({ stage, count, tone }) => (
+              {pipelineStageGroups.map(({ stage, statuses, tone }) => (
                 <li key={stage} className="flex items-center justify-between gap-3 text-sm">
                   <span className="flex items-center gap-2 text-[var(--slate)]">
                     <span className={`h-2 w-2 rounded-full ${tone}`} />
                     {stage}
                   </span>
-                  <span className="font-medium tabular-nums text-[var(--ink)]">{count}</span>
+                  <span className="font-medium tabular-nums text-[var(--ink)]">
+                    {isLoading ? '...' : countDealsInStatuses(deals, statuses)}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -105,10 +200,10 @@ const HomePage = () => {
               Next up
             </p>
             <p className="font-display mt-3 text-lg leading-snug">
-              Wire up deal models and document uploads in the API layer.
+              Review the highest-priority quote packages and closing milestones.
             </p>
             <p className="mt-2 text-sm text-[var(--header-muted)]">
-              This dashboard is ready for live data once backend endpoints land.
+              Demo mode uses the seeded portfolio; Live mode reads the Django API.
             </p>
           </section>
         </aside>
@@ -122,6 +217,20 @@ function getGreeting(): string {
   if (hour < 12) return 'morning';
   if (hour < 17) return 'afternoon';
   return 'evening';
+}
+
+function sumRequestedAmount(deals: Deal[]): number {
+  return deals.reduce((total, deal) => total + (Number(deal.requested_amount) || 0), 0);
+}
+
+function countDealsInStatuses(deals: Deal[], statuses: PipelineStatus[]): number {
+  return deals.filter((deal) => statuses.includes(deal.pipeline_status)).length;
+}
+
+function primaryLocation(deal: Deal): string | null {
+  const primary = deal.properties.find((entry) => entry.is_primary) ?? deal.properties[0];
+  if (!primary) return null;
+  return [primary.property.city, primary.property.state].filter(Boolean).join(', ') || null;
 }
 
 export default HomePage;

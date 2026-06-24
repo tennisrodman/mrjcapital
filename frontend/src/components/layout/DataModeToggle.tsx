@@ -11,7 +11,7 @@ interface DataModeToggleProps {
   surface?: 'dark' | 'light';
 }
 
-const TOOLTIP = 'Switching data mode clears your session in this browser';
+const TOOLTIP = 'Switch data source. Your Live session is restored when available.';
 
 const DataModeToggle = ({ className, surface = 'dark' }: DataModeToggleProps) => {
   const isLight = surface === 'light';
