@@ -31,4 +31,5 @@ Django + React + Celery scaffold for MRJ Capital. Add deal workflow and document
 
 - Shell scripts use `set -euo pipefail`.
 - Frontend build: `frontend/build/` → staged to `build/` by `build.sh`.
-- JWT token keys: `mrj_access_token`, `mrj_refresh_token` in `frontend/src/config/api.ts`.
+- Demo/Live data mode is controlled by the header/login toggle, defaults from `frontend/.env` `VITE_USE_MOCKS`, and uses `shared/demo_seed.json` for mock data.
+- JWT token keys: `mrj_access_token`, `mrj_refresh_token` in `frontend/src/config/authKeys.ts`.

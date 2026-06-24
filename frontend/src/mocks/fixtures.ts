@@ -118,33 +118,44 @@ export function buildInitialDeals(): Deal[] {
   }));
 }
 
-export const DOCUMENTS: DealDocument[] = demoSeed.documents.map((row) => ({
-  id: row.id,
-  deal: row.deal,
-  document_name: row.document_name,
-  category: row.category as DealDocument['category'],
-  version: row.version,
-  file_url: `deals/${row.deal}/${row.id}.${row.file_type}`,
-  file_type: row.file_type,
-  uploaded_by: ANALYST.id,
-  uploaded_date: '2026-05-20T16:30:00Z',
-  is_executed: row.is_executed,
-  expiry_date: row.expiry_date,
-  notes: '',
-  visibility_roles: ['internal'],
-  details: {},
-}));
+export const DOCUMENTS: DealDocument[] = demoSeed.documents.map((row) => {
+  const optional = row as typeof row & { uploaded_date?: string; notes?: string };
+  return {
+    id: row.id,
+    deal: row.deal,
+    document_name: row.document_name,
+    category: row.category as DealDocument['category'],
+    version: row.version,
+    file_url: `deals/${row.deal}/${row.id}.${row.file_type}`,
+    file_type: row.file_type,
+    uploaded_by: ANALYST.id,
+    uploaded_date: optional.uploaded_date ?? '2026-05-20T16:30:00Z',
+    is_executed: row.is_executed,
+    expiry_date: row.expiry_date,
+    notes: optional.notes ?? '',
+    visibility_roles: ['internal'],
+    details: {},
+  };
+});
 
-export const ACTIVITY: ActivityLogEntry[] = demoSeed.activity.map((row) => ({
-  id: row.id,
-  deal: row.deal,
-  action_type: 'status_change',
-  performed_by: ANALYST.id,
-  performed_at: row.performed_at,
-  ip_address: null,
-  description: row.description,
-  old_value: row.old_value,
-  new_value: row.new_value,
-  reason: row.reason,
-  metadata: { field: 'pipeline_status', from: row.old_value, to: row.new_value },
-}));
+export const ACTIVITY: ActivityLogEntry[] = demoSeed.activity.map((row) => {
+  const optional = row as typeof row & { paused_from_status?: string };
+  return {
+    id: row.id,
+    deal: row.deal,
+    action_type: 'status_change',
+    performed_by: ANALYST.id,
+    performed_at: row.performed_at,
+    ip_address: null,
+    description: row.description,
+    old_value: row.old_value,
+    new_value: row.new_value,
+    reason: row.reason,
+    metadata: {
+      field: 'pipeline_status',
+      from: row.old_value,
+      to: row.new_value,
+      ...(optional.paused_from_status ? { paused_from_status: optional.paused_from_status } : {}),
+    },
+  };
+});

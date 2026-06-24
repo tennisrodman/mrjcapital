@@ -1,15 +1,14 @@
 import { MOCKS_ENABLED, mockApiRequest } from '@/mocks';
 import { ApiError } from '@/lib/apiError';
+import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from './authKeys';
 
 export { ApiError, apiErrorMessage, fieldErrors } from '@/lib/apiError';
+export { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from './authKeys';
 
 export const API_URL =
   process.env.REACT_APP_API_URL ||
   (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : '') ||
   '';
-
-export const ACCESS_TOKEN_KEY = 'mrj_access_token';
-export const REFRESH_TOKEN_KEY = 'mrj_refresh_token';
 
 export const getAccessToken = (): string | null => localStorage.getItem(ACCESS_TOKEN_KEY);
 export const getRefreshToken = (): string | null => localStorage.getItem(REFRESH_TOKEN_KEY);

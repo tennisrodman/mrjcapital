@@ -1,29 +1,37 @@
 import { useContext, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
+import DataModeToggle from '@/components/layout/DataModeToggle';
 
 const Login = () => {
-  const { login, error } = useContext(AuthContext);
+  const { login, error, isAuthenticated, isLoading: isAuthLoading } = useContext(AuthContext);
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    setIsSubmitting(true);
     try {
       await login(username, password);
       navigate('/');
     } catch {
       // error is in context
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
+  if (!isAuthLoading && isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+    <div className="relative flex min-h-screen items-center justify-center bg-gray-50 px-4">
+      <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
+        <DataModeToggle surface="light" />
+      </div>
       <div className="w-full max-w-sm rounded-lg bg-white p-8 shadow">
         <p className="mb-1 text-sm text-gray-500">MRJ Capital</p>
         <h1 className="mb-6 text-2xl font-bold text-gray-900">Sign in</h1>
@@ -51,10 +59,10 @@ const Login = () => {
           </div>
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isSubmitting}
             className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {isLoading ? 'Signing in...' : 'Sign in'}
+            {isSubmitting ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
       </div>

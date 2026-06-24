@@ -1,7 +1,25 @@
 {
   "funds": [
-    { "id": "fund-credit-2", "name": "MRJ Credit Fund II", "status": "open" },
-    { "id": "fund-equity-1", "name": "MRJ Equity Opportunities I", "status": "forming" }
+    {
+      "id": "fund-credit-2",
+      "name": "MRJ Credit Fund II",
+      "status": "open"
+    },
+    {
+      "id": "fund-equity-1",
+      "name": "MRJ Equity Opportunities I",
+      "status": "forming"
+    },
+    {
+      "id": "fund-credit-3",
+      "name": "MRJ Credit Fund III",
+      "status": "forming"
+    },
+    {
+      "id": "fund-income-1",
+      "name": "MRJ Income Fund I",
+      "status": "closed"
+    }
   ],
   "sponsors": [
     {
@@ -57,6 +75,60 @@
       "primary_contact_email": "grant@riversidedev.com",
       "primary_contact_phone": "(813) 555-0136",
       "relationship_rating": "strategic"
+    },
+    {
+      "id": "sp-aspen",
+      "entity_name": "Aspen Grove Trust",
+      "entity_type": "trust",
+      "primary_contact_name": "Nina Patel",
+      "primary_contact_email": "nina@aspengrovetrust.com",
+      "primary_contact_phone": "(415) 555-0184",
+      "relationship_rating": "developing"
+    },
+    {
+      "id": "sp-bluewater",
+      "entity_name": "Bluewater Family Office",
+      "entity_type": "individual",
+      "primary_contact_name": "Theo Bennett",
+      "primary_contact_email": "theo@bluewaterfo.com",
+      "primary_contact_phone": "(949) 555-0133",
+      "relationship_rating": "established"
+    },
+    {
+      "id": "sp-canyon",
+      "entity_name": "Canyon Trail Communities",
+      "entity_type": "llc",
+      "primary_contact_name": "Rhea Morgan",
+      "primary_contact_email": "rhea@canyontrail.com",
+      "primary_contact_phone": "(702) 555-0144",
+      "relationship_rating": "new"
+    },
+    {
+      "id": "sp-redwood",
+      "entity_name": "Redwood Urban Partners",
+      "entity_type": "corp",
+      "primary_contact_name": "Alex Kim",
+      "primary_contact_email": "akim@redwoodurban.com",
+      "primary_contact_phone": "(510) 555-0161",
+      "relationship_rating": "strategic"
+    },
+    {
+      "id": "sp-meridian",
+      "entity_name": "Meridian Housing Group",
+      "entity_type": "lp",
+      "primary_contact_name": "Camila Ortiz",
+      "primary_contact_email": "cortiz@meridianhousing.com",
+      "primary_contact_phone": "(617) 555-0177",
+      "relationship_rating": "developing"
+    },
+    {
+      "id": "sp-sage",
+      "entity_name": "Sagebrush Development",
+      "entity_type": "llc",
+      "primary_contact_name": "Owen Clark",
+      "primary_contact_email": "owen@sagebrushdev.com",
+      "primary_contact_phone": "(505) 555-0194",
+      "relationship_rating": "new"
     }
   ],
   "brokers": [
@@ -91,6 +163,38 @@
       "email": "tramsey@walkerdunlop.com",
       "phone": "(301) 555-0190",
       "status": "inactive"
+    },
+    {
+      "id": "bk-cushman",
+      "company_name": "Cushman & Wakefield",
+      "contact_name": "Ivy Chen",
+      "email": "ivy.chen@cushwake.com",
+      "phone": "(213) 555-0112",
+      "status": "active"
+    },
+    {
+      "id": "bk-newmark",
+      "company_name": "Newmark Capital Markets",
+      "contact_name": "Gabe Morris",
+      "email": "gmorris@ngkf.com",
+      "phone": "(646) 555-0182",
+      "status": "active"
+    },
+    {
+      "id": "bk-berkadia",
+      "company_name": "Berkadia",
+      "contact_name": "Leah Foster",
+      "email": "lfoster@berkadia.com",
+      "phone": "(215) 555-0120",
+      "status": "active"
+    },
+    {
+      "id": "bk-greystone",
+      "company_name": "Greystone",
+      "contact_name": "Noah Brooks",
+      "email": "nbrooks@greyco.com",
+      "phone": "(718) 555-0168",
+      "status": "blocked"
     }
   ],
   "properties": [
@@ -228,6 +332,141 @@
       "zip": "38106",
       "property_type": "industrial",
       "msa": "Memphis"
+    },
+    {
+      "id": "pr-canyon-1",
+      "address": "4100 Desert Vista Dr",
+      "city": "Las Vegas",
+      "state": "NV",
+      "zip": "89135",
+      "property_type": "master_planned_residential",
+      "msa": "Las Vegas-Henderson"
+    },
+    {
+      "id": "pr-canyon-2",
+      "address": "4200 Desert Vista Dr",
+      "city": "Las Vegas",
+      "state": "NV",
+      "zip": "89135",
+      "property_type": "master_planned_residential",
+      "msa": "Las Vegas-Henderson"
+    },
+    {
+      "id": "pr-bluewater",
+      "address": "75 Pacific Coast Hwy",
+      "city": "Newport Beach",
+      "state": "CA",
+      "zip": "92660",
+      "property_type": "retail",
+      "msa": "Los Angeles-Long Beach"
+    },
+    {
+      "id": "pr-aspen",
+      "address": "225 Market St",
+      "city": "San Francisco",
+      "state": "CA",
+      "zip": "94105",
+      "property_type": "office",
+      "msa": "San Francisco-Oakland"
+    },
+    {
+      "id": "pr-redwood",
+      "address": "880 Telegraph Ave",
+      "city": "Oakland",
+      "state": "CA",
+      "zip": "94612",
+      "property_type": "mixed_use",
+      "msa": "San Francisco-Oakland"
+    },
+    {
+      "id": "pr-meridian",
+      "address": "1440 Columbia Rd",
+      "city": "Boston",
+      "state": "MA",
+      "zip": "02127",
+      "property_type": "multifamily",
+      "msa": "Boston-Cambridge"
+    },
+    {
+      "id": "pr-sage",
+      "address": "600 Central Ave SW",
+      "city": "Albuquerque",
+      "state": "NM",
+      "zip": "87102",
+      "property_type": "hotel",
+      "msa": "Albuquerque"
+    },
+    {
+      "id": "pr-crescent",
+      "address": "1900 Canal St",
+      "city": "New Orleans",
+      "state": "LA",
+      "zip": "70112",
+      "property_type": "self_storage",
+      "msa": "New Orleans-Metairie"
+    },
+    {
+      "id": "pr-northstar",
+      "address": "7600 France Ave S",
+      "city": "Edina",
+      "state": "MN",
+      "zip": "55435",
+      "property_type": "office",
+      "msa": "Minneapolis-St. Paul"
+    },
+    {
+      "id": "pr-camden",
+      "address": "1200 Haddon Ave",
+      "city": "Camden",
+      "state": "NJ",
+      "zip": "08103",
+      "property_type": "other",
+      "msa": "Philadelphia-Camden"
+    },
+    {
+      "id": "pr-bayview-1",
+      "address": "1400 Bayview Dr",
+      "city": "Miami",
+      "state": "FL",
+      "zip": "33132",
+      "property_type": "condo",
+      "msa": "Miami-Fort Lauderdale"
+    },
+    {
+      "id": "pr-bayview-2",
+      "address": "1420 Bayview Dr",
+      "city": "Miami",
+      "state": "FL",
+      "zip": "33132",
+      "property_type": "condo",
+      "msa": "Miami-Fort Lauderdale"
+    },
+    {
+      "id": "pr-union",
+      "address": "25 Union Station Way",
+      "city": "Kansas City",
+      "state": "MO",
+      "zip": "64108",
+      "property_type": "data_center",
+      "msa": "Kansas City"
+    },
+    {
+      "id": "pr-sequoia",
+      "address": "300 River Park Pl",
+      "city": "Sacramento",
+      "state": "CA",
+      "zip": "95814",
+      "property_type": "land",
+      "msa": "Sacramento-Roseville"
+    },
+    {
+      "id": "pr-silverline",
+      "address": "17 Rail Yard Rd",
+      "city": "Atlanta",
+      "state": "GA",
+      "zip": "30313",
+      "property_type": "industrial",
+      "msa": "Atlanta-Sandy Springs"
     }
   ],
   "deals": [
@@ -238,12 +477,17 @@
       "pipeline_status": "quoting",
       "syndication_status": "raising",
       "sponsor": "sp-larkspur",
-      "broker": "bk-eastdil",
-      "fund": "fund-credit-2",
       "source_channel": "broker",
       "source_date": "2026-05-18",
       "requested_amount": "12400000.00",
-      "properties": [["pr-larkspur", true]]
+      "properties": [
+        [
+          "pr-larkspur",
+          true
+        ]
+      ],
+      "broker": "bk-eastdil",
+      "fund": "fund-credit-2"
     },
     {
       "id": "deal-cobalt",
@@ -252,12 +496,21 @@
       "pipeline_status": "negotiating",
       "syndication_status": "not_started",
       "sponsor": "sp-cobalt",
-      "broker": "bk-cbre",
-      "fund": "fund-credit-2",
       "source_channel": "repeat_sponsor",
       "source_date": "2026-04-30",
       "requested_amount": "28000000.00",
-      "properties": [["pr-cobalt-1", true], ["pr-cobalt-2", false]]
+      "properties": [
+        [
+          "pr-cobalt-1",
+          true
+        ],
+        [
+          "pr-cobalt-2",
+          false
+        ]
+      ],
+      "broker": "bk-cbre",
+      "fund": "fund-credit-2"
     },
     {
       "id": "deal-marisol",
@@ -266,11 +519,16 @@
       "pipeline_status": "screening",
       "syndication_status": "not_started",
       "sponsor": "sp-marisol",
-      "broker": "bk-jll",
       "source_channel": "broker",
       "source_date": "2026-06-02",
       "requested_amount": "8500000.00",
-      "properties": [["pr-marisol", true]]
+      "properties": [
+        [
+          "pr-marisol",
+          true
+        ]
+      ],
+      "broker": "bk-jll"
     },
     {
       "id": "deal-harbor",
@@ -282,7 +540,12 @@
       "source_channel": "direct",
       "source_date": "2026-06-12",
       "requested_amount": "15000000.00",
-      "properties": [["pr-harbor", true]]
+      "properties": [
+        [
+          "pr-harbor",
+          true
+        ]
+      ]
     },
     {
       "id": "deal-vista",
@@ -291,12 +554,17 @@
       "pipeline_status": "closing",
       "syndication_status": "fully_subscribed",
       "sponsor": "sp-vista",
-      "broker": "bk-walker",
-      "fund": "fund-equity-1",
       "source_channel": "referral",
       "source_date": "2026-03-21",
       "requested_amount": "6200000.00",
-      "properties": [["pr-vista", true]]
+      "properties": [
+        [
+          "pr-vista",
+          true
+        ]
+      ],
+      "broker": "bk-walker",
+      "fund": "fund-equity-1"
     },
     {
       "id": "deal-sterling",
@@ -305,12 +573,17 @@
       "pipeline_status": "signed",
       "syndication_status": "raising",
       "sponsor": "sp-larkspur",
-      "broker": "bk-eastdil",
-      "fund": "fund-credit-2",
       "source_channel": "repeat_sponsor",
       "source_date": "2026-04-08",
       "requested_amount": "34000000.00",
-      "properties": [["pr-sterling", true]]
+      "properties": [
+        [
+          "pr-sterling",
+          true
+        ]
+      ],
+      "broker": "bk-eastdil",
+      "fund": "fund-credit-2"
     },
     {
       "id": "deal-oakmont",
@@ -319,12 +592,17 @@
       "pipeline_status": "closed",
       "syndication_status": "closed",
       "sponsor": "sp-cobalt",
-      "broker": "bk-cbre",
-      "fund": "fund-equity-1",
       "source_channel": "broker",
       "source_date": "2026-01-15",
       "requested_amount": "19750000.00",
-      "properties": [["pr-oakmont", true]]
+      "properties": [
+        [
+          "pr-oakmont",
+          true
+        ]
+      ],
+      "broker": "bk-cbre",
+      "fund": "fund-equity-1"
     },
     {
       "id": "deal-riverside",
@@ -333,11 +611,16 @@
       "pipeline_status": "servicing",
       "syndication_status": "closed",
       "sponsor": "sp-riverside",
-      "fund": "fund-equity-1",
       "source_channel": "internal_prospecting",
       "source_date": "2025-11-03",
       "requested_amount": "42000000.00",
-      "properties": [["pr-riverside", true]]
+      "properties": [
+        [
+          "pr-riverside",
+          true
+        ]
+      ],
+      "fund": "fund-equity-1"
     },
     {
       "id": "deal-granite",
@@ -345,13 +628,18 @@
       "investment_type": "whole_loan_bridge",
       "pipeline_status": "on_hold",
       "syndication_status": "not_started",
-      "paused_from_status": "quoting",
       "sponsor": "sp-marisol",
-      "broker": "bk-jll",
       "source_channel": "broker",
       "source_date": "2026-02-26",
       "requested_amount": "22000000.00",
-      "properties": [["pr-granite", true]]
+      "properties": [
+        [
+          "pr-granite",
+          true
+        ]
+      ],
+      "broker": "bk-jll",
+      "paused_from_status": "quoting"
     },
     {
       "id": "deal-beacon",
@@ -360,11 +648,16 @@
       "pipeline_status": "dead",
       "syndication_status": "not_started",
       "sponsor": "sp-harbor",
-      "broker": "bk-cbre",
       "source_channel": "direct",
       "source_date": "2026-02-10",
       "requested_amount": "11000000.00",
-      "properties": [["pr-beacon", true]]
+      "properties": [
+        [
+          "pr-beacon",
+          true
+        ]
+      ],
+      "broker": "bk-cbre"
     },
     {
       "id": "deal-summit",
@@ -376,7 +669,12 @@
       "source_channel": "referral",
       "source_date": "2025-09-19",
       "requested_amount": "9400000.00",
-      "properties": [["pr-summit", true]]
+      "properties": [
+        [
+          "pr-summit",
+          true
+        ]
+      ]
     },
     {
       "id": "deal-pinewood",
@@ -385,12 +683,17 @@
       "pipeline_status": "quoting",
       "syndication_status": "raising",
       "sponsor": "sp-riverside",
-      "broker": "bk-eastdil",
-      "fund": "fund-credit-2",
       "source_channel": "repeat_sponsor",
       "source_date": "2026-05-29",
       "requested_amount": "55000000.00",
-      "properties": [["pr-pinewood", true]]
+      "properties": [
+        [
+          "pr-pinewood",
+          true
+        ]
+      ],
+      "broker": "bk-eastdil",
+      "fund": "fund-credit-2"
     },
     {
       "id": "deal-maple",
@@ -402,7 +705,12 @@
       "source_channel": "direct",
       "source_date": "2026-06-15",
       "requested_amount": "7800000.00",
-      "properties": [["pr-maple", true]]
+      "properties": [
+        [
+          "pr-maple",
+          true
+        ]
+      ]
     },
     {
       "id": "deal-ironwood",
@@ -411,131 +719,1711 @@
       "pipeline_status": "screening",
       "syndication_status": "not_started",
       "sponsor": "sp-cobalt",
-      "broker": "bk-walker",
       "source_channel": "repeat_sponsor",
       "source_date": "2026-06-06",
       "requested_amount": "16300000.00",
-      "properties": [["pr-ironwood", true]]
+      "properties": [
+        [
+          "pr-ironwood",
+          true
+        ]
+      ],
+      "broker": "bk-walker"
+    },
+    {
+      "id": "deal-canyon",
+      "name": "Canyon Trail MPC",
+      "investment_type": "co_gp_equity",
+      "pipeline_status": "negotiating",
+      "syndication_status": "raising",
+      "sponsor": "sp-canyon",
+      "source_channel": "internal_prospecting",
+      "source_date": "2026-04-17",
+      "requested_amount": "31000000.00",
+      "properties": [
+        [
+          "pr-canyon-1",
+          true
+        ],
+        [
+          "pr-canyon-2",
+          false
+        ]
+      ],
+      "broker": "bk-newmark",
+      "fund": "fund-equity-1"
+    },
+    {
+      "id": "deal-bluewater",
+      "name": "Bluewater Retail Note",
+      "investment_type": "whole_loan_permanent",
+      "pipeline_status": "signed",
+      "syndication_status": "fully_subscribed",
+      "sponsor": "sp-bluewater",
+      "source_channel": "referral",
+      "source_date": "2026-03-30",
+      "requested_amount": "18200000.00",
+      "properties": [
+        [
+          "pr-bluewater",
+          true
+        ]
+      ],
+      "broker": "bk-berkadia",
+      "fund": "fund-credit-3"
+    },
+    {
+      "id": "deal-aspen",
+      "name": "Aspen Grove Office Recap",
+      "investment_type": "mezzanine",
+      "pipeline_status": "closing",
+      "syndication_status": "raising",
+      "sponsor": "sp-aspen",
+      "source_channel": "broker",
+      "source_date": "2026-02-18",
+      "requested_amount": "25500000.00",
+      "properties": [
+        [
+          "pr-aspen",
+          true
+        ]
+      ],
+      "broker": "bk-cushman",
+      "fund": "fund-income-1"
+    },
+    {
+      "id": "deal-redwood",
+      "name": "Redwood Urban Mixed-Use",
+      "investment_type": "preferred_equity",
+      "pipeline_status": "closed",
+      "syndication_status": "closed",
+      "sponsor": "sp-redwood",
+      "source_channel": "direct",
+      "source_date": "2025-12-11",
+      "requested_amount": "21400000.00",
+      "properties": [
+        [
+          "pr-redwood",
+          true
+        ]
+      ],
+      "broker": "bk-newmark",
+      "fund": "fund-equity-1"
+    },
+    {
+      "id": "deal-meridian",
+      "name": "Meridian Workforce Housing",
+      "investment_type": "whole_loan_bridge",
+      "pipeline_status": "servicing",
+      "syndication_status": "closed",
+      "sponsor": "sp-meridian",
+      "source_channel": "broker",
+      "source_date": "2025-10-07",
+      "requested_amount": "38600000.00",
+      "properties": [
+        [
+          "pr-meridian",
+          true
+        ]
+      ],
+      "broker": "bk-greystone",
+      "fund": "fund-income-1"
+    },
+    {
+      "id": "deal-sage",
+      "name": "Sagebrush Hospitality Exit",
+      "investment_type": "lp_equity",
+      "pipeline_status": "exited",
+      "syndication_status": "closed",
+      "sponsor": "sp-sage",
+      "source_channel": "internal_prospecting",
+      "source_date": "2025-07-22",
+      "requested_amount": "12800000.00",
+      "properties": [
+        [
+          "pr-sage",
+          true
+        ]
+      ],
+      "broker": "bk-cushman",
+      "fund": "fund-equity-1"
+    },
+    {
+      "id": "deal-crescent",
+      "name": "Crescent Storage Bridge",
+      "investment_type": "whole_loan_permanent",
+      "pipeline_status": "quoting",
+      "syndication_status": "not_started",
+      "sponsor": "sp-aspen",
+      "source_channel": "broker",
+      "source_date": "2026-05-07",
+      "requested_amount": "14600000.00",
+      "properties": [
+        [
+          "pr-crescent",
+          true
+        ]
+      ],
+      "broker": "bk-berkadia",
+      "fund": "fund-credit-3"
+    },
+    {
+      "id": "deal-northstar",
+      "name": "Northstar Office Pref",
+      "investment_type": "co_gp_equity",
+      "pipeline_status": "negotiating",
+      "syndication_status": "raising",
+      "sponsor": "sp-redwood",
+      "source_channel": "referral",
+      "source_date": "2026-04-05",
+      "requested_amount": "17300000.00",
+      "properties": [
+        [
+          "pr-northstar",
+          true
+        ]
+      ],
+      "broker": "bk-eastdil",
+      "fund": "fund-equity-1"
+    },
+    {
+      "id": "deal-camden",
+      "name": "Camden Adaptive Reuse",
+      "investment_type": "mezzanine",
+      "pipeline_status": "signed",
+      "syndication_status": "raising",
+      "sponsor": "sp-meridian",
+      "source_channel": "direct",
+      "source_date": "2026-03-14",
+      "requested_amount": "9300000.00",
+      "properties": [
+        [
+          "pr-camden",
+          true
+        ]
+      ],
+      "broker": "bk-jll",
+      "fund": "fund-income-1"
+    },
+    {
+      "id": "deal-bayview",
+      "name": "Bayview Condo Inventory",
+      "investment_type": "preferred_equity",
+      "pipeline_status": "closing",
+      "syndication_status": "fully_subscribed",
+      "sponsor": "sp-bluewater",
+      "source_channel": "repeat_sponsor",
+      "source_date": "2026-01-28",
+      "requested_amount": "24200000.00",
+      "properties": [
+        [
+          "pr-bayview-1",
+          true
+        ],
+        [
+          "pr-bayview-2",
+          false
+        ]
+      ],
+      "broker": "bk-cbre",
+      "fund": "fund-equity-1"
+    },
+    {
+      "id": "deal-union",
+      "name": "Union Station Data Hall",
+      "investment_type": "whole_loan_bridge",
+      "pipeline_status": "screening",
+      "syndication_status": "not_started",
+      "sponsor": "sp-canyon",
+      "source_channel": "internal_prospecting",
+      "source_date": "2026-06-09",
+      "requested_amount": "29500000.00",
+      "properties": [
+        [
+          "pr-union",
+          true
+        ]
+      ],
+      "broker": "bk-newmark"
+    },
+    {
+      "id": "deal-sequoia",
+      "name": "Sequoia Land Bank",
+      "investment_type": "lp_equity",
+      "pipeline_status": "sourced",
+      "syndication_status": "not_started",
+      "sponsor": "sp-sage",
+      "source_channel": "direct",
+      "source_date": "2026-06-18",
+      "requested_amount": "6700000.00",
+      "properties": [
+        [
+          "pr-sequoia",
+          true
+        ]
+      ]
+    },
+    {
+      "id": "deal-silverline",
+      "name": "Silverline Logistics Takeout",
+      "investment_type": "whole_loan_permanent",
+      "pipeline_status": "dead",
+      "syndication_status": "not_started",
+      "sponsor": "sp-redwood",
+      "source_channel": "broker",
+      "source_date": "2026-01-09",
+      "requested_amount": "19800000.00",
+      "properties": [
+        [
+          "pr-silverline",
+          true
+        ]
+      ],
+      "broker": "bk-greystone"
+    },
+    {
+      "id": "deal-atlas",
+      "name": "Atlas Industrial Pause",
+      "investment_type": "mezzanine",
+      "pipeline_status": "on_hold",
+      "syndication_status": "not_started",
+      "sponsor": "sp-meridian",
+      "source_channel": "referral",
+      "source_date": "2026-02-03",
+      "requested_amount": "13700000.00",
+      "properties": [
+        [
+          "pr-cobalt-1",
+          true
+        ],
+        [
+          "pr-silverline",
+          false
+        ]
+      ],
+      "broker": "bk-berkadia",
+      "paused_from_status": "screening"
     }
   ],
   "documents": [
     {
-      "id": "doc-1",
+      "id": "doc-001",
       "deal": "deal-larkspur",
-      "document_name": "Larkspur OM.pdf",
+      "document_name": "Larkspur Apartments Bridge - Offering Memo.docx",
       "category": "offering_memo",
       "version": 1,
-      "file_type": "pdf",
-      "is_executed": true,
-      "expiry_date": null
-    },
-    {
-      "id": "doc-2",
-      "deal": "deal-larkspur",
-      "document_name": "T-12 Operating Statement.xlsx",
-      "category": "financials",
-      "version": 2,
-      "file_type": "xlsx",
+      "file_type": "docx",
+      "uploaded_date": "2026-04-04T16:30:00Z",
       "is_executed": false,
-      "expiry_date": null
+      "expiry_date": null,
+      "notes": ""
     },
     {
-      "id": "doc-3",
+      "id": "doc-002",
       "deal": "deal-larkspur",
-      "document_name": "Rent Roll - May 2026.xlsx",
-      "category": "rent_roll",
+      "document_name": "Larkspur Apartments Bridge - Financials.xlsx",
+      "category": "financials",
       "version": 1,
       "file_type": "xlsx",
+      "uploaded_date": "2026-05-06T16:30:00Z",
       "is_executed": false,
-      "expiry_date": null
+      "expiry_date": null,
+      "notes": ""
     },
     {
-      "id": "doc-4",
+      "id": "doc-003",
       "deal": "deal-larkspur",
-      "document_name": "Phase I ESA.pdf",
+      "document_name": "Larkspur Apartments Bridge - Rent Roll.pdf",
+      "category": "rent_roll",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-01-08T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-004",
+      "deal": "deal-larkspur",
+      "document_name": "Larkspur Apartments Bridge - Appraisal.docx",
+      "category": "appraisal",
+      "version": 2,
+      "file_type": "docx",
+      "uploaded_date": "2026-02-10T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-05-12",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-005",
+      "deal": "deal-cobalt",
+      "document_name": "Cobalt Industrial Portfolio - Phase I ESA.pdf",
       "category": "environmental",
       "version": 1,
       "file_type": "pdf",
+      "uploaded_date": "2026-03-08T16:30:00Z",
       "is_executed": false,
-      "expiry_date": "2027-05-01"
+      "expiry_date": "2027-06-13",
+      "notes": ""
     },
     {
-      "id": "doc-5",
-      "deal": "deal-oakmont",
-      "document_name": "Executed Loan Agreement.pdf",
-      "category": "closing_docs",
-      "version": 3,
-      "file_type": "pdf",
-      "is_executed": true,
-      "expiry_date": null
-    },
-    {
-      "id": "doc-6",
-      "deal": "deal-oakmont",
-      "document_name": "Title Commitment.pdf",
+      "id": "doc-006",
+      "deal": "deal-cobalt",
+      "document_name": "Cobalt Industrial Portfolio - Title Commitment.docx",
       "category": "title",
       "version": 1,
-      "file_type": "pdf",
-      "is_executed": true,
-      "expiry_date": null
+      "file_type": "docx",
+      "uploaded_date": "2026-04-10T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-07-14",
+      "notes": ""
     },
     {
-      "id": "doc-7",
+      "id": "doc-007",
+      "deal": "deal-cobalt",
+      "document_name": "Cobalt Industrial Portfolio - Insurance Binder.xlsx",
+      "category": "insurance",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-05-12T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": "2027-08-15",
+      "notes": ""
+    },
+    {
+      "id": "doc-008",
+      "deal": "deal-cobalt",
+      "document_name": "Cobalt Industrial Portfolio - Legal Memo.pdf",
+      "category": "legal",
+      "version": 2,
+      "file_type": "pdf",
+      "uploaded_date": "2026-01-14T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-009",
+      "deal": "deal-vista",
+      "document_name": "Vista Ridge Self-Storage - Entity Certificate.xlsx",
+      "category": "entity_docs",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-02-12T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-010",
+      "deal": "deal-vista",
+      "document_name": "Vista Ridge Self-Storage - Construction Budget.pdf",
+      "category": "construction",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-03-14T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-011",
+      "deal": "deal-vista",
+      "document_name": "Vista Ridge Self-Storage - Investor Deck.docx",
+      "category": "investor_docs",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-04-16T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-012",
+      "deal": "deal-vista",
+      "document_name": "Vista Ridge Self-Storage - Sponsor Correspondence.xlsx",
+      "category": "correspondence",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-05-18T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-013",
+      "deal": "deal-sterling",
+      "document_name": "Sterling Hotel Refi - Closing Checklist.docx",
+      "category": "closing_docs",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-01-16T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-014",
+      "deal": "deal-sterling",
+      "document_name": "Sterling Hotel Refi - Servicing Report.xlsx",
+      "category": "servicing",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-02-18T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-015",
+      "deal": "deal-sterling",
+      "document_name": "Sterling Hotel Refi - Market Notes.pdf",
+      "category": "other",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-03-20T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-016",
+      "deal": "deal-sterling",
+      "document_name": "Sterling Hotel Refi - Offering Memo.docx",
+      "category": "offering_memo",
+      "version": 2,
+      "file_type": "docx",
+      "uploaded_date": "2026-04-22T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-017",
       "deal": "deal-oakmont",
-      "document_name": "Property Insurance Binder.pdf",
+      "document_name": "Oakmont Retail Center - Financials.pdf",
+      "category": "financials",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-05-20T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-018",
+      "deal": "deal-oakmont",
+      "document_name": "Oakmont Retail Center - Rent Roll.docx",
+      "category": "rent_roll",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-01-22T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-019",
+      "deal": "deal-oakmont",
+      "document_name": "Oakmont Retail Center - Appraisal.xlsx",
+      "category": "appraisal",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-02-02T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-02-27",
+      "notes": ""
+    },
+    {
+      "id": "doc-020",
+      "deal": "deal-oakmont",
+      "document_name": "Oakmont Retail Center - Phase I ESA.pdf",
+      "category": "environmental",
+      "version": 2,
+      "file_type": "pdf",
+      "uploaded_date": "2026-03-04T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-03-08",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-021",
+      "deal": "deal-riverside",
+      "document_name": "Riverside Multifamily Dev - Title Commitment.xlsx",
+      "category": "title",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-04-02T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-04-09",
+      "notes": ""
+    },
+    {
+      "id": "doc-022",
+      "deal": "deal-riverside",
+      "document_name": "Riverside Multifamily Dev - Insurance Binder.pdf",
       "category": "insurance",
       "version": 1,
       "file_type": "pdf",
-      "is_executed": true,
-      "expiry_date": "2027-01-15"
+      "uploaded_date": "2026-05-04T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-05-10",
+      "notes": ""
     },
     {
-      "id": "doc-8",
-      "deal": "deal-cobalt",
-      "document_name": "Appraisal - Cobalt Portfolio.pdf",
+      "id": "doc-023",
+      "deal": "deal-riverside",
+      "document_name": "Riverside Multifamily Dev - Legal Memo.docx",
+      "category": "legal",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-01-06T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-024",
+      "deal": "deal-riverside",
+      "document_name": "Riverside Multifamily Dev - Entity Certificate.xlsx",
+      "category": "entity_docs",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-02-08T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-025",
+      "deal": "deal-summit",
+      "document_name": "Summit Land Assemblage - Construction Budget.docx",
+      "category": "construction",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-03-06T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-026",
+      "deal": "deal-summit",
+      "document_name": "Summit Land Assemblage - Investor Deck.xlsx",
+      "category": "investor_docs",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-04-08T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-027",
+      "deal": "deal-summit",
+      "document_name": "Summit Land Assemblage - Sponsor Correspondence.pdf",
+      "category": "correspondence",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-05-10T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-028",
+      "deal": "deal-summit",
+      "document_name": "Summit Land Assemblage - Closing Checklist.docx",
+      "category": "closing_docs",
+      "version": 2,
+      "file_type": "docx",
+      "uploaded_date": "2026-01-12T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-029",
+      "deal": "deal-pinewood",
+      "document_name": "Pinewood Data Center - Servicing Report.pdf",
+      "category": "servicing",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-02-10T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-030",
+      "deal": "deal-pinewood",
+      "document_name": "Pinewood Data Center - Market Notes.docx",
+      "category": "other",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-03-12T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-031",
+      "deal": "deal-pinewood",
+      "document_name": "Pinewood Data Center - Offering Memo.xlsx",
+      "category": "offering_memo",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-04-14T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-032",
+      "deal": "deal-pinewood",
+      "document_name": "Pinewood Data Center - Financials.pdf",
+      "category": "financials",
+      "version": 2,
+      "file_type": "pdf",
+      "uploaded_date": "2026-05-16T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-033",
+      "deal": "deal-canyon",
+      "document_name": "Canyon Trail MPC - Rent Roll.xlsx",
+      "category": "rent_roll",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-01-14T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-034",
+      "deal": "deal-canyon",
+      "document_name": "Canyon Trail MPC - Appraisal.pdf",
       "category": "appraisal",
       "version": 1,
       "file_type": "pdf",
+      "uploaded_date": "2026-02-16T16:30:00Z",
       "is_executed": false,
-      "expiry_date": "2027-04-30"
+      "expiry_date": "2027-08-22",
+      "notes": ""
+    },
+    {
+      "id": "doc-035",
+      "deal": "deal-canyon",
+      "document_name": "Canyon Trail MPC - Phase I ESA.docx",
+      "category": "environmental",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-03-18T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-09-23",
+      "notes": ""
+    },
+    {
+      "id": "doc-036",
+      "deal": "deal-canyon",
+      "document_name": "Canyon Trail MPC - Title Commitment.xlsx",
+      "category": "title",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-04-20T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": "2027-01-24",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-037",
+      "deal": "deal-bluewater",
+      "document_name": "Bluewater Retail Note - Insurance Binder.docx",
+      "category": "insurance",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-05-18T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-02-25",
+      "notes": ""
+    },
+    {
+      "id": "doc-038",
+      "deal": "deal-bluewater",
+      "document_name": "Bluewater Retail Note - Legal Memo.xlsx",
+      "category": "legal",
+      "version": 1,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-01-20T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-039",
+      "deal": "deal-bluewater",
+      "document_name": "Bluewater Retail Note - Entity Certificate.pdf",
+      "category": "entity_docs",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-02-22T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-040",
+      "deal": "deal-bluewater",
+      "document_name": "Bluewater Retail Note - Construction Budget.docx",
+      "category": "construction",
+      "version": 2,
+      "file_type": "docx",
+      "uploaded_date": "2026-03-02T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-041",
+      "deal": "deal-aspen",
+      "document_name": "Aspen Grove Office Recap - Investor Deck.pdf",
+      "category": "investor_docs",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-04-22T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-042",
+      "deal": "deal-aspen",
+      "document_name": "Aspen Grove Office Recap - Sponsor Correspondence.docx",
+      "category": "correspondence",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-05-02T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-043",
+      "deal": "deal-aspen",
+      "document_name": "Aspen Grove Office Recap - Closing Checklist.xlsx",
+      "category": "closing_docs",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-01-04T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-044",
+      "deal": "deal-redwood",
+      "document_name": "Redwood Urban Mixed-Use - Servicing Report.pdf",
+      "category": "servicing",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-02-03T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-045",
+      "deal": "deal-redwood",
+      "document_name": "Redwood Urban Mixed-Use - Market Notes.docx",
+      "category": "other",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-03-05T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-046",
+      "deal": "deal-redwood",
+      "document_name": "Redwood Urban Mixed-Use - Offering Memo.xlsx",
+      "category": "offering_memo",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-04-07T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-047",
+      "deal": "deal-meridian",
+      "document_name": "Meridian Workforce Housing - Financials.pdf",
+      "category": "financials",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-05-06T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-048",
+      "deal": "deal-meridian",
+      "document_name": "Meridian Workforce Housing - Rent Roll.docx",
+      "category": "rent_roll",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-01-08T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-049",
+      "deal": "deal-meridian",
+      "document_name": "Meridian Workforce Housing - Appraisal.xlsx",
+      "category": "appraisal",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-02-10T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-05-17",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-050",
+      "deal": "deal-sage",
+      "document_name": "Sagebrush Hospitality Exit - Phase I ESA.pdf",
+      "category": "environmental",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-03-09T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-06-18",
+      "notes": ""
+    },
+    {
+      "id": "doc-051",
+      "deal": "deal-sage",
+      "document_name": "Sagebrush Hospitality Exit - Title Commitment.docx",
+      "category": "title",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-04-11T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": "2027-07-19",
+      "notes": ""
+    },
+    {
+      "id": "doc-052",
+      "deal": "deal-sage",
+      "document_name": "Sagebrush Hospitality Exit - Insurance Binder.xlsx",
+      "category": "insurance",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-05-13T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": "2027-08-20",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-053",
+      "deal": "deal-crescent",
+      "document_name": "Crescent Storage Bridge - Legal Memo.pdf",
+      "category": "legal",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-01-12T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-054",
+      "deal": "deal-crescent",
+      "document_name": "Crescent Storage Bridge - Entity Certificate.docx",
+      "category": "entity_docs",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-02-14T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-055",
+      "deal": "deal-crescent",
+      "document_name": "Crescent Storage Bridge - Construction Budget.xlsx",
+      "category": "construction",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-03-16T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-056",
+      "deal": "deal-northstar",
+      "document_name": "Northstar Office Pref - Investor Deck.pdf",
+      "category": "investor_docs",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-04-15T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-057",
+      "deal": "deal-northstar",
+      "document_name": "Northstar Office Pref - Sponsor Correspondence.docx",
+      "category": "correspondence",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-05-17T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-058",
+      "deal": "deal-northstar",
+      "document_name": "Northstar Office Pref - Closing Checklist.xlsx",
+      "category": "closing_docs",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-01-19T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-059",
+      "deal": "deal-camden",
+      "document_name": "Camden Adaptive Reuse - Servicing Report.pdf",
+      "category": "servicing",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-02-18T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-060",
+      "deal": "deal-camden",
+      "document_name": "Camden Adaptive Reuse - Market Notes.docx",
+      "category": "other",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-03-20T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-061",
+      "deal": "deal-camden",
+      "document_name": "Camden Adaptive Reuse - Offering Memo.xlsx",
+      "category": "offering_memo",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-04-22T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-062",
+      "deal": "deal-bayview",
+      "document_name": "Bayview Condo Inventory - Financials.pdf",
+      "category": "financials",
+      "version": 1,
+      "file_type": "pdf",
+      "uploaded_date": "2026-05-21T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-063",
+      "deal": "deal-bayview",
+      "document_name": "Bayview Condo Inventory - Rent Roll.docx",
+      "category": "rent_roll",
+      "version": 1,
+      "file_type": "docx",
+      "uploaded_date": "2026-01-01T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": ""
+    },
+    {
+      "id": "doc-064",
+      "deal": "deal-bayview",
+      "document_name": "Bayview Condo Inventory - Appraisal.xlsx",
+      "category": "appraisal",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-02-03T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-02-12",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-065",
+      "deal": "deal-marisol",
+      "document_name": "Marisol Mixed-Use - Phase I ESA.pdf",
+      "category": "environmental",
+      "version": 2,
+      "file_type": "pdf",
+      "uploaded_date": "2026-03-02T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": "2027-03-13",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-066",
+      "deal": "deal-ironwood",
+      "document_name": "Ironwood Industrial - Title Commitment.xlsx",
+      "category": "title",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-04-03T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": "2027-04-14",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-067",
+      "deal": "deal-union",
+      "document_name": "Union Station Data Hall - Insurance Binder.docx",
+      "category": "insurance",
+      "version": 2,
+      "file_type": "docx",
+      "uploaded_date": "2026-05-04T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": "2027-05-15",
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-068",
+      "deal": "deal-granite",
+      "document_name": "Granite Logistics Hub - Legal Memo.pdf",
+      "category": "legal",
+      "version": 2,
+      "file_type": "pdf",
+      "uploaded_date": "2026-01-05T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-069",
+      "deal": "deal-atlas",
+      "document_name": "Atlas Industrial Pause - Entity Certificate.xlsx",
+      "category": "entity_docs",
+      "version": 2,
+      "file_type": "xlsx",
+      "uploaded_date": "2026-02-06T16:30:00Z",
+      "is_executed": true,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
+    },
+    {
+      "id": "doc-070",
+      "deal": "deal-harbor",
+      "document_name": "Harbor Point Office - Construction Budget.docx",
+      "category": "construction",
+      "version": 2,
+      "file_type": "docx",
+      "uploaded_date": "2026-03-07T16:30:00Z",
+      "is_executed": false,
+      "expiry_date": null,
+      "notes": "Current working version for demo review."
     }
   ],
   "activity": [
     {
-      "id": "act-1",
+      "id": "act-001",
       "deal": "deal-larkspur",
       "description": "Pipeline status changed from screening to quoting",
       "old_value": "screening",
       "new_value": "quoting",
-      "reason": "Term sheet issued to sponsor",
-      "performed_at": "2026-05-25T14:12:00Z"
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-20T17:30:00.000Z"
     },
     {
-      "id": "act-2",
+      "id": "act-002",
       "deal": "deal-larkspur",
       "description": "Pipeline status changed from sourced to screening",
       "old_value": "sourced",
       "new_value": "screening",
-      "reason": "Cleared initial credit screen",
-      "performed_at": "2026-05-20T10:02:00Z"
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-15T16:53:00.000Z"
     },
     {
-      "id": "act-3",
+      "id": "act-003",
+      "deal": "deal-cobalt",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-19T17:30:00.000Z"
+    },
+    {
+      "id": "act-063",
+      "deal": "deal-cobalt",
+      "description": "Pipeline status changed from on hold to quoting",
+      "old_value": "on_hold",
+      "new_value": "quoting",
+      "reason": "Sponsor returned with revised rent roll",
+      "performed_at": "2026-06-18T16:10:00.000Z",
+      "paused_from_status": "quoting"
+    },
+    {
+      "id": "act-064",
+      "deal": "deal-cobalt",
+      "description": "Pipeline status changed from quoting to on hold",
+      "old_value": "quoting",
+      "new_value": "on_hold",
+      "reason": "Sponsor paused while resolving tenant estoppels",
+      "performed_at": "2026-06-17T15:35:00.000Z"
+    },
+    {
+      "id": "act-004",
+      "deal": "deal-cobalt",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-14T16:53:00.000Z"
+    },
+    {
+      "id": "act-005",
+      "deal": "deal-cobalt",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-09T16:16:00.000Z"
+    },
+    {
+      "id": "act-006",
+      "deal": "deal-marisol",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-18T17:30:00.000Z"
+    },
+    {
+      "id": "act-007",
+      "deal": "deal-vista",
+      "description": "Pipeline status changed from signed to closing",
+      "old_value": "signed",
+      "new_value": "closing",
+      "reason": "Closing checklist opened with counsel",
+      "performed_at": "2026-06-16T17:30:00.000Z"
+    },
+    {
+      "id": "act-008",
+      "deal": "deal-vista",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-11T16:53:00.000Z"
+    },
+    {
+      "id": "act-009",
+      "deal": "deal-vista",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-06T16:16:00.000Z"
+    },
+    {
+      "id": "act-010",
+      "deal": "deal-sterling",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-15T17:30:00.000Z"
+    },
+    {
+      "id": "act-011",
+      "deal": "deal-sterling",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-10T16:53:00.000Z"
+    },
+    {
+      "id": "act-012",
+      "deal": "deal-sterling",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-05T16:16:00.000Z"
+    },
+    {
+      "id": "act-013",
       "deal": "deal-oakmont",
       "description": "Pipeline status changed from closing to closed",
       "old_value": "closing",
       "new_value": "closed",
       "reason": "Funded and recorded",
-      "performed_at": "2026-02-28T19:45:00Z"
+      "performed_at": "2026-06-14T17:30:00.000Z"
     },
     {
-      "id": "act-4",
+      "id": "act-014",
       "deal": "deal-oakmont",
       "description": "Pipeline status changed from signed to closing",
       "old_value": "signed",
       "new_value": "closing",
-      "reason": "Cleared closing conditions",
-      "performed_at": "2026-02-14T15:20:00Z"
+      "reason": "Closing checklist opened with counsel",
+      "performed_at": "2026-06-09T16:53:00.000Z"
+    },
+    {
+      "id": "act-015",
+      "deal": "deal-oakmont",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-04T16:16:00.000Z"
+    },
+    {
+      "id": "act-016",
+      "deal": "deal-riverside",
+      "description": "Pipeline status changed from closed to servicing",
+      "old_value": "closed",
+      "new_value": "servicing",
+      "reason": "Asset moved to servicing handoff",
+      "performed_at": "2026-06-13T17:30:00.000Z"
+    },
+    {
+      "id": "act-017",
+      "deal": "deal-riverside",
+      "description": "Pipeline status changed from closing to closed",
+      "old_value": "closing",
+      "new_value": "closed",
+      "reason": "Funded and recorded",
+      "performed_at": "2026-06-08T16:53:00.000Z"
+    },
+    {
+      "id": "act-018",
+      "deal": "deal-riverside",
+      "description": "Pipeline status changed from signed to closing",
+      "old_value": "signed",
+      "new_value": "closing",
+      "reason": "Closing checklist opened with counsel",
+      "performed_at": "2026-06-03T16:16:00.000Z"
+    },
+    {
+      "id": "act-019",
+      "deal": "deal-granite",
+      "description": "Pipeline status changed from quoting to on hold",
+      "old_value": "quoting",
+      "new_value": "on_hold",
+      "reason": "Sponsor requested a pause while updating materials",
+      "performed_at": "2026-06-12T17:30:00.000Z"
+    },
+    {
+      "id": "act-020",
+      "deal": "deal-granite",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-07T16:53:00.000Z"
+    },
+    {
+      "id": "act-021",
+      "deal": "deal-beacon",
+      "description": "Pipeline status changed from screening to dead",
+      "old_value": "screening",
+      "new_value": "dead",
+      "reason": "Opportunity no longer meets current investment criteria",
+      "performed_at": "2026-06-11T17:30:00.000Z"
+    },
+    {
+      "id": "act-022",
+      "deal": "deal-beacon",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-06T16:53:00.000Z"
+    },
+    {
+      "id": "act-023",
+      "deal": "deal-summit",
+      "description": "Pipeline status changed from servicing to exited",
+      "old_value": "servicing",
+      "new_value": "exited",
+      "reason": "Investment repaid and closed out",
+      "performed_at": "2026-06-20T17:30:00.000Z"
+    },
+    {
+      "id": "act-024",
+      "deal": "deal-summit",
+      "description": "Pipeline status changed from closed to servicing",
+      "old_value": "closed",
+      "new_value": "servicing",
+      "reason": "Asset moved to servicing handoff",
+      "performed_at": "2026-06-15T16:53:00.000Z"
+    },
+    {
+      "id": "act-025",
+      "deal": "deal-summit",
+      "description": "Pipeline status changed from closing to closed",
+      "old_value": "closing",
+      "new_value": "closed",
+      "reason": "Funded and recorded",
+      "performed_at": "2026-06-10T16:16:00.000Z"
+    },
+    {
+      "id": "act-026",
+      "deal": "deal-pinewood",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-19T17:30:00.000Z"
+    },
+    {
+      "id": "act-027",
+      "deal": "deal-pinewood",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-14T16:53:00.000Z"
+    },
+    {
+      "id": "act-028",
+      "deal": "deal-ironwood",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-17T17:30:00.000Z"
+    },
+    {
+      "id": "act-029",
+      "deal": "deal-canyon",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-16T17:30:00.000Z"
+    },
+    {
+      "id": "act-030",
+      "deal": "deal-canyon",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-11T16:53:00.000Z"
+    },
+    {
+      "id": "act-031",
+      "deal": "deal-canyon",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-06T16:16:00.000Z"
+    },
+    {
+      "id": "act-032",
+      "deal": "deal-bluewater",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-15T17:30:00.000Z"
+    },
+    {
+      "id": "act-033",
+      "deal": "deal-bluewater",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-10T16:53:00.000Z"
+    },
+    {
+      "id": "act-034",
+      "deal": "deal-bluewater",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-05T16:16:00.000Z"
+    },
+    {
+      "id": "act-035",
+      "deal": "deal-aspen",
+      "description": "Pipeline status changed from signed to closing",
+      "old_value": "signed",
+      "new_value": "closing",
+      "reason": "Closing checklist opened with counsel",
+      "performed_at": "2026-06-14T17:30:00.000Z"
+    },
+    {
+      "id": "act-036",
+      "deal": "deal-aspen",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-09T16:53:00.000Z"
+    },
+    {
+      "id": "act-037",
+      "deal": "deal-aspen",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-04T16:16:00.000Z"
+    },
+    {
+      "id": "act-038",
+      "deal": "deal-redwood",
+      "description": "Pipeline status changed from closing to closed",
+      "old_value": "closing",
+      "new_value": "closed",
+      "reason": "Funded and recorded",
+      "performed_at": "2026-06-13T17:30:00.000Z"
+    },
+    {
+      "id": "act-039",
+      "deal": "deal-redwood",
+      "description": "Pipeline status changed from signed to closing",
+      "old_value": "signed",
+      "new_value": "closing",
+      "reason": "Closing checklist opened with counsel",
+      "performed_at": "2026-06-08T16:53:00.000Z"
+    },
+    {
+      "id": "act-040",
+      "deal": "deal-redwood",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-03T16:16:00.000Z"
+    },
+    {
+      "id": "act-041",
+      "deal": "deal-meridian",
+      "description": "Pipeline status changed from closed to servicing",
+      "old_value": "closed",
+      "new_value": "servicing",
+      "reason": "Asset moved to servicing handoff",
+      "performed_at": "2026-06-12T17:30:00.000Z"
+    },
+    {
+      "id": "act-042",
+      "deal": "deal-meridian",
+      "description": "Pipeline status changed from closing to closed",
+      "old_value": "closing",
+      "new_value": "closed",
+      "reason": "Funded and recorded",
+      "performed_at": "2026-06-07T16:53:00.000Z"
+    },
+    {
+      "id": "act-043",
+      "deal": "deal-meridian",
+      "description": "Pipeline status changed from signed to closing",
+      "old_value": "signed",
+      "new_value": "closing",
+      "reason": "Closing checklist opened with counsel",
+      "performed_at": "2026-06-02T16:16:00.000Z"
+    },
+    {
+      "id": "act-044",
+      "deal": "deal-sage",
+      "description": "Pipeline status changed from servicing to exited",
+      "old_value": "servicing",
+      "new_value": "exited",
+      "reason": "Investment repaid and closed out",
+      "performed_at": "2026-06-11T17:30:00.000Z"
+    },
+    {
+      "id": "act-045",
+      "deal": "deal-sage",
+      "description": "Pipeline status changed from closed to servicing",
+      "old_value": "closed",
+      "new_value": "servicing",
+      "reason": "Asset moved to servicing handoff",
+      "performed_at": "2026-06-06T16:53:00.000Z"
+    },
+    {
+      "id": "act-046",
+      "deal": "deal-sage",
+      "description": "Pipeline status changed from closing to closed",
+      "old_value": "closing",
+      "new_value": "closed",
+      "reason": "Funded and recorded",
+      "performed_at": "2026-06-01T16:16:00.000Z"
+    },
+    {
+      "id": "act-047",
+      "deal": "deal-crescent",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-20T17:30:00.000Z"
+    },
+    {
+      "id": "act-048",
+      "deal": "deal-crescent",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-15T16:53:00.000Z"
+    },
+    {
+      "id": "act-049",
+      "deal": "deal-northstar",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-19T17:30:00.000Z"
+    },
+    {
+      "id": "act-050",
+      "deal": "deal-northstar",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-14T16:53:00.000Z"
+    },
+    {
+      "id": "act-051",
+      "deal": "deal-northstar",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-09T16:16:00.000Z"
+    },
+    {
+      "id": "act-052",
+      "deal": "deal-camden",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-18T17:30:00.000Z"
+    },
+    {
+      "id": "act-053",
+      "deal": "deal-camden",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-13T16:53:00.000Z"
+    },
+    {
+      "id": "act-054",
+      "deal": "deal-camden",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-08T16:16:00.000Z"
+    },
+    {
+      "id": "act-055",
+      "deal": "deal-bayview",
+      "description": "Pipeline status changed from signed to closing",
+      "old_value": "signed",
+      "new_value": "closing",
+      "reason": "Closing checklist opened with counsel",
+      "performed_at": "2026-06-17T17:30:00.000Z"
+    },
+    {
+      "id": "act-056",
+      "deal": "deal-bayview",
+      "description": "Pipeline status changed from negotiating to signed",
+      "old_value": "negotiating",
+      "new_value": "signed",
+      "reason": "Application and term sheet executed",
+      "performed_at": "2026-06-12T16:53:00.000Z"
+    },
+    {
+      "id": "act-057",
+      "deal": "deal-bayview",
+      "description": "Pipeline status changed from quoting to negotiating",
+      "old_value": "quoting",
+      "new_value": "negotiating",
+      "reason": "Sponsor engaged on structure and pricing",
+      "performed_at": "2026-06-07T16:16:00.000Z"
+    },
+    {
+      "id": "act-058",
+      "deal": "deal-union",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-16T17:30:00.000Z"
+    },
+    {
+      "id": "act-059",
+      "deal": "deal-silverline",
+      "description": "Pipeline status changed from screening to dead",
+      "old_value": "screening",
+      "new_value": "dead",
+      "reason": "Opportunity no longer meets current investment criteria",
+      "performed_at": "2026-06-14T17:30:00.000Z"
+    },
+    {
+      "id": "act-060",
+      "deal": "deal-silverline",
+      "description": "Pipeline status changed from sourced to screening",
+      "old_value": "sourced",
+      "new_value": "screening",
+      "reason": "Cleared initial fit screen",
+      "performed_at": "2026-06-09T16:53:00.000Z"
+    },
+    {
+      "id": "act-061",
+      "deal": "deal-atlas",
+      "description": "Pipeline status changed from quoting to on hold",
+      "old_value": "quoting",
+      "new_value": "on_hold",
+      "reason": "Sponsor requested a pause while updating materials",
+      "performed_at": "2026-06-13T17:30:00.000Z"
+    },
+    {
+      "id": "act-062",
+      "deal": "deal-atlas",
+      "description": "Pipeline status changed from screening to quoting",
+      "old_value": "screening",
+      "new_value": "quoting",
+      "reason": "Credit team issued terms",
+      "performed_at": "2026-06-08T16:53:00.000Z"
     }
   ]
 }

@@ -38,6 +38,12 @@ cp .env.example .env    # edit values
 
 `setup.sh --with-db` seeds a superuser when `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_EMAIL` / `DJANGO_SUPERUSER_PASSWORD` are set in `.env`.
 
+## Demo / Live data
+
+The frontend has a Demo/Live toggle in the header and on the login page. Demo uses the in-memory mock API seeded from `shared/demo_seed.json`; Live uses the Django `/api/` endpoints through `frontend/src/config/api.ts`.
+
+`frontend/.env.example` documents `VITE_USE_MOCKS`, which only sets the default mode for a fresh browser. The toggle persists the chosen mode in `localStorage` and clears the local browser session when switching.
+
 ## Local MCP server
 
 MRJ includes a read-only MCP server for local Codex/admin deal queries. It runs over stdio and requires an active staff or superuser account.

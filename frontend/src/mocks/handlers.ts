@@ -25,6 +25,7 @@ import {
   PROPERTIES,
   SPONSORS,
 } from './fixtures';
+import { PIPELINE_TRANSITIONS } from './pipeline';
 
 const deals = buildInitialDeals();
 const sponsors = [...SPONSORS];
@@ -33,20 +34,6 @@ const funds = [...FUNDS];
 const properties = [...PROPERTIES];
 const documents = [...DOCUMENTS];
 const activity = [...ACTIVITY];
-
-const PIPELINE_TRANSITIONS: Record<PipelineStatus, PipelineStatus[]> = {
-  sourced: ['screening', 'on_hold', 'dead'],
-  screening: ['quoting', 'on_hold', 'dead'],
-  quoting: ['negotiating', 'on_hold', 'dead'],
-  negotiating: ['signed', 'quoting', 'on_hold', 'dead'],
-  signed: ['closing', 'quoting', 'on_hold', 'dead'],
-  closing: ['closed', 'negotiating', 'quoting', 'on_hold', 'dead'],
-  closed: ['servicing'],
-  servicing: ['exited'],
-  on_hold: [],
-  dead: [],
-  exited: [],
-};
 
 const SYNDICATION_TRANSITIONS: Record<SyndicationStatus, SyndicationStatus[]> = {
   not_started: ['raising'],
