@@ -1,9 +1,8 @@
 import {
   ACCESS_TOKEN_KEY,
-  LIVE_ACCESS_TOKEN_KEY,
-  LIVE_REFRESH_TOKEN_KEY,
   MOCK_ACCESS_TOKEN,
   MOCK_REFRESH_TOKEN,
+  preserveLiveAuthTokens,
   REFRESH_TOKEN_KEY,
 } from '@/config/authKeys';
 import { USE_MOCKS } from '@/config/flags';
@@ -15,16 +14,7 @@ export function ensureMockSession(): void {
 
   const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-  const hasLiveTokens =
-    accessToken &&
-    refreshToken &&
-    accessToken !== MOCK_ACCESS_TOKEN &&
-    refreshToken !== MOCK_REFRESH_TOKEN;
-
-  if (hasLiveTokens) {
-    localStorage.setItem(LIVE_ACCESS_TOKEN_KEY, accessToken);
-    localStorage.setItem(LIVE_REFRESH_TOKEN_KEY, refreshToken);
-  }
+  preserveLiveAuthTokens();
 
   if (accessToken !== MOCK_ACCESS_TOKEN || refreshToken !== MOCK_REFRESH_TOKEN) {
     localStorage.setItem(ACCESS_TOKEN_KEY, MOCK_ACCESS_TOKEN);

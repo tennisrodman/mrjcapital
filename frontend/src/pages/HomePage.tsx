@@ -20,7 +20,7 @@ const pipelineStageGroups: { stage: string; statuses: PipelineStatus[]; tone: st
   { stage: 'Underwriting', statuses: ['quoting', 'negotiating', 'signed'], tone: 'bg-[var(--brass)]/35' },
   { stage: 'Closing', statuses: ['closing'], tone: 'bg-[var(--brass)]/60' },
   { stage: 'Funded', statuses: FUNDED_STATUSES, tone: 'bg-[var(--brass)]' },
-] as const;
+];
 
 const HomePage = () => {
   const { user } = useContext(AuthContext);

@@ -104,12 +104,25 @@ function buildSummary(query: URLSearchParams) {
 
 let dealPropertyPk = 5000;
 
+function isNonArrayRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === 'object' && input !== null && !Array.isArray(input);
+}
+
+function isEmptyRecord(input: Record<string, unknown>): boolean {
+  return Object.keys(input).length === 0;
+}
+
 function resolveSponsor(input: unknown): Sponsor {
   if (typeof input === 'string') {
     const existing = sponsors.find((s) => s.id === input);
     if (!existing) badRequest('sponsor', 'Selected sponsor no longer exists.');
     return existing!;
   }
+
+  if (!isNonArrayRecord(input) || isEmptyRecord(input)) {
+    badRequest('sponsor', 'Provide an id or fields to create this relationship.');
+  }
+
   const data = input as Partial<Sponsor>;
   const created: Sponsor = {
     id: newId('sp'),
@@ -128,6 +141,13 @@ function resolveSponsor(input: unknown): Sponsor {
 function resolveBroker(input: unknown): Broker | null {
   if (input === null || input === undefined || input === '') return null;
   if (typeof input === 'string') return brokers.find((b) => b.id === input) ?? null;
+
+  if (!isNonArrayRecord(input)) {
+    badRequest('broker', 'Provide an id or fields to create this relationship.');
+  }
+
+  if (isEmptyRecord(input)) return null;
+
   const data = input as Partial<Broker>;
   const created: Broker = {
     id: newId('bk'),

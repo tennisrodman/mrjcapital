@@ -4,6 +4,7 @@ import {
   LIVE_REFRESH_TOKEN_KEY,
   MOCK_ACCESS_TOKEN,
   MOCK_REFRESH_TOKEN,
+  preserveLiveAuthTokens,
   REFRESH_TOKEN_KEY,
 } from './authKeys';
 
@@ -24,19 +25,7 @@ export const USE_MOCKS = DATA_MODE === 'mock';
 
 export function setDataMode(mode: DataMode): void {
   if (typeof localStorage !== 'undefined') {
-    const currentAccessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-    const currentRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    const hasLiveTokens =
-      currentAccessToken &&
-      currentRefreshToken &&
-      currentAccessToken !== MOCK_ACCESS_TOKEN &&
-      currentRefreshToken !== MOCK_REFRESH_TOKEN;
-
-    if (hasLiveTokens) {
-      localStorage.setItem(LIVE_ACCESS_TOKEN_KEY, currentAccessToken);
-      localStorage.setItem(LIVE_REFRESH_TOKEN_KEY, currentRefreshToken);
-    }
-
+    preserveLiveAuthTokens();
     localStorage.setItem(DATA_MODE_KEY, mode);
 
     if (mode === 'mock') {
