@@ -3,7 +3,7 @@ import posixpath
 import re
 from urllib.parse import urlparse
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from api.models import (
@@ -119,8 +119,66 @@ class FundSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'status', 'details']
 
 
+class InlineCreateValue:
+    def __init__(self, serializer=None, instance=None):
+        self.serializer = serializer
+        self.instance = instance
+
+    def save(self):
+        if self.instance is not None:
+            return self.instance
+        return self.serializer.save()
+
+    def matches(self, instance):
+        if instance is None:
+            return False
+        if self.instance is not None and self.instance != instance:
+            return False
+        if self.serializer is None:
+            return self.instance == instance
+        for field_name, value in self.serializer.validated_data.items():
+            if getattr(instance, field_name) != value:
+                return False
+        return True
+
+
+class InlineCreateRelatedField(serializers.PrimaryKeyRelatedField):
+    def __init__(self, *args, serializer_class=None, **kwargs):
+        if serializer_class is None:
+            raise TypeError('serializer_class is required.')
+        self.serializer_class = serializer_class
+        super().__init__(*args, **kwargs)
+
+    def to_internal_value(self, data):
+        if data == '' and self.allow_null:
+            return None
+
+        if isinstance(data, dict):
+            instance = None
+            payload = data.copy()
+            object_id = payload.pop('id', None)
+            if object_id not in (None, ''):
+                instance = super().to_internal_value(object_id)
+                if payload:
+                    raise serializers.ValidationError(
+                        'Relationship fields cannot be edited through this endpoint; send the id only.',
+                    )
+                return InlineCreateValue(instance=instance)
+
+            if not payload and self.allow_null:
+                return None
+
+            if not payload:
+                raise serializers.ValidationError('Provide an id or fields to create this relationship.')
+
+            serializer = self.serializer_class(data=payload)
+            serializer.is_valid(raise_exception=True)
+            return InlineCreateValue(serializer=serializer)
+        return super().to_internal_value(data)
+
+
 class PropertySerializer(serializers.ModelSerializer):
-    address_normalized = serializers.CharField(required=False, allow_blank=True)
+    address_normalized = serializers.CharField(read_only=True)
 
     class Meta:
         model = Property
@@ -143,15 +201,16 @@ class PropertySerializer(serializers.ModelSerializer):
         zip_code = attrs.get('zip') or getattr(self.instance, 'zip', '')
         if 'state' in attrs:
             attrs['state'] = attrs['state'].upper()
-        if not attrs.get('address_normalized'):
-            attrs['address_normalized'] = normalize_address(address, city, state, zip_code)
+            state = attrs['state']
+        attrs['address_normalized'] = normalize_address(address, city, state, zip_code)
         existing = Property.objects.filter(address_normalized=attrs['address_normalized'])
         if self.instance:
             existing = existing.exclude(pk=self.instance.pk)
-        if existing.exists():
+        existing_property = existing.first()
+        if existing_property:
             raise serializers.ValidationError({
                 'address_normalized': 'A property with this normalized address already exists.',
-                'existing_property': str(existing.first().pk),
+                'existing_property': str(existing_property.pk),
             })
         return attrs
 
@@ -193,6 +252,136 @@ class DealPropertySummarySerializer(serializers.ModelSerializer):
         fields = ['id', 'property', 'is_primary']
 
 
+class DealPropertiesField(serializers.Field):
+    default_error_messages = {
+        'not_a_list': 'Expected a list of property ids or property objects.',
+        'empty': 'Add at least one property.',
+        'duplicate': 'Duplicate property in request.',
+    }
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.pk_field = serializers.PrimaryKeyRelatedField(queryset=Property.objects.all())
+
+    def to_internal_value(self, data):
+        if not isinstance(data, list):
+            self.fail('not_a_list')
+        if not data:
+            self.fail('empty')
+
+        errors = {}
+        properties = []
+        seen_property_ids = set()
+        seen_property_addresses = set()
+        requested_property_ids = self._requested_property_ids(data)
+
+        for index, item in enumerate(data):
+            try:
+                if isinstance(item, dict):
+                    payload = item.copy()
+                    object_id = payload.pop('id', None)
+                    if object_id not in (None, ''):
+                        property_obj = self.pk_field.to_internal_value(object_id)
+                        if payload:
+                            errors[index] = self._index_error(
+                                'Property fields cannot be edited through this endpoint; send the id only.',
+                            )
+                            continue
+                        self._append_existing_property(
+                            properties,
+                            property_obj,
+                            seen_property_ids,
+                            seen_property_addresses,
+                            errors,
+                            index,
+                        )
+                        continue
+
+                    serializer = PropertySerializer(data=item)
+                    try:
+                        serializer.is_valid(raise_exception=True)
+                    except serializers.ValidationError as exc:
+                        existing_property_id = self._existing_property_id(exc.detail)
+                        if (
+                            existing_property_id
+                            and (
+                                existing_property_id in seen_property_ids
+                                or existing_property_id in requested_property_ids
+                            )
+                        ):
+                            errors[index] = self._index_error(self.error_messages['duplicate'])
+                            continue
+                        raise
+                    address_normalized = serializer.validated_data.get('address_normalized')
+                    if address_normalized in seen_property_addresses:
+                        errors[index] = self._index_error(self.error_messages['duplicate'])
+                    else:
+                        seen_property_addresses.add(address_normalized)
+                        properties.append(InlineCreateValue(serializer))
+                    continue
+
+                property_obj = self.pk_field.to_internal_value(item)
+                self._append_existing_property(
+                    properties,
+                    property_obj,
+                    seen_property_ids,
+                    seen_property_addresses,
+                    errors,
+                    index,
+                )
+            except serializers.ValidationError as exc:
+                errors[index] = self._index_error(exc.detail)
+
+        if errors:
+            raise serializers.ValidationError(errors)
+        return properties
+
+    def _append_existing_property(
+        self,
+        properties,
+        property_obj,
+        seen_property_ids,
+        seen_property_addresses,
+        errors,
+        index,
+    ):
+        property_id = str(property_obj.pk)
+        if property_id in seen_property_ids or property_obj.address_normalized in seen_property_addresses:
+            errors[index] = self._index_error(self.error_messages['duplicate'])
+            return
+        seen_property_ids.add(property_id)
+        seen_property_addresses.add(property_obj.address_normalized)
+        properties.append(property_obj)
+
+    def _index_error(self, detail):
+        if isinstance(detail, dict):
+            return detail
+        if not isinstance(detail, list):
+            detail = [detail]
+        return {'non_field_errors': detail}
+
+    def _existing_property_id(self, detail):
+        if not isinstance(detail, dict) or 'existing_property' not in detail:
+            return None
+        value = detail['existing_property']
+        if isinstance(value, list):
+            value = value[0]
+        return str(value)
+
+    def _requested_property_ids(self, data):
+        property_ids = set()
+        for item in data:
+            object_id = item.get('id') if isinstance(item, dict) else item
+            if object_id not in (None, ''):
+                property_ids.add(str(object_id))
+        return property_ids
+
+    def to_representation(self, value):
+        if hasattr(value, 'all'):
+            value = value.all()
+        return DealPropertySummarySerializer(value, many=True, context=self.context).data
+
+
 class AnalystSummarySerializer(serializers.Serializer):
     """Minimal, read-only view of the assigned analyst (no PII beyond username)."""
 
@@ -202,7 +391,14 @@ class AnalystSummarySerializer(serializers.Serializer):
 
 class DealSerializer(serializers.ModelSerializer):
     investment_category = serializers.CharField(read_only=True)
-    properties = DealPropertySummarySerializer(source='deal_properties', many=True, read_only=True)
+    sponsor = InlineCreateRelatedField(queryset=Sponsor.objects.all(), serializer_class=SponsorSerializer)
+    broker = InlineCreateRelatedField(
+        queryset=Broker.objects.all(),
+        serializer_class=BrokerSerializer,
+        required=False,
+        allow_null=True,
+    )
+    properties = DealPropertiesField(source='deal_properties', required=False)
     property_ids = serializers.PrimaryKeyRelatedField(
         queryset=Property.objects.all(),
         many=True,
@@ -251,45 +447,142 @@ class DealSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
     def validate_property_ids(self, value):
-        if not value:
-            raise serializers.ValidationError('property_ids must include at least one property when provided.')
-        property_ids = [property_obj.pk for property_obj in value]
-        if len(property_ids) != len(set(property_ids)):
-            raise serializers.ValidationError('property_ids cannot contain duplicates.')
         return value
 
     def validate(self, attrs):
+        if 'property_ids' in attrs and 'deal_properties' in attrs:
+            raise serializers.ValidationError({
+                'properties': 'Use either properties or property_ids, not both.',
+            })
+        if not self.instance and 'property_ids' not in attrs and 'deal_properties' not in attrs:
+            raise serializers.ValidationError({'properties': 'Add at least one property.'})
+        if 'property_ids' in attrs:
+            self._validate_property_selection(attrs['property_ids'])
         if self.instance:
-            for field_name in ['sponsor', 'broker', 'fund']:
-                if field_name in attrs and attrs[field_name] != getattr(self.instance, field_name):
-                    raise serializers.ValidationError({field_name: 'This relationship cannot be changed through this endpoint.'})
+            self._validate_immutable_relationships(attrs)
         return attrs
+
+    def _validate_immutable_relationships(self, attrs):
+        for field_name in ['sponsor', 'broker']:
+            if field_name not in attrs:
+                continue
+            current_value = getattr(self.instance, field_name)
+            incoming_value = attrs[field_name]
+            if (
+                isinstance(incoming_value, InlineCreateValue)
+                and incoming_value.serializer is not None
+            ):
+                raise serializers.ValidationError({
+                    field_name: 'Relationship fields cannot be edited through this endpoint; send the id only.',
+                })
+            if (
+                isinstance(incoming_value, InlineCreateValue)
+                and incoming_value.matches(current_value)
+            ):
+                attrs[field_name] = current_value
+                continue
+            if incoming_value != current_value:
+                raise serializers.ValidationError({
+                    field_name: 'This relationship cannot be changed through this endpoint.',
+                })
+
+        if 'fund' in attrs:
+            incoming_fund = attrs['fund']
+            if incoming_fund is not None and incoming_fund != self.instance.fund:
+                raise serializers.ValidationError({
+                    'fund': 'This relationship cannot be changed through this endpoint.',
+                })
+
+    def _validate_property_selection(self, properties):
+        if not properties:
+            raise serializers.ValidationError({'properties': 'Add at least one property.'})
+
+        errors = {}
+        seen_property_ids = set()
+        seen_property_addresses = set()
+        for index, property_obj in enumerate(properties):
+            property_id = str(property_obj.pk)
+            if property_id in seen_property_ids or property_obj.address_normalized in seen_property_addresses:
+                errors[index] = {'non_field_errors': ['Duplicate property in request.']}
+            seen_property_ids.add(property_id)
+            seen_property_addresses.add(property_obj.address_normalized)
+        if errors:
+            raise serializers.ValidationError({'properties': errors})
 
     def create(self, validated_data):
         with transaction.atomic():
-            property_ids = validated_data.pop('property_ids', [])
+            properties = self._pop_properties(validated_data)
+            sponsor = validated_data.get('sponsor')
+            if sponsor is None:
+                raise serializers.ValidationError({'sponsor': 'This field is required.'})
+            validated_data['sponsor'] = self._save_inline_create(sponsor)
+            if 'broker' in validated_data:
+                validated_data['broker'] = self._save_inline_create(validated_data['broker'])
             deal = super().create(validated_data)
-            self._replace_properties(deal, property_ids)
+            self._replace_properties(deal, properties)
             return deal
 
     def update(self, instance, validated_data):
         with transaction.atomic():
-            has_property_ids = 'property_ids' in validated_data
-            property_ids = validated_data.pop('property_ids', [])
+            has_properties = 'property_ids' in validated_data or 'deal_properties' in validated_data
+            properties = self._pop_properties(validated_data)
             deal = super().update(instance, validated_data)
-            if has_property_ids:
-                self._replace_properties(deal, property_ids)
+            if has_properties:
+                self._replace_properties(deal, properties)
             return deal
 
+    def _pop_properties(self, validated_data):
+        properties = validated_data.pop('deal_properties', None)
+        property_ids = validated_data.pop('property_ids', None)
+        return [
+            self._save_inline_create(value)
+            for value in (properties if properties is not None else property_ids or [])
+        ]
+
+    def _save_inline_create(self, value):
+        if isinstance(value, InlineCreateValue):
+            return value.save()
+        return value
+
     def _replace_properties(self, deal, properties):
-        with transaction.atomic():
-            DealProperty.objects.filter(deal=deal).delete()
-            if not properties:
-                return
-            DealProperty.objects.bulk_create([
-                DealProperty(deal=deal, property=property_obj, is_primary=index == 0)
-                for index, property_obj in enumerate(properties)
-            ])
+        try:
+            with transaction.atomic():
+                DealProperty.objects.filter(deal=deal).delete()
+                if not properties:
+                    self._clear_prefetched_properties(deal)
+                    return
+                DealProperty.objects.bulk_create([
+                    DealProperty(deal=deal, property=property_obj, is_primary=index == 0)
+                    for index, property_obj in enumerate(properties)
+                ])
+                self._clear_prefetched_properties(deal)
+        except IntegrityError as exc:
+            if not self._is_deal_property_integrity_conflict(exc):
+                raise
+            raise serializers.ValidationError({
+                'properties': 'Could not attach properties to the deal. Please retry.',
+            }) from exc
+
+    def _is_deal_property_integrity_conflict(self, exc):
+        constraint_name = ''
+        cause = getattr(exc, '__cause__', None)
+        cause_diag = getattr(cause, 'diag', None)
+        if cause_diag is not None:
+            constraint_name = getattr(cause_diag, 'constraint_name', '') or ''
+        constraint_name = constraint_name.lower()
+
+        conflict_markers = {
+            'unique_deal_property',
+            'unique_primary_property_per_deal',
+            'api_dealproperty.deal_id, api_dealproperty.property_id',
+            'api_dealproperty.deal_id',
+        }
+        message = ' '.join(str(arg) for arg in exc.args).lower()
+        return any(marker in constraint_name or marker in message for marker in conflict_markers)
+
+    def _clear_prefetched_properties(self, deal):
+        if getattr(deal, '_prefetched_objects_cache', None):
+            deal._prefetched_objects_cache.pop('deal_properties', None)
 
 
 class PipelineTransitionSerializer(serializers.Serializer):

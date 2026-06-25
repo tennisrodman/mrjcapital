@@ -17,7 +17,7 @@ from rest_framework.test import APITestCase
 
 from api.admin import ActivityLogAdmin, SponsorAdmin
 from api.fields import EncryptedTextField, _fernet
-from api.models import ActivityActionType, ActivityLog, Deal, Document, PipelineStatus, Property, Sponsor
+from api.models import ActivityActionType, ActivityLog, Broker, Deal, Document, Fund, PipelineStatus, Property, Sponsor
 from api.services import normalize_address
 
 
@@ -202,6 +202,7 @@ class DealSpineApiTests(APITestCase):
                 'assigned_analyst': str(self.other_user.pk),
                 'source_channel': 'direct',
                 'requested_amount': '2500000.00',
+                'property_ids': [str(self.property.pk)],
             },
             format='json',
         )
@@ -249,6 +250,401 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(deal.deal_properties.get().property, self.property)
         self.assertEqual(resp.data['investment_category'], 'debt')
 
+    def test_create_deal_requires_properties(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Propertyless Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data['properties'][0], 'Add at least one property.')
+        self.assertFalse(Deal.objects.filter(name='Propertyless Deal').exists())
+
+    def test_create_deal_accepts_inline_create_page_payload(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'AR Global Bridge',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': {
+                    'entity_name': 'AR Global LLC',
+                    'entity_type': 'llc',
+                    'primary_contact_name': 'Boris Korotkin',
+                    'primary_contact_email': 'boris@arglobal.com',
+                    'primary_contact_phone': '222-222-2222',
+                    'relationship_rating': 'new',
+                },
+                'broker': {
+                    'company_name': 'Origin Capital',
+                    'contact_name': 'Olivia Broker',
+                    'email': 'olivia@example.com',
+                    'phone': '555-333-4444',
+                },
+                'source_channel': 'direct',
+                'source_date': '2026-06-24',
+                'requested_amount': '2500000.00',
+                'fund': None,
+                'properties': [
+                    str(self.property.pk),
+                    {
+                        'address': '456 Oak Ave',
+                        'city': 'New York',
+                        'state': 'ny',
+                        'zip': '10001',
+                        'property_type': 'office',
+                        'msa': 'New York-Newark-Jersey City',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.select_related('sponsor', 'broker').get(pk=resp.data['id'])
+        self.assertEqual(deal.sponsor.entity_name, 'AR Global LLC')
+        self.assertEqual(deal.broker.company_name, 'Origin Capital')
+        self.assertEqual(deal.assigned_analyst, self.user)
+        self.assertEqual(str(resp.data['sponsor']), str(deal.sponsor_id))
+        self.assertEqual(resp.data['sponsor_detail']['entity_name'], 'AR Global LLC')
+        self.assertEqual(str(resp.data['broker']), str(deal.broker_id))
+        self.assertEqual(resp.data['broker_detail']['company_name'], 'Origin Capital')
+        self.assertEqual(str(resp.data['properties'][0]['property']['id']), str(self.property.pk))
+        self.assertTrue(resp.data['properties'][0]['is_primary'])
+
+        new_property = Property.objects.get(address='456 Oak Ave')
+        self.assertEqual(new_property.state, 'NY')
+        self.assertEqual(deal.deal_properties.count(), 2)
+        self.assertTrue(deal.deal_properties.filter(property=new_property, is_primary=False).exists())
+
+    def test_create_deal_treats_empty_broker_object_as_no_broker(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Direct No Broker Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'broker': {},
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'property_ids': [str(self.property.pk)],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        self.assertIsNone(deal.broker)
+        self.assertIsNone(resp.data['broker'])
+
+    def test_create_deal_treats_blank_broker_as_no_broker(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Blank Broker Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'broker': '',
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'property_ids': [str(self.property.pk)],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        self.assertIsNone(deal.broker)
+        self.assertIsNone(resp.data['broker'])
+
+    def test_create_deal_rejects_empty_sponsor_object(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Empty Sponsor Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': {},
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'property_ids': [str(self.property.pk)],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data['sponsor'][0], 'Provide an id or fields to create this relationship.')
+        self.assertFalse(Deal.objects.filter(name='Empty Sponsor Deal').exists())
+
+    def test_inline_deal_create_validation_does_not_persist_related_records(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Invalid Inline Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': {
+                    'entity_name': 'Should Not Persist LLC',
+                    'entity_type': 'llc',
+                    'primary_contact_name': 'No Persist',
+                    'primary_contact_email': 'nopersist@example.com',
+                    'relationship_rating': 'new',
+                },
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    {
+                        'city': 'New York',
+                        'state': 'NY',
+                        'zip': '10001',
+                        'property_type': 'office',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('properties', resp.data)
+        self.assertFalse(Sponsor.objects.filter(entity_name='Should Not Persist LLC').exists())
+        self.assertFalse(Deal.objects.filter(name='Invalid Inline Deal').exists())
+
+    def test_inline_deal_create_rolls_back_related_records_if_linking_conflicts(self):
+        with patch(
+            'api.serializers.DealProperty.objects.bulk_create',
+            side_effect=IntegrityError(
+                'UNIQUE constraint failed: api_dealproperty.deal_id, api_dealproperty.property_id',
+            ),
+        ):
+            resp = self.client.post(
+                '/api/deals/',
+                {
+                    'name': 'Rollback Inline Deal',
+                    'investment_type': 'whole_loan_bridge',
+                    'sponsor': {
+                        'entity_name': 'Rollback Sponsor LLC',
+                        'entity_type': 'llc',
+                        'primary_contact_name': 'Rollback Sponsor',
+                        'primary_contact_email': 'rollback@example.com',
+                        'relationship_rating': 'new',
+                    },
+                    'source_channel': 'direct',
+                    'requested_amount': '2500000.00',
+                    'properties': [str(self.property.pk)],
+                },
+                format='json',
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('properties', resp.data)
+        self.assertFalse(Sponsor.objects.filter(entity_name='Rollback Sponsor LLC').exists())
+        self.assertFalse(Deal.objects.filter(name='Rollback Inline Deal').exists())
+
+    def test_deal_patch_accepts_unchanged_nested_relationship_ids(self):
+        broker = Broker.objects.create(
+            company_name='Existing Broker',
+            contact_name='Blake Broker',
+            email='blake@example.com',
+            phone='555-333-4444',
+        )
+        deal = self.create_deal()
+        deal.broker = broker
+        deal.save(update_fields=['broker', 'updated_at'])
+        deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {
+                'name': 'Renamed Deal',
+                'sponsor': {'id': str(self.sponsor.pk)},
+                'broker': {'id': str(broker.pk)},
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        deal.refresh_from_db()
+        self.assertEqual(deal.name, 'Renamed Deal')
+        self.assertEqual(deal.sponsor, self.sponsor)
+        self.assertEqual(deal.broker, broker)
+        self.assertEqual(Sponsor.objects.filter(entity_name=self.sponsor.entity_name).count(), 1)
+        self.assertEqual(Broker.objects.filter(company_name=broker.company_name).count(), 1)
+
+    def test_deal_patch_can_detach_fund(self):
+        fund = Fund.objects.create(name='MRJ Capital Fund I', status='open')
+        deal = self.create_deal()
+        deal.fund = fund
+        deal.save(update_fields=['fund', 'updated_at'])
+        deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {'fund': None},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        deal.refresh_from_db()
+        self.assertIsNone(deal.fund)
+        self.assertIsNone(resp.data['fund'])
+        self.assertIsNone(resp.data['fund_detail'])
+
+    def test_deal_patch_rejects_fund_reassignment(self):
+        fund = Fund.objects.create(name='MRJ Capital Fund I', status='open')
+        other_fund = Fund.objects.create(name='MRJ Capital Fund II', status='open')
+        deal = self.create_deal()
+        deal.fund = fund
+        deal.save(update_fields=['fund', 'updated_at'])
+        deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {'fund': str(other_fund.pk)},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            resp.data['fund'][0],
+            'This relationship cannot be changed through this endpoint.',
+        )
+        deal.refresh_from_db()
+        self.assertEqual(deal.fund, fund)
+
+    def test_deal_patch_rejects_nested_relationship_field_edits(self):
+        deal = self.create_deal()
+        deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {
+                'sponsor': {
+                    'id': str(self.sponsor.pk),
+                    'entity_name': self.sponsor.entity_name,
+                },
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            resp.data['sponsor'][0],
+            'Relationship fields cannot be edited through this endpoint; send the id only.',
+        )
+        deal.refresh_from_db()
+        self.assertEqual(deal.sponsor, self.sponsor)
+
+    def test_deal_patch_returns_fresh_properties_after_replacement(self):
+        deal = self.create_deal()
+        deal.deal_properties.create(property=self.property, is_primary=True)
+        replacement = Property.objects.create(
+            address='900 Replacement Rd',
+            city='Burbank',
+            state='CA',
+            zip='91502',
+            address_normalized=normalize_address('900 Replacement Rd', 'Burbank', 'CA', '91502'),
+            property_type='office',
+        )
+
+        resp = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {'property_ids': [str(replacement.pk)]},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data['properties']), 1)
+        self.assertEqual(str(resp.data['properties'][0]['property']['id']), str(replacement.pk))
+        self.assertTrue(resp.data['properties'][0]['is_primary'])
+        self.assertEqual(deal.deal_properties.count(), 1)
+        self.assertTrue(deal.deal_properties.filter(property=replacement, is_primary=True).exists())
+
+    def test_deal_create_reports_duplicate_property_request_consistently(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Duplicate Mixed Property Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    str(self.property.pk),
+                    {
+                        'address': '123 Main Street',
+                        'city': 'Los Angeles',
+                        'state': 'CA',
+                        'zip': '90001',
+                        'property_type': 'multifamily',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data['properties'][1]['non_field_errors'][0], 'Duplicate property in request.')
+        self.assertFalse(Deal.objects.filter(name='Duplicate Mixed Property Deal').exists())
+
+    def test_deal_create_reports_reversed_mixed_duplicate_property_request_consistently(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Reversed Duplicate Mixed Property Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    {
+                        'address': '123 Main Street',
+                        'city': 'Los Angeles',
+                        'state': 'CA',
+                        'zip': '90001',
+                        'property_type': 'multifamily',
+                    },
+                    str(self.property.pk),
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data['properties'][0]['non_field_errors'][0], 'Duplicate property in request.')
+        self.assertFalse(Deal.objects.filter(name='Reversed Duplicate Mixed Property Deal').exists())
+
+    def test_deal_create_rejects_property_id_objects_with_field_edits(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Property Edit Payload Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    {
+                        'id': str(self.property.pk),
+                        'address': '999 Changed St',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            resp.data['properties'][0]['non_field_errors'][0],
+            'Property fields cannot be edited through this endpoint; send the id only.',
+        )
+        self.property.refresh_from_db()
+        self.assertEqual(self.property.address, '123 Main St')
+        self.assertFalse(Deal.objects.filter(name='Property Edit Payload Deal').exists())
+
     def test_deal_rejects_duplicate_property_ids(self):
         resp = self.client.post(
             '/api/deals/',
@@ -264,7 +660,8 @@ class DealSpineApiTests(APITestCase):
         )
 
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('property_ids', resp.data)
+        self.assertIn('properties', resp.data)
+        self.assertEqual(resp.data['properties'][1]['non_field_errors'][0], 'Duplicate property in request.')
         self.assertFalse(Deal.objects.filter(name='Duplicate Property Deal').exists())
 
     def test_deal_rejects_non_positive_requested_amount(self):
@@ -276,6 +673,7 @@ class DealSpineApiTests(APITestCase):
                 'sponsor': str(self.sponsor.pk),
                 'source_channel': 'direct',
                 'requested_amount': '-1.00',
+                'property_ids': [str(self.property.pk)],
             },
             format='json',
         )
@@ -294,10 +692,42 @@ class DealSpineApiTests(APITestCase):
         )
 
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('property_ids', resp.data)
+        self.assertIn('properties', resp.data)
+        self.assertEqual(resp.data['properties'][0], 'Add at least one property.')
         self.assertEqual(deal.deal_properties.count(), 1)
 
     def test_deal_property_replacement_is_atomic_if_bulk_create_fails(self):
+        deal = self.create_deal()
+        deal.deal_properties.create(property=self.property, is_primary=True)
+        replacement = Property.objects.create(
+            address='900 Replacement Rd',
+            city='Burbank',
+            state='CA',
+            zip='91502',
+            address_normalized=normalize_address('900 Replacement Rd', 'Burbank', 'CA', '91502'),
+            property_type='office',
+        )
+
+        with patch(
+            'api.serializers.DealProperty.objects.bulk_create',
+            side_effect=IntegrityError(
+                'UNIQUE constraint failed: api_dealproperty.deal_id, api_dealproperty.property_id',
+            ),
+        ):
+            resp = self.client.patch(
+                f'/api/deals/{deal.pk}/',
+                {'name': 'Changed Deal Name', 'property_ids': [str(replacement.pk)]},
+                format='json',
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('properties', resp.data)
+        deal.refresh_from_db()
+        self.assertEqual(deal.name, '123 Main St Bridge')
+        self.assertEqual(deal.deal_properties.count(), 1)
+        self.assertEqual(deal.deal_properties.get().property, self.property)
+
+    def test_deal_property_replacement_unexpected_integrity_error_is_not_masked(self):
         deal = self.create_deal()
         deal.deal_properties.create(property=self.property, is_primary=True)
         replacement = Property.objects.create(
@@ -661,6 +1091,24 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('address_normalized', resp.data)
         self.assertIn('existing_property', resp.data)
+
+    def test_property_create_ignores_client_supplied_address_normalized_for_dedup(self):
+        resp = self.client.post(
+            '/api/properties/',
+            {
+                'address': '123 Main Street',
+                'city': 'Los Angeles',
+                'state': 'CA',
+                'zip': '90001',
+                'property_type': 'multifamily',
+                'address_normalized': 'client supplied bypass value',
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('address_normalized', resp.data)
+        self.assertEqual(Property.objects.filter(address='123 Main Street').count(), 0)
 
     def test_property_create_integrity_race_returns_400(self):
         with patch('api.viewsets.PropertyViewSet.perform_create', side_effect=IntegrityError('duplicate key')):
