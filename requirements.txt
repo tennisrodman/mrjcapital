@@ -29,6 +29,7 @@ mcp[cli]>=1.28,<2
 # Task queue
 celery==5.6.3
 redis==8.0.0
+boto3==1.35.99
 
 # System
 psutil==7.0.0

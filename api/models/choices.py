@@ -81,6 +81,12 @@ class FundStatus(models.TextChoices):
     CLOSED = 'closed', 'Closed'
 
 
+class DocumentStorageStatus(models.TextChoices):
+    PENDING = 'pending', 'Pending upload'
+    READY = 'ready', 'Ready'
+    FAILED = 'failed', 'Failed'
+
+
 class DocumentCategory(models.TextChoices):
     OFFERING_MEMO = 'offering_memo', 'Offering memo'
     FINANCIALS = 'financials', 'Financials'

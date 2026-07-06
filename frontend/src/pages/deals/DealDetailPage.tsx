@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  Download,
   FileText,
   Landmark,
   Layers,
@@ -15,8 +16,10 @@ import {
   Pencil,
   Phone,
   Star,
+  Upload,
   UserRound,
 } from 'lucide-react';
+import { DocumentUploadDialog } from '@/components/deals/DocumentUploadDialog';
 import { AuthContext } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +28,7 @@ import { InvestmentChip, PipelineBadge, SyndicationBadge } from '@/components/de
 import { TransitionDialog } from '@/components/deals/TransitionDialog';
 import { EmptyState, ErrorState, Spinner } from '@/components/deals/States';
 import { useDeal, useDealActivity, useDealDocuments } from '@/lib/api/deals';
+import { formatFileSize, useDownloadDocument } from '@/lib/api/documents';
 import {
   DOCUMENT_CATEGORY_LABELS,
   INVESTMENT_CATEGORY_LABELS,
@@ -47,6 +51,7 @@ export default function DealDetailPage() {
   const documentsQuery = useDealDocuments(id);
   const activityQuery = useDealActivity(id, isStaff);
   const [openDialog, setOpenDialog] = useState<'pipeline' | 'syndication' | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   if (dealQuery.isLoading) return <Spinner label="Loading deal…" />;
 
@@ -95,6 +100,7 @@ export default function DealDetailPage() {
             documents={documentsQuery.data ?? []}
             isLoading={documentsQuery.isLoading}
             isError={documentsQuery.isError}
+            onUpload={() => setUploadOpen(true)}
           />
         </div>
 
@@ -109,6 +115,8 @@ export default function DealDetailPage() {
           ) : null}
         </aside>
       </div>
+
+      <DocumentUploadDialog deal={deal} open={uploadOpen} onOpenChange={setUploadOpen} />
     </div>
   );
 }
@@ -242,11 +250,14 @@ function DocumentsPanel({
   documents,
   isLoading,
   isError,
+  onUpload,
 }: {
   documents: DealDocument[];
   isLoading: boolean;
   isError: boolean;
+  onUpload: () => void;
 }) {
+  const download = useDownloadDocument();
   const grouped = useMemo(() => {
     const map = new Map<DocumentCategory, DealDocument[]>();
     for (const doc of documents) {
@@ -258,7 +269,16 @@ function DocumentsPanel({
   }, [documents]);
 
   return (
-    <Panel title="Documents" count={documents.length}>
+    <Panel
+      title="Documents"
+      count={documents.length}
+      action={
+        <Button type="button" variant="outline" size="sm" onClick={onUpload}>
+          <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Upload
+        </Button>
+      }
+    >
       {isLoading ? (
         <p className="text-sm text-[var(--slate)]">Loading documents…</p>
       ) : isError ? (
@@ -288,9 +308,20 @@ function DocumentsPanel({
                       </p>
                       <p className="text-xs text-[var(--slate)]">
                         {doc.file_type?.toUpperCase() || 'FILE'}
+                        {doc.file_size_bytes ? ` · ${formatFileSize(doc.file_size_bytes)}` : ''}
                         {doc.expiry_date ? ` · expires ${formatDate(doc.expiry_date)}` : ''}
                       </p>
                     </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={download.isPending}
+                      onClick={() => void download.mutate(doc)}
+                    >
+                      <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      Download
+                    </Button>
                     {doc.is_executed ? (
                       <Badge className="border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]">
                         <CheckCircle2 className="h-3 w-3" strokeWidth={2} />

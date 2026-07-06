@@ -49,8 +49,8 @@ class FundAdmin(admin.ModelAdmin):
 
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ['document_name', 'deal', 'category', 'version', 'uploaded_date', 'is_executed', 'expiry_date']
-    list_filter = ['category', 'is_executed']
+    list_display = ['document_name', 'deal', 'category', 'version', 'storage_status', 'uploaded_date', 'is_executed', 'expiry_date']
+    list_filter = ['category', 'storage_status', 'is_executed']
     search_fields = ['document_name', 'deal__name']
 
 

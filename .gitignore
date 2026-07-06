@@ -31,7 +31,8 @@ frontend/.eslintcache
 .idea/
 .vscode/
 .cursor/
-docs/
+docs/*
+!docs/*.md
 *.swp
 *.swo
 
@@ -43,3 +44,4 @@ docs/
 
 # Test caches
 .pytest_cache/
+tmp/

@@ -1,4 +1,6 @@
 from ipaddress import ip_address
+import logging
+import uuid
 from uuid import UUID
 
 from django.conf import settings
@@ -6,6 +8,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection, IntegrityError, transaction
 from django.db.models import Count, Max, Sum
 from django.db.models.deletion import ProtectedError
+from django.http import HttpResponse
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
@@ -19,6 +22,7 @@ from api.models import (
     Deal,
     DealProperty,
     Document,
+    DocumentStorageStatus,
     Fund,
     PipelineStatus,
     Property,
@@ -29,7 +33,10 @@ from api.serializers import (
     BrokerSerializer,
     DealPropertySerializer,
     DealSerializer,
+    DocumentDownloadSerializer,
     DocumentSerializer,
+    DocumentUploadCompleteSerializer,
+    DocumentUploadIntentSerializer,
     FundSerializer,
     PipelineTransitionSerializer,
     PropertySerializer,
@@ -45,6 +52,17 @@ from api.services import (
     transition_pipeline_status,
     transition_syndication_status,
 )
+from api.services.storage import (
+    PresignedDownload,
+    PresignedUpload,
+    build_document_key,
+    get_document_storage,
+    max_upload_bytes,
+    sanitize_filename,
+    sha256_hex,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class SponsorViewSet(viewsets.ModelViewSet):
@@ -349,6 +367,13 @@ class DocumentViewSet(viewsets.ModelViewSet):
         if not _is_staff_user(self.request.user):
             queryset = queryset.filter(deal__assigned_analyst=self.request.user)
             queryset = _filter_visibility_role(queryset, 'internal')
+        storage_status = self.request.query_params.get('storage_status')
+        if storage_status:
+            if not _is_staff_user(self.request.user):
+                raise PermissionDenied('Only staff may filter by storage_status.')
+            queryset = queryset.filter(storage_status=storage_status)
+        elif self.action == 'list':
+            queryset = queryset.filter(storage_status=DocumentStorageStatus.READY)
         deal_id = self.request.query_params.get('deal')
         if deal_id:
             queryset = queryset.filter(deal=_uuid_filter_value(deal_id, 'deal'))
@@ -362,30 +387,183 @@ class DocumentViewSet(viewsets.ModelViewSet):
             queryset = _filter_visibility_role(queryset, visibility_role)
         return queryset
 
-    def perform_create(self, serializer):
-        uploaded_by = self.request.user if getattr(self.request.user, 'is_authenticated', False) else None
-        deal = serializer.validated_data['deal']
-        if not _can_access_deal(self.request.user, deal):
-            raise PermissionDenied('You cannot add documents to this deal.')
+    def create(self, request, *args, **kwargs):
+        # Documents are created only through the upload-intent flow, which
+        # generates the storage key server-side. Direct POST is not supported.
+        return Response(
+            {'detail': 'Direct document creation is disabled. Use upload-intent.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    def perform_destroy(self, instance):
+        if instance.is_executed and not _is_staff_user(self.request.user):
+            raise PermissionDenied('Only staff may delete executed documents.')
+        storage_key = instance.file_url
+        storage = get_document_storage()
+        if storage_key:
+            storage.delete_object(storage_key)
         with transaction.atomic():
-            next_version = (
-                Document.objects
-                .filter(
-                    deal=deal,
-                    category=serializer.validated_data['category'],
-                    document_name=serializer.validated_data['document_name'],
-                )
-                .aggregate(max_version=Max('version'))['max_version'] or 0
-            ) + 1
-            document = serializer.save(uploaded_by=uploaded_by, version=next_version)
-            ActivityLog.objects.create(
-                deal=document.deal,
-                action_type=ActivityActionType.DOCUMENT_UPLOAD,
-                performed_by=uploaded_by,
-                ip_address=_client_ip(self.request),
-                description=f'Document uploaded: {document.document_name}',
-                metadata={'document_id': str(document.pk), 'category': document.category},
+            instance.delete()
+
+    @action(detail=False, methods=['post'], url_path='upload-intent')
+    def upload_intent(self, request):
+        serializer = DocumentUploadIntentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        deal = data['deal']
+        if not _can_access_deal(request.user, deal):
+            raise PermissionDenied('You cannot add documents to this deal.')
+
+        uploaded_by = request.user if getattr(request.user, 'is_authenticated', False) else None
+        visibility_roles = data.get('visibility_roles') or ['internal']
+        if not _is_staff_user(request.user) and 'internal' not in visibility_roles:
+            visibility_roles = [*visibility_roles, 'internal']
+
+        # Lock the deal row so concurrent uploads allocate distinct versions; the
+        # unique_document_version constraint is the database backstop.
+        with transaction.atomic():
+            Deal.objects.select_for_update().filter(pk=deal.pk).first()
+            next_version = _next_document_version(deal, data['category'], data['document_name'])
+            document_id = uuid.uuid4()
+            storage_key = build_document_key(deal.pk, document_id, next_version, data['document_name'])
+            document = Document.objects.create(
+                pk=document_id,
+                deal=deal,
+                document_name=data['document_name'],
+                category=data['category'],
+                subcategory=data.get('subcategory', ''),
+                version=next_version,
+                file_url=storage_key,
+                file_type=data['file_type'],
+                content_type=data['content_type'],
+                file_size_bytes=data['file_size_bytes'],
+                checksum_sha256=data.get('checksum_sha256', ''),
+                storage_status=DocumentStorageStatus.PENDING,
+                pipeline_stage_at_upload=deal.pipeline_status,
+                uploaded_by=uploaded_by,
+                notes=data.get('notes', ''),
+                expiry_date=data.get('expiry_date'),
+                visibility_roles=visibility_roles,
             )
+        return self._upload_intent_response(request, document)
+
+    def _upload_intent_response(self, request, document):
+        upload_target = _build_upload_target(request, document)
+        return Response(
+            {
+                'document': DocumentSerializer(document).data,
+                'upload_url': upload_target.url,
+                'upload_method': upload_target.method,
+                'upload_headers': upload_target.headers,
+                'expires_in': upload_target.expires_in,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='complete')
+    def complete(self, request, pk=None):
+        document = self.get_object()
+        if document.storage_status != DocumentStorageStatus.PENDING:
+            return Response({'detail': 'Document upload is not pending.'}, status=status.HTTP_409_CONFLICT)
+        if not _can_access_deal(request.user, document.deal):
+            raise PermissionDenied('You cannot complete uploads for this deal.')
+
+        serializer = DocumentUploadCompleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        declared_checksum = serializer.validated_data.get('checksum_sha256') or document.checksum_sha256
+
+        # Verify the object exists and its size matches. We do not re-download the
+        # object from R2 to hash it — for local storage the SHA-256 was already
+        # computed from the received bytes during the blob PUT.
+        storage = get_document_storage()
+        meta = storage.head_object(document.file_url)
+        if meta is None:
+            return Response({'detail': 'Uploaded file was not found in storage.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if document.file_size_bytes is not None and meta.size != document.file_size_bytes:
+            return Response(
+                {'detail': f'Uploaded size {meta.size} does not match expected {document.file_size_bytes}.'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        if (
+            declared_checksum
+            and document.checksum_sha256
+            and document.checksum_sha256.lower() != declared_checksum.lower()
+        ):
+            return Response({'detail': 'Checksum verification failed.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+        with transaction.atomic():
+            document.storage_status = DocumentStorageStatus.READY
+            if declared_checksum and not document.checksum_sha256:
+                document.checksum_sha256 = declared_checksum
+            document.save(update_fields=['storage_status', 'checksum_sha256'])
+            _log_document_upload(request, document)
+
+        return Response(DocumentSerializer(document).data)
+
+    @action(detail=True, methods=['get'], url_path='download')
+    def download(self, request, pk=None):
+        document = self.get_object()
+        if document.storage_status != DocumentStorageStatus.READY:
+            return Response({'detail': 'Document is not ready for download.'}, status=status.HTTP_409_CONFLICT)
+        if not _can_access_deal(request.user, document.deal):
+            raise PermissionDenied('You cannot download documents for this deal.')
+
+        download_target = _build_download_target(request, document)
+        payload = {
+            'download_url': download_target.url,
+            'expires_in': download_target.expires_in,
+            'document_name': document.document_name,
+            'content_type': document.content_type or 'application/octet-stream',
+            'file_size_bytes': document.file_size_bytes,
+        }
+        return Response(DocumentDownloadSerializer(payload).data)
+
+    @action(detail=True, methods=['put', 'get'], url_path='blob')
+    def blob(self, request, pk=None):
+        if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') != 'local':
+            return Response({'detail': 'Direct blob access is only available for local storage.'}, status=status.HTTP_404_NOT_FOUND)
+
+        document = Document.objects.select_related('deal').filter(pk=pk).first()
+        if document is None:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not _can_access_deal(request.user, document.deal):
+            raise PermissionDenied('You cannot access this document blob.')
+
+        storage = get_document_storage()
+        if request.method == 'PUT':
+            if document.storage_status != DocumentStorageStatus.PENDING:
+                return Response({'detail': 'Document upload is not pending.'}, status=status.HTTP_409_CONFLICT)
+            body = request.body
+            if len(body) > max_upload_bytes():
+                return Response({'detail': 'File exceeds maximum upload size.'}, status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+            if document.file_size_bytes is not None and len(body) != document.file_size_bytes:
+                return Response(
+                    {'detail': f'Uploaded size {len(body)} does not match expected {document.file_size_bytes}.'},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            request_content_type = (request.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+            declared_content_type = (document.content_type or '').split(';', 1)[0].strip().lower()
+            if declared_content_type and request_content_type and request_content_type != declared_content_type:
+                return Response(
+                    {'detail': f'Content-Type {request_content_type} does not match expected {declared_content_type}.'},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            content_type = request_content_type or declared_content_type or 'application/octet-stream'
+            storage.write_object(document.file_url, body, content_type)
+            document.checksum_sha256 = sha256_hex(body)
+            document.save(update_fields=['checksum_sha256'])
+            return Response({'detail': 'Upload received.'}, status=status.HTTP_200_OK)
+
+        if document.storage_status != DocumentStorageStatus.READY:
+            return Response({'detail': 'Document is not ready for download.'}, status=status.HTTP_409_CONFLICT)
+        if not _is_staff_user(request.user):
+            visible = _filter_visibility_role(Document.objects.filter(pk=document.pk), 'internal')
+            if not visible.exists():
+                raise PermissionDenied('You cannot download this document.')
+        body, meta = storage.read_object(document.file_url)
+        response = HttpResponse(body, content_type=document.content_type or meta.content_type)
+        response['Content-Disposition'] = f'attachment; filename="{_download_filename(document)}"'
+        return response
 
 
 class ActivityLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -471,6 +649,65 @@ def _filter_visibility_role(queryset, visibility_role):
         return queryset.filter(visibility_roles__contains=[visibility_role])
     matching_ids = [document.pk for document in queryset if visibility_role in (document.visibility_roles or [])]
     return queryset.filter(pk__in=matching_ids)
+
+
+def _next_document_version(deal, category, document_name):
+    return (
+        Document.objects.filter(
+            deal=deal,
+            category=category,
+            document_name=document_name,
+        ).aggregate(max_version=Max('version'))['max_version'] or 0
+    ) + 1
+
+
+def _log_document_upload(request, document):
+    performed_by = request.user if getattr(request.user, 'is_authenticated', False) else document.uploaded_by
+    ActivityLog.objects.create(
+        deal=document.deal,
+        action_type=ActivityActionType.DOCUMENT_UPLOAD,
+        performed_by=performed_by,
+        ip_address=_client_ip(request),
+        description=f'Document uploaded: {document.document_name} v{document.version}',
+        metadata={
+            'document_id': str(document.pk),
+            'category': document.category,
+            'file_size_bytes': document.file_size_bytes,
+            'storage_key': document.file_url,
+        },
+    )
+
+
+def _build_upload_target(request, document) -> PresignedUpload:
+    content_type = document.content_type or 'application/octet-stream'
+    if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'local':
+        return PresignedUpload(
+            url=request.build_absolute_uri(f'/api/documents/{document.pk}/blob/'),
+            method='PUT',
+            headers={'Content-Type': content_type},
+            expires_in=0,
+        )
+    return get_document_storage().presign_upload(document.file_url, content_type)
+
+
+def _download_filename(document) -> str:
+    """Filename for Content-Disposition, appending the file extension only when
+    the document name does not already carry it (avoids `report.pdf.pdf`)."""
+    name = sanitize_filename(document.document_name)
+    ext = (document.file_type or '').lower().lstrip('.')
+    if ext and not name.lower().endswith(f'.{ext}'):
+        name = f'{name}.{ext}'
+    return name
+
+
+def _build_download_target(request, document) -> PresignedDownload:
+    content_type = document.content_type or 'application/octet-stream'
+    if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'local':
+        return PresignedDownload(
+            url=request.build_absolute_uri(f'/api/documents/{document.pk}/blob/'),
+            expires_in=0,
+        )
+    return get_document_storage().presign_download(document.file_url, _download_filename(document), content_type)
 
 
 def _django_validation_response(exc):

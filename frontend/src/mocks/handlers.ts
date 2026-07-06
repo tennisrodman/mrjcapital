@@ -7,6 +7,7 @@ import type {
   ActivityLogEntry,
   Broker,
   Deal,
+  DealDocument,
   DealPropertySummary,
   Fund,
   InvestmentType,
@@ -291,6 +292,80 @@ function transitionSyndication(deal: Deal, to: SyndicationStatus, reason: string
   return deal;
 }
 
+function findDocument(id: string): DealDocument {
+  const document = documents.find((d) => d.id === id);
+  if (!document) throw new ApiError('Not found.', 404, { detail: 'Not found.' });
+  return document;
+}
+
+function nextDocumentVersion(dealId: string, category: string, documentName: string): number {
+  const maxVersion = documents
+    .filter((d) => d.deal === dealId && d.category === category && d.document_name === documentName)
+    .reduce((max, d) => Math.max(max, d.version), 0);
+  return maxVersion + 1;
+}
+
+function createUploadIntent(body: Record<string, unknown>): unknown {
+  const dealId = String(body.deal ?? '');
+  findDeal(dealId);
+  const documentName = String(body.document_name ?? '');
+  const category = String(body.category ?? 'other');
+  const fileType = String(body.file_type ?? 'pdf');
+  const version = nextDocumentVersion(dealId, category, documentName);
+  const id = newId('doc');
+  const document: DealDocument = {
+    id,
+    deal: dealId,
+    document_name: documentName,
+    category: category as DealDocument['category'],
+    subcategory: String(body.subcategory ?? ''),
+    version,
+    file_url: `deals/${dealId}/${id}/v${version}/${documentName}.${fileType}`,
+    file_type: fileType,
+    content_type: String(body.content_type ?? ''),
+    file_size_bytes: Number(body.file_size_bytes ?? 0),
+    checksum_sha256: '',
+    storage_status: 'pending',
+    pipeline_stage_at_upload: null,
+    uploaded_by: 1,
+    uploaded_by_username: 'tchen',
+    uploaded_date: nowIso(),
+    is_executed: false,
+    expiry_date: null,
+    notes: String(body.notes ?? ''),
+    visibility_roles: (body.visibility_roles as string[]) ?? ['internal'],
+    details: {},
+  };
+  documents.push(document);
+  return {
+    document,
+    upload_url: `/api/documents/${id}/blob/`,
+    upload_method: 'PUT',
+    upload_headers: { 'Content-Type': document.content_type || 'application/octet-stream' },
+    expires_in: 3600,
+  };
+}
+
+function completeUpload(documentId: string): DealDocument {
+  const document = findDocument(documentId);
+  document.storage_status = 'ready';
+  return document;
+}
+
+function downloadDocument(documentId: string) {
+  const document = findDocument(documentId);
+  if (document.storage_status !== 'ready') {
+    throw new ApiError('Document is not ready for download.', 409, { detail: 'Not ready.' });
+  }
+  return {
+    download_url: `/api/documents/${document.id}/blob/`,
+    expires_in: 900,
+    document_name: document.document_name,
+    content_type: document.content_type || 'application/octet-stream',
+    file_size_bytes: document.file_size_bytes,
+  };
+}
+
 function findDeal(id: string): Deal {
   const deal = deals.find((d) => d.id === id);
   if (!deal) throw new ApiError('Not found.', 404, { detail: 'Not found.' });
@@ -358,8 +433,19 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
   }
 
   if (resource === 'documents') {
+    if (second === 'upload-intent' && method === 'POST') {
+      return createUploadIntent(body);
+    }
+    if (second && third === 'complete' && method === 'POST') {
+      return completeUpload(second);
+    }
+    if (second && third === 'download' && method === 'GET') {
+      return downloadDocument(second);
+    }
     const dealId = query.get('deal');
-    const filtered = dealId ? documents.filter((d) => d.deal === dealId) : documents;
+    const filtered = documents.filter(
+      (d) => d.storage_status === 'ready' && (!dealId || d.deal === dealId),
+    );
     return paginate(filtered, query);
   }
 

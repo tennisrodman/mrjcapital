@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import uuid
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
@@ -17,7 +18,16 @@ from rest_framework.test import APITestCase
 
 from api.admin import ActivityLogAdmin, SponsorAdmin
 from api.fields import EncryptedTextField, _fernet
-from api.models import ActivityActionType, ActivityLog, Deal, Document, PipelineStatus, Property, Sponsor
+from api.models import (
+    ActivityActionType,
+    ActivityLog,
+    Deal,
+    Document,
+    DocumentStorageStatus,
+    PipelineStatus,
+    Property,
+    Sponsor,
+)
 from api.services import normalize_address
 
 
@@ -156,6 +166,36 @@ class DealSpineApiTests(APITestCase):
             source_channel='direct',
             requested_amount='2500000.00',
             details={'source_contact_name': 'Avery Sponsor'},
+        )
+
+    def _upload_intent(self, deal, name, category, file_type='pdf', visibility_roles=None,
+                       size=32, content_type='application/pdf'):
+        payload = {
+            'deal': str(deal.pk),
+            'document_name': name,
+            'category': category,
+            'file_type': file_type,
+            'file_size_bytes': size,
+            'content_type': content_type,
+        }
+        if visibility_roles is not None:
+            payload['visibility_roles'] = visibility_roles
+        return self.client.post('/api/documents/upload-intent/', payload, format='json')
+
+    def _create_ready_document(self, deal, name, category, file_type='pdf', visibility_roles=None):
+        document_id = uuid.uuid4()
+        return Document.objects.create(
+            id=document_id,
+            deal=deal,
+            document_name=name,
+            category=category,
+            file_url=f'deals/{deal.pk}/{document_id}/v1/{file_type}-doc.{file_type}',
+            file_type=file_type,
+            content_type='application/pdf',
+            file_size_bytes=32,
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.user,
+            visibility_roles=visibility_roles or ['internal'],
         )
 
     def test_non_staff_deal_access_is_scoped_to_assigned_analyst(self):
@@ -876,31 +916,25 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(len(filtered_results), 1)
         self.assertEqual(filtered_results[0]['id'], str(log.pk))
 
-    def test_document_create_writes_activity_log(self):
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_allocates_sequential_versions(self):
         deal = self.create_deal()
 
-        resp = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Offering memo',
-                'category': 'offering_memo',
-                'version': 1,
-                'file_url': 'deals/123/offering-memo.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal', 'investor'],
-            },
-            format='json',
-        )
+        first = self._upload_intent(deal, 'Offering memo', 'offering_memo')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data['document']['version'], 1)
 
-        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
-        log = ActivityLog.objects.get(action_type=ActivityActionType.DOCUMENT_UPLOAD)
-        self.assertEqual(log.deal, deal)
-        self.assertEqual(log.performed_by, self.user)
-        self.assertEqual(log.metadata['category'], 'offering_memo')
+        second = self._upload_intent(deal, 'Offering memo', 'offering_memo')
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.data['document']['version'], 2)
 
-    def test_document_server_controls_version_and_blocks_unsafe_paths_and_deal_changes(self):
+        # A different (category, name) starts its own version sequence.
+        other = self._upload_intent(deal, 'Loan agreement', 'legal')
+        self.assertEqual(other.data['document']['version'], 1)
+
+    def test_document_identity_fields_are_immutable_on_update(self):
         deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Offering memo', 'offering_memo')
         other_deal = Deal.objects.create(
             name='Other Deal',
             investment_type='whole_loan_bridge',
@@ -910,149 +944,80 @@ class DealSpineApiTests(APITestCase):
             requested_amount='1000000.00',
         )
 
-        unsafe = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Unsafe path',
-                'category': 'legal',
-                'file_url': '../secrets/legal.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
+        # deal / category / document_name are guarded and rejected with a 400.
+        for field, value in [
+            ('deal', str(other_deal.pk)),
+            ('category', 'legal'),
+            ('document_name', 'Renamed'),
+        ]:
+            resp = self.client.patch(
+                f'/api/documents/{document.pk}/',
+                {field: value},
+                format='json',
+            )
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, field)
+            self.assertIn(field, resp.data, field)
+
+        # file_url is read-only, so a change attempt is silently ignored (not applied).
+        original_url = document.file_url
+        ignored = self.client.patch(
+            f'/api/documents/{document.pk}/',
+            {'file_url': f'deals/{other_deal.pk}/sneaky/secret.pdf'},
             format='json',
         )
-        self.assertEqual(unsafe.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('file_url', unsafe.data)
+        self.assertEqual(ignored.status_code, status.HTTP_200_OK)
 
-        first = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Offering memo',
-                'category': 'offering_memo',
-                'version': 99,
-                'file_url': 'deals/123/offering-memo-v1.pdf',
-                'file_type': 'pdf',
-                'is_executed': True,
-                'visibility_roles': ['internal'],
-            },
-            format='json',
-        )
-        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(first.data['version'], 1)
-        self.assertFalse(first.data['is_executed'])
+        document.refresh_from_db()
+        self.assertEqual(document.file_url, original_url)
+        self.assertEqual(document.category, 'offering_memo')
+        self.assertEqual(document.document_name, 'Offering memo')
 
-        second = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Offering memo',
-                'category': 'offering_memo',
-                'file_url': 'deals/123/offering-memo-v2.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
-            format='json',
-        )
-        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(second.data['version'], 2)
-
-        change_deal = self.client.patch(
-            f'/api/documents/{first.data["id"]}/',
-            {'deal': str(other_deal.pk)},
-            format='json',
-        )
-        self.assertEqual(change_deal.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_document_create_rolls_back_if_audit_log_write_fails(self):
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_complete_rolls_back_if_audit_log_write_fails(self):
         deal = self.create_deal()
+        content = b'%PDF-1.4 atomic complete'
+        intent = self._upload_intent(deal, 'Atomic document', 'legal', size=len(content))
+        doc_id = intent.data['document']['id']
+        self.client.put(
+            f'/api/documents/{doc_id}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
 
         with patch('api.viewsets.ActivityLog.objects.create', side_effect=IntegrityError('audit failed')):
             with self.assertRaises(IntegrityError):
-                self.client.post(
-                    '/api/documents/',
-                    {
-                        'deal': str(deal.pk),
-                        'document_name': 'Atomic document',
-                        'category': 'legal',
-                        'file_url': 'deals/123/atomic.pdf',
-                        'file_type': 'pdf',
-                        'visibility_roles': ['internal'],
-                    },
-                    format='json',
-                )
+                self.client.post(f'/api/documents/{doc_id}/complete/', {}, format='json')
 
-        self.assertFalse(Document.objects.filter(document_name='Atomic document').exists())
+        # The status flip and the audit write share one transaction: neither lands.
+        document = Document.objects.get(pk=doc_id)
+        self.assertEqual(document.storage_status, DocumentStorageStatus.PENDING)
 
     def test_deal_delete_is_blocked_when_documents_exist(self):
         deal = self.create_deal()
-        self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Executed closing package',
-                'category': 'closing_docs',
-                'version': 1,
-                'file_url': 'deals/123/closing.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
-            format='json',
-        )
+        self._create_ready_document(deal, 'Executed closing package', 'closing_docs')
 
         resp = self.client.delete(f'/api/deals/{deal.pk}/')
 
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertTrue(Deal.objects.filter(pk=deal.pk).exists())
 
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
     def test_document_visibility_roles_are_validated_and_filterable(self):
         deal = self.create_deal()
 
-        invalid = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Bad visibility doc',
-                'category': 'legal',
-                'version': 1,
-                'file_url': 'deals/123/legal.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['public'],
-            },
-            format='json',
+        invalid = self._upload_intent(
+            deal, 'Bad visibility doc', 'legal', visibility_roles=['public'],
         )
         self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
 
-        investor_doc = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Investor package',
-                'category': 'investor_docs',
-                'version': 1,
-                'file_url': 'deals/123/investor.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal', 'investor'],
-            },
-            format='json',
+        self._create_ready_document(
+            deal, 'Investor package', 'investor_docs', visibility_roles=['internal', 'investor'],
         )
-        self.assertEqual(investor_doc.status_code, status.HTTP_201_CREATED)
-        internal_doc = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Internal memo',
-                'category': 'legal',
-                'version': 1,
-                'file_url': 'deals/123/internal.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
-            format='json',
+        self._create_ready_document(
+            deal, 'Internal memo', 'legal', visibility_roles=['internal'],
         )
-        self.assertEqual(internal_doc.status_code, status.HTTP_201_CREATED)
 
+        # Non-staff analysts can only ever see the internal slice.
         filtered = self.client.get('/api/documents/?visibility_role=investor')
         self.assertEqual(filtered.status_code, status.HTTP_200_OK)
         self.assertEqual(response_results(filtered), [])
@@ -1063,6 +1028,166 @@ class DealSpineApiTests(APITestCase):
         filtered_results = response_results(staff_filtered)
         self.assertEqual(len(filtered_results), 1)
         self.assertEqual(filtered_results[0]['document_name'], 'Investor package')
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_complete_and_download_flow(self):
+        deal = self.create_deal()
+        content = b'%PDF-1.4 test document bytes'
+
+        intent = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Offering memo',
+                'category': 'offering_memo',
+                'file_type': 'pdf',
+                'content_type': 'application/pdf',
+                'file_size_bytes': len(content),
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(intent.status_code, status.HTTP_201_CREATED)
+        document = intent.data['document']
+        self.assertEqual(document['storage_status'], 'pending')
+        self.assertTrue(document['file_url'].startswith(f'deals/{deal.pk}/'))
+
+        upload = self.client.put(
+            f'/api/documents/{document["id"]}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
+        self.assertEqual(upload.status_code, status.HTTP_200_OK)
+
+        complete = self.client.post(f'/api/documents/{document["id"]}/complete/', {}, format='json')
+        self.assertEqual(complete.status_code, status.HTTP_200_OK)
+        self.assertEqual(complete.data['storage_status'], 'ready')
+
+        log = ActivityLog.objects.filter(
+            action_type=ActivityActionType.DOCUMENT_UPLOAD,
+            metadata__document_id=document['id'],
+        )
+        self.assertEqual(log.count(), 1)
+
+        listed = self.client.get(f'/api/documents/?deal={deal.pk}')
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response_results(listed)), 1)
+
+        download = self.client.get(f'/api/documents/{document["id"]}/download/')
+        self.assertEqual(download.status_code, status.HTTP_200_OK)
+        self.assertIn('/blob/', download.data['download_url'])
+
+        blob = self.client.get(f'/api/documents/{document["id"]}/blob/')
+        self.assertEqual(blob.status_code, status.HTTP_200_OK)
+        self.assertEqual(blob.content, content)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_rejects_oversized_file(self):
+        deal = self.create_deal()
+        resp = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Huge file',
+                'category': 'financials',
+                'file_type': 'pdf',
+                'file_size_bytes': 200 * 1024 * 1024,
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_document_direct_create_is_blocked(self):
+        deal = self.create_deal()
+        resp = self.client.post(
+            '/api/documents/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Blocked',
+                'category': 'legal',
+                'file_type': 'pdf',
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(Document.objects.filter(document_name='Blocked').exists())
+
+    def test_document_details_rejects_sensitive_identifiers(self):
+        deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Sensitive details doc', 'legal')
+        resp = self.client.patch(
+            f'/api/documents/{document.pk}/',
+            {'details': {'notes': ['Sponsor SSN is 123-45-6789']}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('details', resp.data)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_non_staff_upload_intent_forces_internal_visibility(self):
+        deal = self.create_deal()
+        resp = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Investor only memo',
+                'category': 'investor_docs',
+                'file_type': 'pdf',
+                'file_size_bytes': 128,
+                'visibility_roles': ['investor'],
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        document = Document.objects.get(pk=resp.data['document']['id'])
+        self.assertIn('internal', document.visibility_roles)
+        # The non-staff analyst can still reach their own doc via complete/blob.
+        self.assertEqual(document.visibility_roles, ['investor', 'internal'])
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_cleanup_stale_pending_documents_sweeps_old_rows_and_blobs(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from api.tasks import cleanup_stale_pending_documents
+        from api.services.storage import get_document_storage
+
+        deal = self.create_deal()
+        stale = Document.objects.create(
+            deal=deal,
+            document_name='Abandoned',
+            category='legal',
+            version=1,
+            file_url='deals/abc/stale/v1/abandoned.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.PENDING,
+            uploaded_by=self.user,
+        )
+        Document.objects.filter(pk=stale.pk).update(
+            uploaded_date=timezone.now() - timedelta(hours=48)
+        )
+        fresh = Document.objects.create(
+            deal=deal,
+            document_name='Fresh',
+            category='legal',
+            version=2,
+            file_url='deals/abc/fresh/v2/fresh.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.PENDING,
+            uploaded_by=self.user,
+        )
+        storage = get_document_storage()
+        storage.write_object(stale.file_url, b'stale', 'application/pdf')
+        storage.write_object(fresh.file_url, b'fresh', 'application/pdf')
+
+        deleted = cleanup_stale_pending_documents()
+
+        self.assertEqual(deleted, 1)
+        self.assertFalse(Document.objects.filter(pk=stale.pk).exists())
+        self.assertTrue(Document.objects.filter(pk=fresh.pk).exists())
+        self.assertIsNone(storage.head_object(stale.file_url))
+        self.assertIsNotNone(storage.head_object(fresh.file_url))
 
     def test_activity_logs_are_read_only_via_api(self):
         ActivityLog.objects.create(

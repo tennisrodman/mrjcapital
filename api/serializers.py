@@ -1,7 +1,5 @@
 from decimal import Decimal, InvalidOperation
-import posixpath
 import re
-from urllib.parse import urlparse
 
 from django.db import transaction
 from rest_framework import serializers
@@ -12,6 +10,7 @@ from api.models import (
     Deal,
     DealProperty,
     Document,
+    DocumentCategory,
     Fund,
     Property,
     Sponsor,
@@ -21,6 +20,18 @@ from api.services.audit import SENSITIVE_SPONSOR_FIELDS
 
 
 ALLOWED_DOCUMENT_VISIBILITY_ROLES = {'internal', 'investor', 'borrower', 'counsel'}
+
+
+def _validate_visibility_roles(value):
+    if not isinstance(value, list):
+        raise serializers.ValidationError('visibility_roles must be a list.')
+    invalid_roles = sorted(set(value) - ALLOWED_DOCUMENT_VISIBILITY_ROLES)
+    if invalid_roles:
+        raise serializers.ValidationError(f'Unsupported visibility role(s): {", ".join(invalid_roles)}')
+    return value
+
+
+
 SENSITIVE_DETAIL_KEYS = {
     'account_number',
     'bank_account',
@@ -304,6 +315,7 @@ class SyndicationTransitionSerializer(serializers.Serializer):
 
 class DocumentSerializer(serializers.ModelSerializer):
     uploaded_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
 
     class Meta:
         model = Document
@@ -312,10 +324,17 @@ class DocumentSerializer(serializers.ModelSerializer):
             'deal',
             'document_name',
             'category',
+            'subcategory',
             'version',
             'file_url',
             'file_type',
+            'content_type',
+            'file_size_bytes',
+            'checksum_sha256',
+            'storage_status',
+            'pipeline_stage_at_upload',
             'uploaded_by',
+            'uploaded_by_username',
             'uploaded_date',
             'is_executed',
             'expiry_date',
@@ -323,27 +342,94 @@ class DocumentSerializer(serializers.ModelSerializer):
             'visibility_roles',
             'details',
         ]
-        read_only_fields = ['uploaded_by', 'uploaded_date', 'version', 'is_executed']
+        read_only_fields = [
+            'uploaded_by',
+            'uploaded_by_username',
+            'uploaded_date',
+            'version',
+            'file_url',
+            'is_executed',
+            'storage_status',
+            'pipeline_stage_at_upload',
+            'checksum_sha256',
+        ]
+        # Documents are created only via upload-intent (POST is disabled), so the
+        # (deal, category, document_name, version) uniqueness is enforced
+        # server-side under a row lock plus the DB constraint. Disable DRF's
+        # auto-generated UniqueTogetherValidator, which would otherwise fire on
+        # the read-only `version` default.
+        validators = []
 
     def validate(self, attrs):
-        if self.instance and 'deal' in attrs and attrs['deal'] != self.instance.deal:
-            raise serializers.ValidationError({'deal': 'Document deal cannot be changed after creation.'})
+        # deal / category / document_name form the storage-key identity; they are
+        # fixed once the blob exists. (file_url and version are read-only.)
+        if self.instance:
+            for field_name in ('deal', 'category', 'document_name'):
+                if field_name in attrs and attrs[field_name] != getattr(self.instance, field_name):
+                    raise serializers.ValidationError(
+                        {field_name: f'{field_name} cannot be changed after creation.'}
+                    )
         return attrs
 
-    def validate_file_url(self, value):
-        parsed = urlparse(value)
-        normalized = posixpath.normpath(value)
-        if parsed.scheme or parsed.netloc or value.startswith(('/', '\\')) or normalized.startswith('../') or '/../' in value:
-            raise serializers.ValidationError('file_url must be a relative storage path.')
+    def validate_visibility_roles(self, value):
+        return _validate_visibility_roles(value)
+
+    def validate_details(self, value):
+        _reject_sensitive_details(value)
         return value
 
+
+class DocumentUploadIntentSerializer(serializers.Serializer):
+    deal = serializers.PrimaryKeyRelatedField(queryset=Deal.objects.all())
+    document_name = serializers.CharField(max_length=255)
+    category = serializers.ChoiceField(choices=DocumentCategory.choices)
+    subcategory = serializers.CharField(max_length=64, required=False, allow_blank=True, default='')
+    file_type = serializers.CharField(max_length=24)
+    content_type = serializers.CharField(max_length=127, required=False, allow_blank=True, default='')
+    file_size_bytes = serializers.IntegerField(min_value=1)
+    visibility_roles = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+    expiry_date = serializers.DateField(required=False, allow_null=True, default=None)
+    checksum_sha256 = serializers.CharField(required=False, allow_blank=True, default='')
+
     def validate_visibility_roles(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError('visibility_roles must be a list.')
-        invalid_roles = sorted(set(value) - ALLOWED_DOCUMENT_VISIBILITY_ROLES)
-        if invalid_roles:
-            raise serializers.ValidationError(f'Unsupported visibility role(s): {", ".join(invalid_roles)}')
+        return _validate_visibility_roles(value)
+
+    def validate_file_size_bytes(self, value):
+        from api.services.storage import max_upload_bytes
+
+        cap = max_upload_bytes()
+        if value > cap:
+            raise serializers.ValidationError(f'File exceeds maximum upload size of {cap} bytes.')
         return value
+
+    def validate(self, attrs):
+        from api.services.storage import normalize_content_type, normalize_file_type
+
+        try:
+            attrs['file_type'] = normalize_file_type(attrs['file_type'])
+        except ValueError as exc:
+            raise serializers.ValidationError({'file_type': str(exc)}) from exc
+        attrs['content_type'] = normalize_content_type(attrs['file_type'], attrs.get('content_type') or None)
+        if not attrs.get('visibility_roles'):
+            attrs['visibility_roles'] = ['internal']
+        return attrs
+
+
+class DocumentUploadCompleteSerializer(serializers.Serializer):
+    checksum_sha256 = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class DocumentDownloadSerializer(serializers.Serializer):
+    download_url = serializers.URLField()
+    expires_in = serializers.IntegerField()
+    document_name = serializers.CharField()
+    content_type = serializers.CharField()
+    file_size_bytes = serializers.IntegerField(allow_null=True)
 
 
 class ActivityLogSerializer(serializers.ModelSerializer):

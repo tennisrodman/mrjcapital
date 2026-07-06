@@ -159,21 +159,46 @@ export interface Deal {
   updated_at: string;
 }
 
+export type DocumentStorageStatus = 'pending' | 'ready' | 'failed';
+
 export interface DealDocument {
   id: string;
   deal: string;
   document_name: string;
   category: DocumentCategory;
+  subcategory?: string;
   version: number;
   file_url: string;
   file_type: string;
+  content_type?: string;
+  file_size_bytes: number | null;
+  checksum_sha256?: string;
+  storage_status: DocumentStorageStatus;
+  pipeline_stage_at_upload: PipelineStatus | null;
   uploaded_by: number | null;
+  uploaded_by_username?: string | null;
   uploaded_date: string;
   is_executed: boolean;
   expiry_date: string | null;
   notes: string;
   visibility_roles: string[];
   details: Record<string, unknown>;
+}
+
+export interface DocumentUploadIntentResponse {
+  document: DealDocument;
+  upload_url: string;
+  upload_method: string;
+  upload_headers: Record<string, string>;
+  expires_in: number;
+}
+
+export interface DocumentDownloadResponse {
+  download_url: string;
+  expires_in: number;
+  document_name: string;
+  content_type: string;
+  file_size_bytes: number | null;
 }
 
 export interface ActivityLogEntry {
