@@ -13,6 +13,7 @@ router.register('properties', viewsets.PropertyViewSet, basename='property')
 router.register('deals', viewsets.DealViewSet, basename='deal')
 router.register('deal-properties', viewsets.DealPropertyViewSet, basename='deal-property')
 router.register('documents', viewsets.DocumentViewSet, basename='document')
+router.register('deal-notes', viewsets.DealNoteViewSet, basename='deal-note')
 router.register('activity-logs', viewsets.ActivityLogViewSet, basename='activity-log')
 
 urlpatterns = [

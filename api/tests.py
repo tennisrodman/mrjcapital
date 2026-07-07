@@ -1726,6 +1726,129 @@ class DealNoteServiceTests(APITestCase):
         self.assertEqual(ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0)
 
 
+class DealNoteApiTests(APITestCase):
+    def setUp(self):
+        self.analyst = User.objects.create_user('note_analyst', password='pw')
+        self.staff = User.objects.create_user('note_staff', password='pw', is_staff=True)
+        self.deal = Deal.objects.create(
+            name='Notes API Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.analyst,
+        )
+        self.other_deal = Deal.objects.create(
+            name='Other Notes Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='500000.00',
+            assigned_analyst=self.analyst,
+        )
+
+    def _ready_doc(self, deal):
+        return Document.objects.create(
+            id=uuid.uuid4(),
+            deal=deal,
+            document_name='OM',
+            category='offering_memo',
+            file_url=f'deals/{deal.pk}/om.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.staff,
+            visibility_roles=['internal'],
+        )
+
+    def test_staff_creates_note_sets_author_and_logs_activity(self):
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'Call sponsor Monday.'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data['author'], self.staff.pk)
+        self.assertEqual(resp.data['visibility_roles'], ['internal'])
+        log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
+        self.assertEqual(log.metadata['subject_id'], resp.data['id'])
+
+    def test_non_staff_cannot_create_or_list_notes(self):
+        self.client.force_authenticate(self.analyst)
+        create = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'blocked'},
+            format='json',
+        )
+        self.assertEqual(create.status_code, status.HTTP_403_FORBIDDEN)
+        listing = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        self.assertEqual(listing.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_notes_are_filtered_by_deal(self):
+        DealNote.objects.create(deal=self.deal, author=self.staff, body='keep')
+        DealNote.objects.create(deal=self.other_deal, author=self.staff, body='drop')
+        self.client.force_authenticate(self.staff)
+        resp = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['body'] for row in response_results(resp)], ['keep'])
+
+    def test_empty_body_is_rejected(self):
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': '   '},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('body', resp.data)
+
+    def test_cross_deal_attachment_is_rejected(self):
+        doc = self._ready_doc(self.other_deal)
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'see doc', 'attachments': [str(doc.id)]},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('attachments', resp.data)
+
+    def test_same_deal_attachment_is_accepted(self):
+        doc = self._ready_doc(self.deal)
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'see doc', 'attachments': [str(doc.id)]},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data['attachments'], [str(doc.id)])
+
+    def test_staff_can_edit_body_but_not_deal(self):
+        note = DealNote.objects.create(deal=self.deal, author=self.staff, body='draft')
+        self.client.force_authenticate(self.staff)
+        edit = self.client.patch(
+            f'/api/deal-notes/{note.pk}/', {'body': 'final'}, format='json'
+        )
+        self.assertEqual(edit.status_code, status.HTTP_200_OK)
+        self.assertEqual(edit.data['body'], 'final')
+        move = self.client.patch(
+            f'/api/deal-notes/{note.pk}/', {'deal': str(self.other_deal.pk)}, format='json'
+        )
+        self.assertEqual(move.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_staff_can_delete_note_and_audit_row_remains(self):
+        from api.services.notes import log_note_added
+
+        note = DealNote.objects.create(deal=self.deal, author=self.staff, body='temp')
+        log_note_added(note, self.staff, None)
+        self.client.force_authenticate(self.staff)
+        resp = self.client.delete(f'/api/deal-notes/{note.pk}/')
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(DealNote.objects.filter(pk=note.pk).exists())
+        self.assertTrue(
+            ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).exists()
+        )
+
+
 def response_results(response):
     if isinstance(response.data, dict) and 'results' in response.data:
         return response.data['results']

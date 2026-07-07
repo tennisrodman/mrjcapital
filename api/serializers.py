@@ -9,6 +9,7 @@ from api.models import (
     ActivityLog,
     Broker,
     Deal,
+    DealNote,
     DealProperty,
     Document,
     DocumentCategory,
@@ -660,6 +661,57 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             'metadata',
         ]
         read_only_fields = fields
+
+
+class DealNoteSerializer(serializers.ModelSerializer):
+    author = serializers.PrimaryKeyRelatedField(read_only=True)
+    author_username = serializers.CharField(source='author.username', read_only=True)
+    attachments = serializers.PrimaryKeyRelatedField(
+        many=True,
+        required=False,
+        queryset=Document.objects.all(),
+        pk_field=serializers.UUIDField(),
+    )
+
+    class Meta:
+        model = DealNote
+        fields = [
+            'id',
+            'deal',
+            'body',
+            'author',
+            'author_username',
+            'attachments',
+            'visibility_roles',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'author',
+            'author_username',
+            'visibility_roles',
+            'created_at',
+            'updated_at',
+        ]
+
+    def validate_body(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError('Note body cannot be empty.')
+        return value
+
+    def validate(self, attrs):
+        # deal is fixed after creation; a change attempt is an explicit 400.
+        if self.instance and 'deal' in attrs and attrs['deal'] != self.instance.deal:
+            raise serializers.ValidationError({'deal': 'deal cannot be changed after creation.'})
+        deal = attrs.get('deal') or getattr(self.instance, 'deal', None)
+        attachments = attrs.get('attachments')
+        if attachments and deal is not None:
+            wrong = [str(doc.id) for doc in attachments if doc.deal_id != deal.id]
+            if wrong:
+                raise serializers.ValidationError(
+                    {'attachments': f'Documents must belong to the same deal: {", ".join(wrong)}'}
+                )
+        return attrs
 
 
 def _validate_decimal_string(value, field_name):

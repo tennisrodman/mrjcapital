@@ -20,6 +20,7 @@ from api.models import (
     ActivityLog,
     Broker,
     Deal,
+    DealNote,
     DealProperty,
     Document,
     DocumentStorageStatus,
@@ -32,6 +33,7 @@ from api.serializers import (
     ActivityLogSerializer,
     BrokerSerializer,
     DealCreateSerializer,
+    DealNoteSerializer,
     DealPropertySerializer,
     DealSerializer,
     DocumentDownloadSerializer,
@@ -48,6 +50,7 @@ from api.serializers import (
 from api.services import (
     allowed_pipeline_statuses,
     allowed_syndication_statuses,
+    create_note,
     log_sensitive_field_read,
     normalize_address,
     transition_pipeline_status,
@@ -583,6 +586,33 @@ class DocumentViewSet(viewsets.ModelViewSet):
         response = HttpResponse(body, content_type=document.content_type or meta.content_type)
         response['Content-Disposition'] = f'attachment; filename="{_download_filename(document)}"'
         return response
+
+
+class DealNoteViewSet(viewsets.ModelViewSet):
+    # Notes are a staff-only collaboration surface, matching ActivityLogViewSet.
+    # (When notes later open to assigned analysts, swap in a _can_access_deal
+    # queryset scope and an author-or-staff edit/delete guard.)
+    permission_classes = [IsAdminUser]
+    serializer_class = DealNoteSerializer
+    queryset = DealNote.objects.select_related('deal', 'author').prefetch_related('attachments')
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        deal_id = self.request.query_params.get('deal')
+        if deal_id:
+            queryset = queryset.filter(deal=_uuid_filter_value(deal_id, 'deal'))
+        return queryset
+
+    def perform_create(self, serializer):
+        data = serializer.validated_data
+        note = create_note(
+            deal=data['deal'],
+            author=self.request.user,
+            body=data['body'],
+            attachments=data.get('attachments') or [],
+            ip_address=_client_ip(self.request),
+        )
+        serializer.instance = note
 
 
 class ActivityLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
