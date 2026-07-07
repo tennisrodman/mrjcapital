@@ -29,6 +29,7 @@ import { TransitionDialog } from '@/components/deals/TransitionDialog';
 import { EmptyState, ErrorState, Spinner } from '@/components/deals/States';
 import { useDeal, useDealActivity, useDealDocuments } from '@/lib/api/deals';
 import { formatFileSize, useDownloadDocument } from '@/lib/api/documents';
+import { useDealNotes, useCreateNote, useDeleteNote } from '@/lib/api/notes';
 import { apiErrorMessage } from '@/lib/apiError';
 import {
   DOCUMENT_CATEGORY_LABELS,
@@ -41,7 +42,7 @@ import {
   formatDate,
   formatDateTime,
 } from '@/lib/dealChoices';
-import type { ActivityLogEntry, Deal, DealDocument, DocumentCategory } from '@/types/deal';
+import type { ActivityLogEntry, Deal, DealDocument, DealNote, DocumentCategory } from '@/types/deal';
 
 export default function DealDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -51,6 +52,7 @@ export default function DealDetailPage() {
   const dealQuery = useDeal(id);
   const documentsQuery = useDealDocuments(id);
   const activityQuery = useDealActivity(id, isStaff);
+  const notesQuery = useDealNotes(id, isStaff);
   const [openDialog, setOpenDialog] = useState<'pipeline' | 'syndication' | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
 
@@ -109,10 +111,17 @@ export default function DealDetailPage() {
           <SponsorPanel deal={deal} />
           <BrokerPanel deal={deal} />
           {isStaff ? (
-            <ActivityPanel
-              entries={activityQuery.data ?? []}
-              isLoading={activityQuery.isLoading}
-            />
+            <>
+              <NotesPanel
+                dealId={deal.id}
+                notes={notesQuery.data ?? []}
+                isLoading={notesQuery.isLoading}
+              />
+              <ActivityPanel
+                entries={activityQuery.data ?? []}
+                isLoading={activityQuery.isLoading}
+              />
+            </>
           ) : null}
         </aside>
       </div>
@@ -488,6 +497,88 @@ function ActivityPanel({
           </li>
         ))}
       </ol>
+    </Panel>
+  );
+}
+
+function NotesPanel({
+  dealId,
+  notes,
+  isLoading,
+}: {
+  dealId: string;
+  notes: DealNote[];
+  isLoading: boolean;
+}) {
+  const [body, setBody] = useState('');
+  const createNote = useCreateNote(dealId);
+  const deleteNote = useDeleteNote(dealId);
+
+  const submit = () => {
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    createNote.mutate(
+      { deal: dealId, body: trimmed },
+      { onSuccess: () => setBody('') },
+    );
+  };
+
+  return (
+    <Panel title="Notes" count={notes.length}>
+      <div className="space-y-3">
+        <textarea
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          rows={3}
+          placeholder="Add an internal note…"
+          className="w-full resize-y rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--slate)] focus:outline-none focus:ring-1 focus:ring-[var(--brass)]"
+        />
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            onClick={submit}
+            disabled={!body.trim() || createNote.isPending}
+          >
+            {createNote.isPending ? 'Adding…' : 'Add note'}
+          </Button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <p className="mt-4 text-sm text-[var(--slate)]">Loading notes…</p>
+      ) : notes.length === 0 ? (
+        <p className="mt-4 text-sm text-[var(--slate)]">No notes on this deal yet.</p>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {notes.map((note) => (
+            <li
+              key={note.id}
+              className="rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2"
+            >
+              <p className="whitespace-pre-wrap text-sm text-[var(--ink)]">{note.body}</p>
+              <div className="mt-1 flex items-center justify-between text-[0.7rem] text-[var(--slate)]/80">
+                <span>
+                  {note.author_username ?? 'Unknown'} · {formatDateTime(note.created_at)}
+                  {note.updated_at !== note.created_at ? ' · edited' : ''}
+                  {note.attachments.length > 0
+                    ? ` · ${note.attachments.length} attachment${note.attachments.length === 1 ? '' : 's'}`
+                    : ''}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => deleteNote.mutate(note.id)}
+                  disabled={deleteNote.isPending}
+                >
+                  Delete
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </Panel>
   );
 }
