@@ -1821,6 +1821,8 @@ class DealNoteApiTests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data['attachments'], [str(doc.id)])
+        log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
+        self.assertEqual(log.metadata['attachment_ids'], [str(doc.id)])
 
     def test_staff_can_edit_body_but_not_deal(self):
         note = DealNote.objects.create(deal=self.deal, author=self.staff, body='draft')
@@ -1830,6 +1832,9 @@ class DealNoteApiTests(APITestCase):
         )
         self.assertEqual(edit.status_code, status.HTTP_200_OK)
         self.assertEqual(edit.data['body'], 'final')
+        self.assertEqual(
+            ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0
+        )
         move = self.client.patch(
             f'/api/deal-notes/{note.pk}/', {'deal': str(self.other_deal.pk)}, format='json'
         )

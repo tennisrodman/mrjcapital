@@ -651,6 +651,8 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
         if (!body.body.trim()) badRequest('body', 'Note body cannot be empty.');
         note.body = body.body;
       }
+      // Attachments are intentionally not mirrored on edit here: there is no edit-attachments
+      // UI surface yet, so Demo/Live parity is maintained for all reachable paths.
       note.updated_at = nowIso();
       return note;
     }
