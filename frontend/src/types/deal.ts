@@ -216,6 +216,18 @@ export interface ActivityLogEntry {
   metadata: Record<string, unknown>;
 }
 
+export interface DealNote {
+  id: string;
+  deal: string;
+  body: string;
+  author: number | null;
+  author_username?: string | null;
+  attachments: string[];
+  visibility_roles: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DealSummary {
   active_deals: number;
   pipeline_value: string | number;

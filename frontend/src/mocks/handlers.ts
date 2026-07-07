@@ -8,6 +8,7 @@ import type {
   Broker,
   Deal,
   DealDocument,
+  DealNote,
   DealPropertySummary,
   Fund,
   InvestmentType,
@@ -35,6 +36,7 @@ const funds = [...FUNDS];
 const properties = [...PROPERTIES];
 const documents = [...DOCUMENTS];
 const activity = [...ACTIVITY];
+const notes: DealNote[] = [];
 
 const SYNDICATION_TRANSITIONS: Record<SyndicationStatus, SyndicationStatus[]> = {
   not_started: ['raising'],
@@ -383,6 +385,49 @@ function logTransition(deal: Deal, field: string, from: string, to: string, reas
   } as ActivityLogEntry);
 }
 
+function createNote(body: Record<string, unknown>): DealNote {
+  const dealId = String(body.deal ?? '');
+  const deal = deals.find((d) => d.id === dealId);
+  if (!deal) badRequest('deal', 'Selected deal no longer exists.');
+  const text = String(body.body ?? '');
+  if (!text.trim()) badRequest('body', 'Note body cannot be empty.');
+  const attachmentIds = Array.isArray(body.attachments) ? body.attachments.map(String) : [];
+  for (const docId of attachmentIds) {
+    const doc = documents.find((d) => d.id === docId);
+    if (!doc || doc.deal !== dealId) {
+      badRequest('attachments', 'Documents must belong to the same deal.');
+    }
+  }
+  const id = newId('note');
+  const iso = nowIso();
+  const note: DealNote = {
+    id,
+    deal: dealId,
+    body: text,
+    author: MOCK_USER_ID,
+    author_username: MOCK_USER.username,
+    attachments: attachmentIds,
+    visibility_roles: ['internal'],
+    created_at: iso,
+    updated_at: iso,
+  };
+  notes.unshift(note);
+  activity.unshift({
+    id: newId('act'),
+    deal: dealId,
+    action_type: 'note_added',
+    performed_by: MOCK_USER_ID,
+    performed_at: iso,
+    ip_address: null,
+    description: `Note added: ${text.slice(0, 80)}`,
+    old_value: '',
+    new_value: '',
+    reason: '',
+    metadata: { subject_model: 'deal_note', subject_id: id, attachment_ids: attachmentIds },
+  } as ActivityLogEntry);
+  return note;
+}
+
 function transitionPipeline(deal: Deal, to: PipelineStatus, reason: string): Deal {
   if (!reason?.trim()) badRequest('reason', 'A reason is required for every status transition.');
   const from = deal.pipeline_status;
@@ -585,6 +630,32 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
     const filtered = documents.filter(
       (d) => d.storage_status === 'ready' && (!dealId || d.deal === dealId),
     );
+    return paginate(filtered, query);
+  }
+
+  if (resource === 'deal-notes') {
+    if (!second && method === 'POST') return createNote(body);
+    if (second && method === 'DELETE') {
+      const idx = notes.findIndex((n) => n.id === second);
+      if (idx === -1) throw new ApiError('Not found', 404, { detail: 'Not found.' });
+      notes.splice(idx, 1);
+      return {};
+    }
+    if (second && (method === 'PATCH' || method === 'PUT')) {
+      const note = notes.find((n) => n.id === second);
+      if (!note) throw new ApiError('Not found', 404, { detail: 'Not found.' });
+      if ('deal' in body && body.deal !== note.deal) {
+        badRequest('deal', 'deal cannot be changed after creation.');
+      }
+      if (typeof body.body === 'string') {
+        if (!body.body.trim()) badRequest('body', 'Note body cannot be empty.');
+        note.body = body.body;
+      }
+      note.updated_at = nowIso();
+      return note;
+    }
+    const dealId = query.get('deal');
+    const filtered = dealId ? notes.filter((n) => n.deal === dealId) : notes;
     return paginate(filtered, query);
   }
 
