@@ -1676,6 +1676,56 @@ class DealNoteModelTests(APITestCase):
         self.assertEqual(list(doc.deal_notes.all()), [note])
 
 
+class DealNoteServiceTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('svc_staff', password='pw', is_staff=True)
+        self.deal = Deal.objects.create(
+            name='Service Note Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.user,
+        )
+
+    def test_create_note_writes_note_and_activity_log(self):
+        from api.services.notes import create_note
+
+        note = create_note(
+            deal=self.deal,
+            author=self.user,
+            body='Needs updated appraisal before quoting.',
+            attachments=[],
+            visibility_roles=None,
+            ip_address='203.0.113.5',
+        )
+
+        self.assertEqual(note.visibility_roles, ['internal'])
+        log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
+        self.assertEqual(log.deal, self.deal)
+        self.assertEqual(log.performed_by, self.user)
+        self.assertEqual(log.ip_address, '203.0.113.5')
+        self.assertEqual(log.metadata['subject_model'], 'deal_note')
+        self.assertEqual(log.metadata['subject_id'], str(note.id))
+
+    def test_create_note_is_atomic_when_logging_fails(self):
+        from unittest.mock import patch
+
+        from api.services.notes import create_note
+
+        with patch('api.services.notes.log_note_added', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                create_note(
+                    deal=self.deal,
+                    author=self.user,
+                    body='rolls back',
+                    attachments=[],
+                    visibility_roles=None,
+                    ip_address=None,
+                )
+        self.assertEqual(DealNote.objects.count(), 0)
+        self.assertEqual(ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0)
+
+
 def response_results(response):
     if isinstance(response.data, dict) and 'results' in response.data:
         return response.data['results']
