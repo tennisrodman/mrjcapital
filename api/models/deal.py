@@ -31,7 +31,13 @@ class Deal(models.Model):
         null=True,
         blank=True,
     )
-    sponsor = models.ForeignKey('Sponsor', on_delete=models.PROTECT, related_name='deals')
+    sponsor = models.ForeignKey(
+        'Sponsor',
+        on_delete=models.PROTECT,
+        related_name='deals',
+        null=True,
+        blank=True,
+    )
     broker = models.ForeignKey(
         'Broker',
         on_delete=models.PROTECT,

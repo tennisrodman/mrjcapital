@@ -48,10 +48,16 @@ export function PropertiesSection() {
     >
       <p className="mb-4 text-xs text-[var(--slate)]">
         The first property is the deal’s primary location. Pick an existing property to avoid
-        duplicates, or add a new one.
+        duplicates, add a new one, or leave this empty for an early first look.
       </p>
 
-      <div className="space-y-4">
+      {fields.length === 0 ? (
+        <div className="rounded-md border border-dashed border-[var(--border)] bg-[var(--paper)] px-4 py-5 text-sm text-[var(--slate)]">
+          No property attached yet.
+        </div>
+      ) : null}
+
+      <div className="mt-4 space-y-4">
         {fields.map((field, index) => {
           const mode = watch(`properties.${index}.mode`);
           const rowErrors = errors.properties?.[index];
@@ -79,16 +85,14 @@ export function PropertiesSection() {
                     ]}
                   />
                 </div>
-                {fields.length > 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => remove(index)}
-                    aria-label={`Remove property ${index + 1}`}
-                    className="rounded-sm p-1 text-[var(--slate)] transition-colors hover:bg-[var(--ink)]/5 hover:text-[var(--ink)]"
-                  >
-                    <Trash2 className="h-4 w-4" strokeWidth={1.75} />
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => remove(index)}
+                  aria-label={`Remove property ${index + 1}`}
+                  className="rounded-sm p-1 text-[var(--slate)] transition-colors hover:bg-[var(--ink)]/5 hover:text-[var(--ink)]"
+                >
+                  <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+                </button>
               </div>
 
               {mode === 'existing' ? (

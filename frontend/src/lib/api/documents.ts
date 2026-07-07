@@ -101,7 +101,7 @@ export async function downloadDocument(doc: DealDocument): Promise<void> {
       [`Demo file placeholder for ${doc.document_name}`],
       { type: payload.content_type || 'text/plain' },
     );
-    triggerBrowserDownload(blob, doc.document_name);
+    triggerBrowserDownload(blob, payload.filename);
     return;
   }
 
@@ -122,7 +122,7 @@ export async function downloadDocument(doc: DealDocument): Promise<void> {
   }
 
   const blob = await response.blob();
-  triggerBrowserDownload(blob, payload.document_name);
+  triggerBrowserDownload(blob, payload.filename);
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {

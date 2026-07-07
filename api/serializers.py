@@ -1,7 +1,8 @@
 from decimal import Decimal, InvalidOperation
 import re
+from uuid import UUID
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from api.models import (
@@ -220,6 +221,21 @@ class DealSerializer(serializers.ModelSerializer):
         required=False,
         write_only=True,
     )
+    sponsor = serializers.PrimaryKeyRelatedField(
+        queryset=Sponsor.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    broker = serializers.PrimaryKeyRelatedField(
+        queryset=Broker.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    fund = serializers.PrimaryKeyRelatedField(
+        queryset=Fund.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     assigned_analyst = serializers.PrimaryKeyRelatedField(read_only=True)
     # Read-only expansions so list/detail views can render names without N+1 lookups.
     # The writable FK fields above remain the canonical inputs; encrypted sponsor
@@ -272,8 +288,15 @@ class DealSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if self.instance:
             for field_name in ['sponsor', 'broker', 'fund']:
-                if field_name in attrs and attrs[field_name] != getattr(self.instance, field_name):
-                    raise serializers.ValidationError({field_name: 'This relationship cannot be changed through this endpoint.'})
+                if field_name not in attrs:
+                    continue
+                current_id = getattr(self.instance, f'{field_name}_id')
+                incoming_obj = attrs[field_name]
+                incoming_id = incoming_obj.pk if incoming_obj else None
+                if current_id and incoming_id != current_id:
+                    raise serializers.ValidationError({
+                        field_name: 'This relationship cannot be changed through this endpoint.',
+                    })
         return attrs
 
     def create(self, validated_data):
@@ -297,10 +320,186 @@ class DealSerializer(serializers.ModelSerializer):
             DealProperty.objects.filter(deal=deal).delete()
             if not properties:
                 return
-            DealProperty.objects.bulk_create([
-                DealProperty(deal=deal, property=property_obj, is_primary=index == 0)
-                for index, property_obj in enumerate(properties)
-            ])
+            _create_deal_property_links(deal, properties)
+
+
+class DealCreateSerializer(serializers.ModelSerializer):
+    investment_category = serializers.CharField(read_only=True)
+    sponsor = serializers.JSONField(required=False, allow_null=True)
+    broker = serializers.JSONField(required=False, allow_null=True)
+    properties = serializers.ListField(
+        child=serializers.JSONField(),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
+    property_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Property.objects.all(),
+        many=True,
+        required=False,
+        write_only=True,
+    )
+    fund = serializers.PrimaryKeyRelatedField(
+        queryset=Fund.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = Deal
+        fields = [
+            'id',
+            'name',
+            'investment_type',
+            'investment_category',
+            'sponsor',
+            'broker',
+            'fund',
+            'source_channel',
+            'source_date',
+            'requested_amount',
+            'details',
+            'properties',
+            'property_ids',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'investment_category', 'created_at', 'updated_at']
+
+    def validate_details(self, value):
+        _reject_sensitive_details(value)
+        return value
+
+    def validate(self, attrs):
+        if 'properties' in attrs and 'property_ids' in attrs:
+            raise serializers.ValidationError({
+                'properties': 'Use either properties or property_ids, not both.',
+            })
+
+        attrs['_sponsor_input'] = self._validate_sponsor_input(attrs.pop('sponsor', None))
+
+        if 'broker' in attrs:
+            attrs['_broker_input'] = self._validate_broker_input(attrs.pop('broker'))
+
+        property_inputs = []
+        if 'property_ids' in attrs:
+            property_inputs = [('existing', property_obj) for property_obj in attrs.pop('property_ids')]
+            self._validate_unique_property_inputs(property_inputs, error_field='property_ids')
+        elif 'properties' in attrs:
+            property_inputs = self._validate_properties(attrs.pop('properties'))
+        attrs['_property_inputs'] = property_inputs
+        return attrs
+
+    def create(self, validated_data):
+        sponsor_input = validated_data.pop('_sponsor_input', None)
+        broker_input = validated_data.pop('_broker_input', None)
+        property_inputs = validated_data.pop('_property_inputs', [])
+        with transaction.atomic():
+            validated_data['sponsor'] = self._realize_nested_input(Sponsor, sponsor_input)
+            if broker_input is not None:
+                validated_data['broker'] = self._realize_nested_input(Broker, broker_input)
+            deal = Deal.objects.create(**validated_data)
+            properties = [
+                self._realize_property_input(property_input, index)
+                for index, property_input in enumerate(property_inputs)
+            ]
+            if properties:
+                _create_deal_property_links(deal, properties)
+            return deal
+
+    def to_representation(self, instance):
+        return DealSerializer(instance, context=self.context).data
+
+    def _validate_sponsor_input(self, value):
+        if value in (None, ''):
+            return None
+        if isinstance(value, str):
+            return ('existing', _resolve_existing_uuid(Sponsor, value, 'sponsor'))
+        if isinstance(value, dict):
+            serializer = SponsorSerializer(data=value, context=self.context)
+            try:
+                serializer.is_valid(raise_exception=True)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({'sponsor': exc.detail}) from exc
+            return ('new', serializer.validated_data)
+        raise serializers.ValidationError({'sponsor': 'Expected an existing sponsor id, an object, or null.'})
+
+    def _validate_broker_input(self, value):
+        if value in (None, ''):
+            return None
+        if isinstance(value, str):
+            return ('existing', _resolve_existing_uuid(Broker, value, 'broker'))
+        if isinstance(value, dict):
+            data = {'status': 'active', 'contact_name': '', **value}
+            if not data.get('contact_name'):
+                data['contact_name'] = data.get('company_name', '')
+            serializer = BrokerSerializer(data=data, context=self.context)
+            try:
+                serializer.is_valid(raise_exception=True)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({'broker': exc.detail}) from exc
+            return ('new', serializer.validated_data)
+        raise serializers.ValidationError({'broker': 'Expected an existing broker id, an object, or null.'})
+
+    def _validate_properties(self, values):
+        property_inputs = []
+        for index, value in enumerate(values or []):
+            property_input = self._validate_property_input(value, index)
+            property_inputs.append(property_input)
+        self._validate_unique_property_inputs(property_inputs)
+        return property_inputs
+
+    def _validate_unique_property_inputs(self, property_inputs, error_field='properties'):
+        seen = set()
+        for index, property_input in enumerate(property_inputs):
+            identity = self._property_identity(property_input)
+            if identity in seen:
+                raise serializers.ValidationError({
+                    error_field: f'Property at index {index} duplicates another property on this deal.',
+                })
+            seen.add(identity)
+
+    def _validate_property_input(self, value, index):
+        if isinstance(value, str):
+            return ('existing', _resolve_existing_uuid(Property, value, f'properties[{index}]'))
+        if isinstance(value, dict):
+            serializer = PropertySerializer(data=value, context=self.context)
+            try:
+                serializer.is_valid(raise_exception=True)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({'properties': {index: exc.detail}}) from exc
+            return ('new', serializer.validated_data)
+        raise serializers.ValidationError({
+            'properties': {index: 'Expected an existing property id or an object.'},
+        })
+
+    def _property_identity(self, property_input):
+        kind, payload = property_input
+        if kind == 'existing':
+            return ('existing', payload.pk)
+        return ('new', payload['address_normalized'])
+
+    def _realize_nested_input(self, model_cls, nested_input):
+        if nested_input is None:
+            return None
+        kind, payload = nested_input
+        if kind == 'existing':
+            return payload
+        return model_cls.objects.create(**payload)
+
+    def _realize_property_input(self, property_input, index):
+        kind, payload = property_input
+        if kind == 'existing':
+            return payload
+        try:
+            with transaction.atomic():
+                return Property.objects.create(**payload)
+        except IntegrityError as exc:
+            existing = Property.objects.filter(address_normalized=payload.get('address_normalized')).first()
+            detail = {'address_normalized': 'A property with this normalized address already exists.'}
+            if existing:
+                detail['existing_property'] = str(existing.pk)
+            raise serializers.ValidationError({'properties': {index: detail}}) from exc
 
 
 class PipelineTransitionSerializer(serializers.Serializer):
@@ -342,16 +541,27 @@ class DocumentSerializer(serializers.ModelSerializer):
             'visibility_roles',
             'details',
         ]
+        # file_type, content_type, and file_size_bytes are server-controlled
+        # storage facts: keeping them read-only stops a client from PATCHing a
+        # pending row to bypass the intent-time size cap or file-type whitelist.
+        # visibility_roles is likewise fixed after intent so a non-staff uploader
+        # cannot silently retag who can see a document. (deal/category/
+        # document_name are held immutable by validate() so a change attempt is
+        # an explicit 400 rather than a silent ignore.)
         read_only_fields = [
             'uploaded_by',
             'uploaded_by_username',
             'uploaded_date',
             'version',
             'file_url',
+            'file_type',
+            'content_type',
+            'file_size_bytes',
             'is_executed',
             'storage_status',
             'pipeline_stage_at_upload',
             'checksum_sha256',
+            'visibility_roles',
         ]
         # Documents are created only via upload-intent (POST is disabled), so the
         # (deal, category, document_name, version) uniqueness is enforced
@@ -428,6 +638,7 @@ class DocumentDownloadSerializer(serializers.Serializer):
     download_url = serializers.URLField()
     expires_in = serializers.IntegerField()
     document_name = serializers.CharField()
+    filename = serializers.CharField()
     content_type = serializers.CharField()
     file_size_bytes = serializers.IntegerField(allow_null=True)
 
@@ -461,6 +672,24 @@ def _validate_decimal_string(value, field_name):
     if not decimal_value.is_finite():
         raise serializers.ValidationError(f'{field_name} must be a finite decimal number.')
     return str(decimal_value)
+
+
+def _resolve_existing_uuid(model_cls, value, field_name):
+    try:
+        object_id = UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise serializers.ValidationError({field_name: 'Invalid UUID.'}) from exc
+    obj = model_cls.objects.filter(pk=object_id).first()
+    if not obj:
+        raise serializers.ValidationError({field_name: 'Selected record does not exist.'})
+    return obj
+
+
+def _create_deal_property_links(deal, properties):
+    DealProperty.objects.bulk_create([
+        DealProperty(deal=deal, property=property_obj, is_primary=index == 0)
+        for index, property_obj in enumerate(properties)
+    ])
 
 
 def _reject_sensitive_details(value):

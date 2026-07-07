@@ -43,7 +43,7 @@ export const createDealSchema = z
     source_date: z.string().min(1, 'Select a source date'),
     fund_id: z.string().optional(),
 
-    sponsor_mode: z.enum(['existing', 'new']),
+    sponsor_mode: z.enum(['none', 'existing', 'new']),
     sponsor_id: z.string().optional(),
     sponsor_new: entitySub,
 
@@ -51,7 +51,7 @@ export const createDealSchema = z
     broker_id: z.string().optional(),
     broker_new: brokerSub,
 
-    properties: z.array(propertyRow).min(1, 'Add at least one property'),
+    properties: z.array(propertyRow),
   })
   .superRefine((value, ctx) => {
     if (value.sponsor_mode === 'existing' && !value.sponsor_id) {
@@ -104,7 +104,7 @@ export const defaultCreateDealValues: CreateDealForm = {
   source_channel: '',
   source_date: new Date().toISOString().slice(0, 10),
   fund_id: '',
-  sponsor_mode: 'existing',
+  sponsor_mode: 'none',
   sponsor_id: '',
   sponsor_new: {
     entity_name: '',
@@ -117,7 +117,5 @@ export const defaultCreateDealValues: CreateDealForm = {
   broker_mode: 'none',
   broker_id: '',
   broker_new: { company_name: '', contact_name: '', email: '', phone: '' },
-  properties: [
-    { mode: 'existing', property_id: '', address: '', city: '', state: '', zip: '', property_type: '', msa: '' },
-  ],
+  properties: [],
 };

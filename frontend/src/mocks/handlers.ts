@@ -54,6 +54,26 @@ function badRequest(field: string, message: string): never {
   throw new ApiError(message, 400, { [field]: [message] });
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function requireString(data: Record<string, unknown>, field: string, errorField = field): string {
+  const value = stringValue(data[field]);
+  if (!value) badRequest(errorField, `${field} is required.`);
+  return value;
+}
+
+function requireEmail(data: Record<string, unknown>, field: string, errorField = field): string {
+  const value = requireString(data, field, errorField);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) badRequest(errorField, `${field} must be a valid email.`);
+  return value;
+}
+
 function deriveCategory(type: InvestmentType): Deal['investment_category'] {
   if (type === 'whole_loan_bridge' || type === 'whole_loan_permanent') return 'debt';
   if (type === 'mezzanine' || type === 'preferred_equity') return 'hybrid';
@@ -105,21 +125,22 @@ function buildSummary(query: URLSearchParams) {
 
 let dealPropertyPk = 5000;
 
-function resolveSponsor(input: unknown): Sponsor {
+function resolveSponsor(input: unknown): Sponsor | null {
+  if (input === null || input === undefined || input === '') return null;
   if (typeof input === 'string') {
     const existing = sponsors.find((s) => s.id === input);
     if (!existing) badRequest('sponsor', 'Selected sponsor no longer exists.');
     return existing!;
   }
-  const data = input as Partial<Sponsor>;
+  if (!isObject(input)) badRequest('sponsor', 'Expected an existing sponsor id, an object, or null.');
   const created: Sponsor = {
     id: newId('sp'),
-    entity_name: data.entity_name ?? 'New Sponsor',
-    entity_type: data.entity_type ?? 'llc',
-    primary_contact_name: data.primary_contact_name ?? '',
-    primary_contact_email: data.primary_contact_email ?? '',
-    primary_contact_phone: data.primary_contact_phone ?? '',
-    relationship_rating: data.relationship_rating ?? 'new',
+    entity_name: requireString(input, 'entity_name', 'sponsor'),
+    entity_type: requireString(input, 'entity_type', 'sponsor') as Sponsor['entity_type'],
+    primary_contact_name: requireString(input, 'primary_contact_name', 'sponsor'),
+    primary_contact_email: requireEmail(input, 'primary_contact_email', 'sponsor'),
+    primary_contact_phone: stringValue(input.primary_contact_phone),
+    relationship_rating: (stringValue(input.relationship_rating) || 'new') as Sponsor['relationship_rating'],
     details: {},
   };
   sponsors.push(created);
@@ -128,19 +149,44 @@ function resolveSponsor(input: unknown): Sponsor {
 
 function resolveBroker(input: unknown): Broker | null {
   if (input === null || input === undefined || input === '') return null;
-  if (typeof input === 'string') return brokers.find((b) => b.id === input) ?? null;
-  const data = input as Partial<Broker>;
+  if (typeof input === 'string') {
+    const existing = brokers.find((b) => b.id === input);
+    if (!existing) badRequest('broker', 'Selected broker no longer exists.');
+    return existing!;
+  }
+  if (!isObject(input)) badRequest('broker', 'Expected an existing broker id, an object, or null.');
+  const companyName = requireString(input, 'company_name', 'broker');
   const created: Broker = {
     id: newId('bk'),
-    company_name: data.company_name ?? 'New Broker',
-    contact_name: data.contact_name ?? '',
-    email: data.email ?? '',
-    phone: data.phone ?? '',
+    company_name: companyName,
+    contact_name: stringValue(input.contact_name) || companyName,
+    email: requireEmail(input, 'email', 'broker'),
+    phone: stringValue(input.phone),
     status: 'active',
     details: {},
   };
   brokers.push(created);
   return created;
+}
+
+function resolveFund(input: unknown): Fund | null {
+  if (input === null || input === undefined || input === '') return null;
+  if (typeof input !== 'string') badRequest('fund', 'Expected an existing fund id or null.');
+  const existing = funds.find((f) => f.id === input);
+  if (!existing) badRequest('fund', 'Selected fund no longer exists.');
+  return existing!;
+}
+
+function resolveExistingSponsor(input: unknown): Sponsor | null {
+  if (input === null || input === undefined || input === '') return null;
+  if (typeof input !== 'string') badRequest('sponsor', 'Expected an existing sponsor id or null.');
+  return resolveSponsor(input);
+}
+
+function resolveExistingBroker(input: unknown): Broker | null {
+  if (input === null || input === undefined || input === '') return null;
+  if (typeof input !== 'string') badRequest('broker', 'Expected an existing broker id or null.');
+  return resolveBroker(input);
 }
 
 function resolveProperty(input: unknown): Property {
@@ -149,20 +195,64 @@ function resolveProperty(input: unknown): Property {
     if (!existing) badRequest('properties', 'Selected property no longer exists.');
     return existing!;
   }
-  const data = input as Partial<Property>;
+  if (!isObject(input)) badRequest('properties', 'Expected an existing property id or an object.');
+  const address = requireString(input, 'address', 'properties');
+  const city = requireString(input, 'city', 'properties');
+  const state = requireString(input, 'state', 'properties').toUpperCase();
+  const zip = requireString(input, 'zip', 'properties');
+  const propertyType = requireString(input, 'property_type', 'properties') as Property['property_type'];
+  const addressNormalized = normalizePropertyInput(input);
+  if (properties.some((property) => property.address_normalized === addressNormalized)) {
+    badRequest('properties', 'A property with this normalized address already exists.');
+  }
   const created: Property = {
     id: newId('pr'),
-    address: data.address ?? '',
-    address_normalized: `${data.address ?? ''} ${data.city ?? ''} ${data.state ?? ''} ${data.zip ?? ''}`.toUpperCase(),
-    city: data.city ?? '',
-    state: (data.state ?? '').toUpperCase(),
-    zip: data.zip ?? '',
-    property_type: data.property_type ?? 'other',
-    msa: data.msa ?? '',
+    address,
+    address_normalized: addressNormalized,
+    city,
+    state,
+    zip,
+    property_type: propertyType,
+    msa: stringValue(input.msa),
     details: {},
   };
   properties.push(created);
   return created;
+}
+
+function normalizePropertyInput(input: Record<string, unknown>): string {
+  return [
+    stringValue(input.address),
+    stringValue(input.city),
+    stringValue(input.state).toUpperCase(),
+    stringValue(input.zip),
+  ].join(' ').toUpperCase();
+}
+
+function propertyInputIdentity(input: unknown, field = 'properties'): string {
+  if (typeof input === 'string') {
+    const existing = properties.find((property) => property.id === input);
+    if (!existing) badRequest(field, 'Selected property no longer exists.');
+    return `id:${existing.id}`;
+  }
+  if (field === 'property_ids') badRequest(field, 'Incorrect type. Expected pk value.');
+  if (!isObject(input)) badRequest(field, 'Expected an existing property id or an object.');
+  return `address:${normalizePropertyInput(input)}`;
+}
+
+function validateUniquePropertyInputs(inputs: unknown[], field = 'properties') {
+  const seen = new Set<string>();
+  inputs.forEach((input, index) => {
+    const identity = propertyInputIdentity(input, field);
+    if (seen.has(identity)) {
+      const message =
+        field === 'property_ids'
+          ? 'property_ids cannot contain duplicates.'
+          : `Property at index ${index} duplicates another property on this deal.`;
+      badRequest(field, message);
+    }
+    seen.add(identity);
+  });
 }
 
 function toDealProperties(props: Property[]): DealPropertySummary[] {
@@ -176,10 +266,22 @@ function toDealProperties(props: Property[]): DealPropertySummary[] {
 function createDeal(body: Record<string, unknown>): Deal {
   const sponsor = resolveSponsor(body.sponsor);
   const broker = resolveBroker(body.broker);
-  const fundId = (body.fund as string | null) || null;
-  const fund: Fund | null = fundId ? funds.find((f) => f.id === fundId) ?? null : null;
-  const propertyInputs = Array.isArray(body.properties) ? body.properties : [];
-  if (propertyInputs.length === 0) badRequest('properties', 'Add at least one property.');
+  const fund = resolveFund(body.fund);
+  if ('properties' in body && 'property_ids' in body) {
+    badRequest('properties', 'Use either properties or property_ids, not both.');
+  }
+  if ('properties' in body && !Array.isArray(body.properties)) {
+    badRequest('properties', 'Expected a list of property ids or objects.');
+  }
+  if ('property_ids' in body && !Array.isArray(body.property_ids)) {
+    badRequest('property_ids', 'Expected a list of property ids.');
+  }
+  const propertyInputs = Array.isArray(body.property_ids)
+    ? body.property_ids
+    : Array.isArray(body.properties)
+      ? body.properties
+      : [];
+  validateUniquePropertyInputs(propertyInputs, Array.isArray(body.property_ids) ? 'property_ids' : 'properties');
   const resolvedProperties = propertyInputs.map(resolveProperty);
   const investmentType = body.investment_type as InvestmentType;
 
@@ -191,7 +293,7 @@ function createDeal(body: Record<string, unknown>): Deal {
     pipeline_status: 'sourced',
     syndication_status: 'not_started',
     paused_from_status: null,
-    sponsor: sponsor.id,
+    sponsor: sponsor?.id ?? null,
     sponsor_detail: sponsor,
     broker: broker?.id ?? null,
     broker_detail: broker,
@@ -220,14 +322,45 @@ function updateDeal(deal: Deal, body: Record<string, unknown>): Deal {
   if (body.requested_amount !== undefined) deal.requested_amount = String(body.requested_amount);
   if (typeof body.source_channel === 'string') deal.source_channel = body.source_channel as Deal['source_channel'];
   if (typeof body.source_date === 'string') deal.source_date = body.source_date;
+  if ('sponsor' in body) {
+    const sponsor = resolveExistingSponsor(body.sponsor);
+    if (deal.sponsor && sponsor?.id !== deal.sponsor) {
+      badRequest('sponsor', 'This relationship cannot be changed through this endpoint.');
+    }
+    if (!deal.sponsor && sponsor) {
+      deal.sponsor = sponsor.id;
+      deal.sponsor_detail = sponsor;
+    }
+  }
+  if ('broker' in body) {
+    const broker = resolveExistingBroker(body.broker);
+    if (deal.broker && broker?.id !== deal.broker) {
+      badRequest('broker', 'This relationship cannot be changed through this endpoint.');
+    }
+    if (!deal.broker && broker) {
+      deal.broker = broker.id;
+      deal.broker_detail = broker;
+    }
+  }
   if ('fund' in body) {
-    const fundId = (body.fund as string | null) || null;
-    deal.fund = fundId;
-    deal.fund_detail = fundId ? funds.find((f) => f.id === fundId) ?? null : null;
+    const fund = resolveFund(body.fund);
+    if (deal.fund && fund?.id !== deal.fund) {
+      badRequest('fund', 'This relationship cannot be changed through this endpoint.');
+    }
+    if (!deal.fund && fund) {
+      deal.fund = fund.id;
+      deal.fund_detail = fund;
+    }
   }
   if (Array.isArray(body.property_ids)) {
-    const resolved = body.property_ids.map((id) => properties.find((p) => p.id === id)).filter(Boolean) as Property[];
-    if (resolved.length === 0) badRequest('property_ids', 'A deal must have at least one property.');
+    if (body.property_ids.length === 0) badRequest('property_ids', 'property_ids must include at least one property when provided.');
+    validateUniquePropertyInputs(body.property_ids, 'property_ids');
+    const resolved = body.property_ids.map((id) => {
+      if (typeof id !== 'string') badRequest('property_ids', 'Expected a list of property ids.');
+      const property = properties.find((p) => p.id === id);
+      if (!property) badRequest('property_ids', 'Selected property no longer exists.');
+      return property;
+    });
     deal.properties = toDealProperties(resolved);
   }
   deal.updated_at = nowIso();
@@ -357,10 +490,16 @@ function downloadDocument(documentId: string) {
   if (document.storage_status !== 'ready') {
     throw new ApiError('Document is not ready for download.', 409, { detail: 'Not ready.' });
   }
+  const ext = (document.file_type || '').toLowerCase();
+  const filename =
+    ext && !document.document_name.toLowerCase().endsWith(`.${ext}`)
+      ? `${document.document_name}.${ext}`
+      : document.document_name;
   return {
     download_url: `/api/documents/${document.id}/blob/`,
     expires_in: 900,
     document_name: document.document_name,
+    filename,
     content_type: document.content_type || 'application/octet-stream',
     file_size_bytes: document.file_size_bytes,
   };

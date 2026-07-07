@@ -34,6 +34,7 @@ export default function DealEditPage() {
   const { register, handleSubmit, reset, formState } = useForm<EditForm>();
   const errors = formState.errors;
   const [propertyIds, setPropertyIds] = useState<string[]>([]);
+  const [initialPropertyIds, setInitialPropertyIds] = useState<string[]>([]);
   const [propertyError, setPropertyError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
@@ -49,7 +50,10 @@ export default function DealEditPage() {
       source_date: deal.source_date,
       fund_id: deal.fund ?? '',
     });
-    setPropertyIds(deal.properties.map((entry) => entry.property.id));
+    const nextPropertyIds = deal.properties.map((entry) => entry.property.id);
+    setPropertyIds(nextPropertyIds);
+    setInitialPropertyIds(nextPropertyIds);
+    setPropertyError(null);
   }, [deal, reset]);
 
   if (dealQuery.isLoading) return <Spinner label="Loading deal…" />;
@@ -67,6 +71,7 @@ export default function DealEditPage() {
   const selected = propertyIds.map((pid) => propertyById.get(pid)).filter(Boolean) as Property[];
   const available = allProperties.filter((p) => !propertyIds.includes(p.id));
   const fundOptions = (fundsQuery.data ?? []).map((f) => ({ value: f.id, label: f.name }));
+  const fundLocked = Boolean(deal.fund);
 
   const addProperty = (pid: string) => {
     if (pid) {
@@ -74,13 +79,17 @@ export default function DealEditPage() {
       setPropertyError(null);
     }
   };
-  const removeProperty = (pid: string) => setPropertyIds((prev) => prev.filter((x) => x !== pid));
+  const removeProperty = (pid: string) => {
+    setPropertyIds((prev) => prev.filter((x) => x !== pid));
+    setPropertyError(null);
+  };
   const makePrimary = (pid: string) =>
     setPropertyIds((prev) => [pid, ...prev.filter((x) => x !== pid)]);
 
   const onSubmit = (values: EditForm) => {
     setBanner(null);
-    if (propertyIds.length === 0) {
+    const propertiesChanged = !sameOrderedIds(propertyIds, initialPropertyIds);
+    if (propertiesChanged && initialPropertyIds.length > 0 && propertyIds.length === 0) {
       setPropertyError('Keep at least one property on the deal.');
       return;
     }
@@ -90,9 +99,13 @@ export default function DealEditPage() {
       requested_amount: values.requested_amount,
       source_channel: values.source_channel as UpdateDealPayload['source_channel'],
       source_date: values.source_date,
-      fund: values.fund_id || null,
-      property_ids: propertyIds,
     };
+    if (!deal.fund && values.fund_id) {
+      payload.fund = values.fund_id;
+    }
+    if (propertiesChanged) {
+      payload.property_ids = propertyIds;
+    }
     updateDeal.mutate(payload, {
       onSuccess: () => navigate(`/deals/${id}`),
       onError: (error) => {
@@ -112,7 +125,7 @@ export default function DealEditPage() {
             {deal.name}
           </h1>
           <p className="mt-2 max-w-xl text-[var(--slate)]">
-            Update terms and collateral. Sponsor and broker are fixed once a deal exists; pipeline
+            Update terms and collateral. Sponsor, broker, and fund are fixed once assigned; pipeline
             stage moves through the transition controls on the deal page.
           </p>
         </div>
@@ -164,8 +177,14 @@ export default function DealEditPage() {
             <FormField label="Source date" required error={errors.source_date?.message}>
               <Input type="date" {...register('source_date', { required: 'Select a source date' })} />
             </FormField>
-            <FormField label="Fund" hint="Optional" className="sm:col-span-2">
-              <SelectNative placeholder="Unassigned" options={fundOptions} {...register('fund_id')} />
+            <FormField label="Fund" hint={fundLocked ? 'Fixed once assigned' : 'Optional'} className="sm:col-span-2">
+              <SelectNative
+                placeholder="Unassigned"
+                options={fundOptions}
+                {...register('fund_id')}
+                disabled={fundLocked}
+                className={fundLocked ? 'opacity-70' : undefined}
+              />
             </FormField>
           </div>
         </Panel>
@@ -214,6 +233,11 @@ export default function DealEditPage() {
               ))}
             </ul>
           ) : null}
+          {selected.length === 0 ? (
+            <div className="mb-4 rounded-md border border-dashed border-[var(--border)] bg-[var(--paper)] px-4 py-5 text-sm text-[var(--slate)]">
+              No property attached yet.
+            </div>
+          ) : null}
 
           <div className="flex items-end gap-2">
             <FormField label="Add a property" className="flex-1">
@@ -241,7 +265,7 @@ export default function DealEditPage() {
             <PanelField label="Analyst">{deal.assigned_analyst_detail?.username ?? 'Unassigned'}</PanelField>
           </dl>
           <p className="mt-3 text-xs text-[var(--slate)]">
-            Sponsor and broker can’t be reassigned after origination.
+            Sponsor, broker, and fund can’t be reassigned after origination.
           </p>
         </Panel>
       </div>
@@ -256,6 +280,10 @@ export default function DealEditPage() {
       </div>
     </form>
   );
+}
+
+function sameOrderedIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function BackLink({ id }: { id: string }) {

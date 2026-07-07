@@ -142,7 +142,7 @@ export interface Deal {
   pipeline_status: PipelineStatus;
   syndication_status: SyndicationStatus;
   paused_from_status: PipelineStatus | null;
-  sponsor: string;
+  sponsor: string | null;
   sponsor_detail: Sponsor | null;
   broker: string | null;
   broker_detail: Broker | null;
@@ -197,6 +197,7 @@ export interface DocumentDownloadResponse {
   download_url: string;
   expires_in: number;
   document_name: string;
+  filename: string;
   content_type: string;
   file_size_bytes: number | null;
 }

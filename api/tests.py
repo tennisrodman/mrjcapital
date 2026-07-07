@@ -21,9 +21,11 @@ from api.fields import EncryptedTextField, _fernet
 from api.models import (
     ActivityActionType,
     ActivityLog,
+    Broker,
     Deal,
     Document,
     DocumentStorageStatus,
+    Fund,
     PipelineStatus,
     Property,
     Sponsor,
@@ -288,6 +290,222 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(deal.assigned_analyst, self.user)
         self.assertEqual(deal.deal_properties.get().property, self.property)
         self.assertEqual(resp.data['investment_category'], 'debt')
+
+    def test_create_sparse_deal_without_sponsor_or_properties(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Early First Look',
+                'investment_type': 'whole_loan_bridge',
+                'source_channel': 'internal_prospecting',
+                'requested_amount': '1000000.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        self.assertIsNone(deal.sponsor)
+        self.assertEqual(deal.deal_properties.count(), 0)
+        self.assertIsNone(resp.data['sponsor'])
+        self.assertEqual(resp.data['properties'], [])
+
+    def test_create_deal_with_nested_sponsor_broker_and_property(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Nested Intake Deal',
+                'investment_type': 'whole_loan_bridge',
+                'source_channel': 'broker',
+                'requested_amount': '3500000.00',
+                'sponsor': {
+                    'entity_name': 'Nested Sponsor LLC',
+                    'entity_type': 'llc',
+                    'primary_contact_name': 'Nora Sponsor',
+                    'primary_contact_email': 'nora@example.com',
+                },
+                'broker': {
+                    'company_name': 'Nested Capital Markets',
+                    'email': 'broker@example.com',
+                },
+                'properties': [
+                    {
+                        'address': '777 Nested Way',
+                        'city': 'Pasadena',
+                        'state': 'CA',
+                        'zip': '91101',
+                        'property_type': 'multifamily',
+                        'msa': 'Los Angeles-Long Beach-Anaheim',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        self.assertEqual(deal.sponsor.entity_name, 'Nested Sponsor LLC')
+        self.assertEqual(deal.broker.company_name, 'Nested Capital Markets')
+        self.assertEqual(deal.broker.contact_name, 'Nested Capital Markets')
+        self.assertEqual(deal.deal_properties.get().property.address, '777 Nested Way')
+
+    def test_create_deal_with_mixed_existing_and_new_properties(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Mixed Property Intake',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '4500000.00',
+                'properties': [
+                    str(self.property.pk),
+                    {
+                        'address': '888 Mixed Ave',
+                        'city': 'Glendale',
+                        'state': 'CA',
+                        'zip': '91203',
+                        'property_type': 'office',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        links = list(deal.deal_properties.order_by('-is_primary', 'property__address'))
+        self.assertEqual(len(links), 2)
+        self.assertEqual(links[0].property, self.property)
+        self.assertTrue(links[0].is_primary)
+        self.assertTrue(Property.objects.filter(address='888 Mixed Ave').exists())
+
+    def test_nested_property_duplicate_is_rejected(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Duplicate Nested Property',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    {
+                        'address': '123 Main St',
+                        'city': 'Los Angeles',
+                        'state': 'CA',
+                        'zip': '90001',
+                        'property_type': 'multifamily',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('properties', resp.data)
+        self.assertFalse(Deal.objects.filter(name='Duplicate Nested Property').exists())
+
+    def test_nested_create_rolls_back_if_property_linking_fails(self):
+        with patch('api.serializers.DealProperty.objects.bulk_create', side_effect=IntegrityError('bulk failed')):
+            with self.assertRaises(IntegrityError):
+                self.client.post(
+                    '/api/deals/',
+                    {
+                        'name': 'Rollback Nested Intake',
+                        'investment_type': 'whole_loan_bridge',
+                        'source_channel': 'broker',
+                        'requested_amount': '2500000.00',
+                        'sponsor': {
+                            'entity_name': 'Rollback Sponsor LLC',
+                            'entity_type': 'llc',
+                            'primary_contact_name': 'Riley Rollback',
+                            'primary_contact_email': 'rollback@example.com',
+                        },
+                        'broker': {
+                            'company_name': 'Rollback Broker LLC',
+                            'email': 'rollback-broker@example.com',
+                        },
+                        'properties': [
+                            {
+                                'address': '999 Rollback Rd',
+                                'city': 'Burbank',
+                                'state': 'CA',
+                                'zip': '91501',
+                                'property_type': 'industrial',
+                            },
+                        ],
+                    },
+                    format='json',
+                )
+
+        self.assertFalse(Deal.objects.filter(name='Rollback Nested Intake').exists())
+        self.assertFalse(Sponsor.objects.filter(entity_name='Rollback Sponsor LLC').exists())
+        self.assertFalse(Broker.objects.filter(company_name='Rollback Broker LLC').exists())
+        self.assertFalse(Property.objects.filter(address='999 Rollback Rd').exists())
+
+    def test_nested_property_integrity_error_returns_validation_error(self):
+        with patch('api.serializers.Property.objects.create', side_effect=IntegrityError('duplicate key')):
+            resp = self.client.post(
+                '/api/deals/',
+                {
+                    'name': 'Race Duplicate Property',
+                    'investment_type': 'whole_loan_bridge',
+                    'sponsor': str(self.sponsor.pk),
+                    'source_channel': 'direct',
+                    'requested_amount': '2500000.00',
+                    'properties': [
+                        {
+                            'address': '999 Race Rd',
+                            'city': 'Burbank',
+                            'state': 'CA',
+                            'zip': '91501',
+                            'property_type': 'industrial',
+                        },
+                    ],
+                },
+                format='json',
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('properties', resp.data)
+        self.assertFalse(Deal.objects.filter(name='Race Duplicate Property').exists())
+
+    def test_patch_can_fill_empty_relationships_once(self):
+        broker = Broker.objects.create(
+            company_name='Fill Later Broker',
+            contact_name='Fill Later Broker',
+            email='fill-broker@example.com',
+        )
+        fund = Fund.objects.create(name='Fill Later Fund', status='forming')
+        deal = Deal.objects.create(
+            name='Fill Later Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.user,
+            source_channel='direct',
+            requested_amount='2500000.00',
+        )
+
+        fill = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {
+                'sponsor': str(self.sponsor.pk),
+                'broker': str(broker.pk),
+                'fund': str(fund.pk),
+            },
+            format='json',
+        )
+
+        self.assertEqual(fill.status_code, status.HTTP_200_OK)
+        deal.refresh_from_db()
+        self.assertEqual(deal.sponsor, self.sponsor)
+        self.assertEqual(deal.broker, broker)
+        self.assertEqual(deal.fund, fund)
+
+        remove = self.client.patch(f'/api/deals/{deal.pk}/', {'broker': None}, format='json')
+        self.assertEqual(remove.status_code, status.HTTP_400_BAD_REQUEST)
+        deal.refresh_from_db()
+        self.assertEqual(deal.broker, broker)
 
     def test_deal_rejects_duplicate_property_ids(self):
         resp = self.client.post(
@@ -1080,6 +1298,48 @@ class DealSpineApiTests(APITestCase):
         blob = self.client.get(f'/api/documents/{document["id"]}/blob/')
         self.assertEqual(blob.status_code, status.HTTP_200_OK)
         self.assertEqual(blob.content, content)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_blob_put_verifies_declared_checksum(self):
+        deal = self.create_deal()
+        content = b'%PDF-1.4 checksummed bytes'
+        wrong_checksum = hashlib.sha256(b'different bytes').hexdigest()
+
+        intent = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Checksum doc',
+                'category': 'offering_memo',
+                'file_type': 'pdf',
+                'content_type': 'application/pdf',
+                'file_size_bytes': len(content),
+                'checksum_sha256': wrong_checksum,
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(intent.status_code, status.HTTP_201_CREATED)
+        document_id = intent.data['document']['id']
+
+        rejected = self.client.put(
+            f'/api/documents/{document_id}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        self.assertEqual(Document.objects.get(pk=document_id).storage_status, 'pending')
+
+        # A matching declared checksum is accepted and stored.
+        Document.objects.filter(pk=document_id).update(
+            checksum_sha256=hashlib.sha256(content).hexdigest()
+        )
+        accepted = self.client.put(
+            f'/api/documents/{document_id}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
+        self.assertEqual(accepted.status_code, status.HTTP_200_OK)
 
     @override_settings(DOCUMENT_STORAGE_BACKEND='local')
     def test_document_upload_intent_rejects_oversized_file(self):

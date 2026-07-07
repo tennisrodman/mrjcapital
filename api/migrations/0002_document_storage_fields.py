@@ -34,7 +34,7 @@ class Migration(migrations.Migration):
             field=models.CharField(
                 choices=[('pending', 'Pending upload'), ('ready', 'Ready'), ('failed', 'Failed')],
                 db_index=True,
-                default='ready',
+                default='pending',
                 max_length=16,
             ),
         ),

@@ -69,7 +69,7 @@ List/detail endpoints only return `storage_status=ready` documents by default (s
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DOCUMENT_STORAGE_BACKEND` | `local` | `r2` or `local` |
-| `DOCUMENT_MAX_UPLOAD_BYTES` | `104857600` | 100 MB cap |
+| `DOCUMENT_MAX_UPLOAD_BYTES` | `52428800` | 50 MB cap (also drives `DATA_UPLOAD_MAX_MEMORY_SIZE`) |
 | `DOCUMENT_PENDING_MAX_AGE_HOURS` | `24` | Stale pending cleanup cutoff |
 | `R2_ACCOUNT_ID` | — | Cloudflare account ID |
 | `R2_ACCESS_KEY_ID` | — | R2 API token |

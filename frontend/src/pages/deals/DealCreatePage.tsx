@@ -68,17 +68,18 @@ export default function DealCreatePage() {
 
   const onSubmit = (values: CreateDealForm) => {
     setBanner(null);
-    const sponsor: string | SponsorInput =
-      values.sponsor_mode === 'existing'
-        ? values.sponsor_id ?? ''
-        : {
-            entity_name: values.sponsor_new.entity_name ?? '',
-            entity_type: (values.sponsor_new.entity_type ?? 'llc') as Sponsor['entity_type'],
-            primary_contact_name: values.sponsor_new.primary_contact_name ?? '',
-            primary_contact_email: values.sponsor_new.primary_contact_email ?? '',
-            primary_contact_phone: values.sponsor_new.primary_contact_phone ?? '',
-            relationship_rating: (values.sponsor_new.relationship_rating ?? 'new') as Sponsor['relationship_rating'],
-          };
+    let sponsor: string | SponsorInput | null = null;
+    if (values.sponsor_mode === 'existing') sponsor = values.sponsor_id ?? '';
+    else if (values.sponsor_mode === 'new') {
+      sponsor = {
+        entity_name: values.sponsor_new.entity_name ?? '',
+        entity_type: (values.sponsor_new.entity_type ?? 'llc') as Sponsor['entity_type'],
+        primary_contact_name: values.sponsor_new.primary_contact_name ?? '',
+        primary_contact_email: values.sponsor_new.primary_contact_email ?? '',
+        primary_contact_phone: values.sponsor_new.primary_contact_phone ?? '',
+        relationship_rating: (values.sponsor_new.relationship_rating ?? 'new') as Sponsor['relationship_rating'],
+      };
+    }
 
     let broker: string | BrokerInput | null = null;
     if (values.broker_mode === 'existing') broker = values.broker_id ?? '';
@@ -223,13 +224,16 @@ export default function DealCreatePage() {
                 value={sponsorMode}
                 onChange={(next) => setValue('sponsor_mode', next, { shouldValidate: false })}
                 options={[
+                  { value: 'none', label: 'None yet' },
                   { value: 'existing', label: 'Existing' },
                   { value: 'new', label: 'New' },
                 ]}
               />
             }
           >
-            {sponsorMode === 'existing' ? (
+            {sponsorMode === 'none' ? (
+              <PanelField label="Sponsor">Add sponsor or borrower details later.</PanelField>
+            ) : sponsorMode === 'existing' ? (
               <FormField label="Select sponsor" required error={errors.sponsor_id?.message}>
                 <SelectNative
                   placeholder={sponsorsQuery.isLoading ? 'Loading…' : 'Choose a sponsor'}

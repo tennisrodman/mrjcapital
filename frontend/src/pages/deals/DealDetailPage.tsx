@@ -29,6 +29,7 @@ import { TransitionDialog } from '@/components/deals/TransitionDialog';
 import { EmptyState, ErrorState, Spinner } from '@/components/deals/States';
 import { useDeal, useDealActivity, useDealDocuments } from '@/lib/api/deals';
 import { formatFileSize, useDownloadDocument } from '@/lib/api/documents';
+import { apiErrorMessage } from '@/lib/apiError';
 import {
   DOCUMENT_CATEGORY_LABELS,
   INVESTMENT_CATEGORY_LABELS,
@@ -258,6 +259,7 @@ function DocumentsPanel({
   onUpload: () => void;
 }) {
   const download = useDownloadDocument();
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const grouped = useMemo(() => {
     const map = new Map<DocumentCategory, DealDocument[]>();
     for (const doc of documents) {
@@ -317,7 +319,15 @@ function DocumentsPanel({
                       variant="ghost"
                       size="sm"
                       disabled={download.isPending}
-                      onClick={() => void download.mutate(doc)}
+                      onClick={() => {
+                        setDownloadError(null);
+                        download.mutate(doc, {
+                          onError: (err) =>
+                            setDownloadError(
+                              `Couldn't download ${doc.document_name}: ${apiErrorMessage(err)}`,
+                            ),
+                        });
+                      }}
                     >
                       <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
                       Download
@@ -333,6 +343,7 @@ function DocumentsPanel({
               </ul>
             </div>
           ))}
+          {downloadError ? <p className="text-sm text-red-600">{downloadError}</p> : null}
         </div>
       )}
     </Panel>

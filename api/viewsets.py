@@ -31,6 +31,7 @@ from api.models import (
 from api.serializers import (
     ActivityLogSerializer,
     BrokerSerializer,
+    DealCreateSerializer,
     DealPropertySerializer,
     DealSerializer,
     DocumentDownloadSerializer,
@@ -218,6 +219,11 @@ class DealViewSet(viewsets.ModelViewSet):
     queryset = Deal.objects.select_related('sponsor', 'broker', 'assigned_analyst', 'fund').prefetch_related(
         'deal_properties__property',
     )
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return DealCreateSerializer
+        return DealSerializer
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -513,6 +519,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             'download_url': download_target.url,
             'expires_in': download_target.expires_in,
             'document_name': document.document_name,
+            'filename': _download_filename(document),
             'content_type': document.content_type or 'application/octet-stream',
             'file_size_bytes': document.file_size_bytes,
         }
@@ -548,9 +555,18 @@ class DocumentViewSet(viewsets.ModelViewSet):
                     {'detail': f'Content-Type {request_content_type} does not match expected {declared_content_type}.'},
                     status=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 )
+            # If a checksum was declared at upload-intent, verify the received
+            # bytes against it before storing anything; otherwise record the
+            # computed digest so `complete` and downloads have it on file.
+            computed_checksum = sha256_hex(body)
+            if document.checksum_sha256 and computed_checksum.lower() != document.checksum_sha256.lower():
+                return Response(
+                    {'detail': 'Checksum verification failed.'},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
             content_type = request_content_type or declared_content_type or 'application/octet-stream'
             storage.write_object(document.file_url, body, content_type)
-            document.checksum_sha256 = sha256_hex(body)
+            document.checksum_sha256 = computed_checksum
             document.save(update_fields=['checksum_sha256'])
             return Response({'detail': 'Upload received.'}, status=status.HTTP_200_OK)
 
@@ -560,7 +576,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
             visible = _filter_visibility_role(Document.objects.filter(pk=document.pk), 'internal')
             if not visible.exists():
                 raise PermissionDenied('You cannot download this document.')
-        body, meta = storage.read_object(document.file_url)
+        try:
+            body, meta = storage.read_object(document.file_url)
+        except FileNotFoundError:
+            return Response({'detail': 'Stored file was not found.'}, status=status.HTTP_404_NOT_FOUND)
         response = HttpResponse(body, content_type=document.content_type or meta.content_type)
         response['Content-Disposition'] = f'attachment; filename="{_download_filename(document)}"'
         return response

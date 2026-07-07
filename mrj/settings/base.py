@@ -156,7 +156,13 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 DOCUMENT_STORAGE_BACKEND = os.environ.get('DOCUMENT_STORAGE_BACKEND', 'local')
-DOCUMENT_MAX_UPLOAD_BYTES = int(os.environ.get('DOCUMENT_MAX_UPLOAD_BYTES', str(100 * 1024 * 1024)))
+DOCUMENT_MAX_UPLOAD_BYTES = int(os.environ.get('DOCUMENT_MAX_UPLOAD_BYTES', str(50 * 1024 * 1024)))
+
+# Local-backend uploads land in a single in-memory request body, so Django's
+# default 2.5 MB in-memory request cap would reject anything larger long before
+# DOCUMENT_MAX_UPLOAD_BYTES applies. Keep the two in lockstep (plus a small
+# margin for headers) so the document cap is the single source of truth.
+DATA_UPLOAD_MAX_MEMORY_SIZE = DOCUMENT_MAX_UPLOAD_BYTES + 5 * 1024 * 1024
 R2_ACCOUNT_ID = os.environ.get('R2_ACCOUNT_ID', '')
 R2_ACCESS_KEY_ID = os.environ.get('R2_ACCESS_KEY_ID', '')
 R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY', '')

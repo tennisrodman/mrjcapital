@@ -190,10 +190,10 @@ export interface CreateDealPayload {
   requested_amount: string;
   source_channel: Deal['source_channel'];
   source_date: string;
-  sponsor: string | SponsorInput;
+  sponsor?: string | SponsorInput | null;
   broker?: string | BrokerInput | null;
   fund?: string | null;
-  properties: (string | PropertyInput)[];
+  properties?: (string | PropertyInput)[];
 }
 
 export interface UpdateDealPayload {
@@ -202,6 +202,8 @@ export interface UpdateDealPayload {
   requested_amount?: string;
   source_channel?: Deal['source_channel'];
   source_date?: string;
+  sponsor?: string | null;
+  broker?: string | null;
   fund?: string | null;
   property_ids?: string[];
 }

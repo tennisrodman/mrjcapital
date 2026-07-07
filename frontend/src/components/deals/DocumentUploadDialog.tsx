@@ -26,6 +26,7 @@ export function DocumentUploadDialog({ deal, open, onOpenChange }: DocumentUploa
   const upload = useUploadDocument(deal.id);
   const [file, setFile] = useState<File | null>(null);
   const [documentName, setDocumentName] = useState('');
+  const [nameEdited, setNameEdited] = useState(false);
   const [category, setCategory] = useState<DocumentCategory>('offering_memo');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -34,17 +35,20 @@ export function DocumentUploadDialog({ deal, open, onOpenChange }: DocumentUploa
     if (open) {
       setFile(null);
       setDocumentName('');
+      setNameEdited(false);
       setCategory('offering_memo');
       setNotes('');
       setError(null);
     }
   }, [open]);
 
+  // Derive the name from the selected file until the user edits it themselves,
+  // so swapping the chosen file updates the name instead of keeping the old one.
   useEffect(() => {
-    if (file && !documentName) {
+    if (file && !nameEdited) {
       setDocumentName(file.name.replace(/\.[^.]+$/, ''));
     }
-  }, [file, documentName]);
+  }, [file, nameEdited]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -105,7 +109,10 @@ export function DocumentUploadDialog({ deal, open, onOpenChange }: DocumentUploa
               <Input
                 id="document-name"
                 value={documentName}
-                onChange={(event) => setDocumentName(event.target.value)}
+                onChange={(event) => {
+                  setNameEdited(true);
+                  setDocumentName(event.target.value);
+                }}
                 placeholder="Offering memo"
               />
             </FormField>
