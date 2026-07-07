@@ -16,6 +16,7 @@ from .choices import (
 from .deal import Deal
 from .document import Document
 from .fund import Fund
+from .note import DealNote
 from .parties import Broker, Sponsor
 from .property import DealProperty, Property
 
@@ -25,6 +26,7 @@ __all__ = [
     'Broker',
     'BrokerStatus',
     'Deal',
+    'DealNote',
     'DealProperty',
     'Document',
     'DocumentCategory',

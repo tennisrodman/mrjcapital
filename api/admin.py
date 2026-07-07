@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.conf import settings
 
-from api.models import ActivityLog, Broker, Deal, DealProperty, Document, Fund, Property, Sponsor
+from api.models import ActivityLog, Broker, Deal, DealNote, DealProperty, Document, Fund, Property, Sponsor
 
 
 class DealPropertyInline(admin.TabularInline):
@@ -92,3 +92,11 @@ class ActivityLogAdmin(admin.ModelAdmin):
         if settings.AUDIT_LOG_ADMIN_IMMUTABLE:
             actions.pop('delete_selected', None)
         return actions
+
+
+@admin.register(DealNote)
+class DealNoteAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'author', 'created_at', 'updated_at']
+    search_fields = ['deal__name', 'body']
+    filter_horizontal = ['attachments']
+    readonly_fields = ['created_at', 'updated_at']

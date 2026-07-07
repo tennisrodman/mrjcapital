@@ -23,6 +23,7 @@ from api.models import (
     ActivityLog,
     Broker,
     Deal,
+    DealNote,
     Document,
     DocumentStorageStatus,
     Fund,
@@ -1638,6 +1639,41 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(response_results(broker_filter)[0]['company_name'], 'Metro Capital Markets')
         self.assertEqual(fund_filter.status_code, status.HTTP_200_OK)
         self.assertEqual(response_results(fund_filter)[0]['name'], 'MRJ Capital Fund I')
+
+
+class DealNoteModelTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('note_author', password='pw')
+        self.deal = Deal.objects.create(
+            name='Note Model Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.user,
+        )
+
+    def test_note_is_deleted_when_its_deal_is_deleted(self):
+        DealNote.objects.create(deal=self.deal, author=self.user, body='hello')
+        self.assertEqual(DealNote.objects.count(), 1)
+        self.deal.delete()
+        self.assertEqual(DealNote.objects.count(), 0)
+
+    def test_note_accepts_same_deal_document_attachment(self):
+        doc = Document.objects.create(
+            id=uuid.uuid4(),
+            deal=self.deal,
+            document_name='OM',
+            category='offering_memo',
+            file_url='deals/x/om.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.user,
+            visibility_roles=['internal'],
+        )
+        note = DealNote.objects.create(deal=self.deal, author=self.user, body='see OM')
+        note.attachments.add(doc)
+        self.assertEqual(list(note.attachments.all()), [doc])
+        self.assertEqual(list(doc.deal_notes.all()), [note])
 
 
 def response_results(response):
