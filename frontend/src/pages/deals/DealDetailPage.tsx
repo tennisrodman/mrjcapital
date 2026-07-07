@@ -543,7 +543,18 @@ function NotesPanel({
             {createNote.isPending ? 'Adding…' : 'Add note'}
           </Button>
         </div>
+        {createNote.isError ? (
+          <p className="text-sm text-red-600">
+            Couldn't add note: {apiErrorMessage(createNote.error)}
+          </p>
+        ) : null}
       </div>
+
+      {deleteNote.isError ? (
+        <p className="mt-3 text-sm text-red-600">
+          Couldn't delete note: {apiErrorMessage(deleteNote.error)}
+        </p>
+      ) : null}
 
       {isLoading ? (
         <p className="mt-4 text-sm text-[var(--slate)]">Loading notes…</p>
