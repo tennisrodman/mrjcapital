@@ -665,7 +665,10 @@ class ActivityLogSerializer(serializers.ModelSerializer):
 
 class DealNoteSerializer(serializers.ModelSerializer):
     author = serializers.PrimaryKeyRelatedField(read_only=True)
-    author_username = serializers.CharField(source='author.username', read_only=True)
+    # author is nullable (SET_NULL on user deletion). A SerializerMethodField
+    # always emits the key as a string-or-null, so the response shape is stable
+    # across authored/orphaned notes and matches the Demo mock and the TS type.
+    author_username = serializers.SerializerMethodField()
     attachments = serializers.PrimaryKeyRelatedField(
         many=True,
         required=False,
@@ -688,11 +691,13 @@ class DealNoteSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'author',
-            'author_username',
             'visibility_roles',
             'created_at',
             'updated_at',
         ]
+
+    def get_author_username(self, obj):
+        return obj.author.username if obj.author_id else None
 
     def validate_body(self, value):
         if not value or not value.strip():

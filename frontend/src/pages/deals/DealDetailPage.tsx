@@ -116,6 +116,7 @@ export default function DealDetailPage() {
                 dealId={deal.id}
                 notes={notesQuery.data ?? []}
                 isLoading={notesQuery.isLoading}
+                documents={documentsQuery.data ?? []}
               />
               <ActivityPanel
                 entries={activityQuery.data ?? []}
@@ -505,21 +506,39 @@ function NotesPanel({
   dealId,
   notes,
   isLoading,
+  documents,
 }: {
   dealId: string;
   notes: DealNote[];
   isLoading: boolean;
+  documents: DealDocument[];
 }) {
   const [body, setBody] = useState('');
+  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const createNote = useCreateNote(dealId);
   const deleteNote = useDeleteNote(dealId);
+
+  const toggleDoc = (id: string) => {
+    setSelectedDocs((current) =>
+      current.includes(id) ? current.filter((docId) => docId !== id) : [...current, id],
+    );
+  };
 
   const submit = () => {
     const trimmed = body.trim();
     if (!trimmed) return;
     createNote.mutate(
-      { deal: dealId, body: trimmed },
-      { onSuccess: () => setBody('') },
+      {
+        deal: dealId,
+        body: trimmed,
+        attachments: selectedDocs.length > 0 ? selectedDocs : undefined,
+      },
+      {
+        onSuccess: () => {
+          setBody('');
+          setSelectedDocs([]);
+        },
+      },
     );
   };
 
@@ -533,6 +552,31 @@ function NotesPanel({
           placeholder="Add an internal note…"
           className="w-full resize-y rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--slate)] focus:outline-none focus:ring-1 focus:ring-[var(--brass)]"
         />
+        {documents.length > 0 ? (
+          <details className="rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2">
+            <summary className="cursor-pointer text-xs text-[var(--slate)]">
+              Attach documents
+              {selectedDocs.length > 0 ? ` · ${selectedDocs.length} selected` : ''}
+            </summary>
+            <ul className="mt-2 space-y-1.5">
+              {documents.map((doc) => (
+                <li key={doc.id}>
+                  <label className="flex items-center gap-2 text-sm text-[var(--ink)]">
+                    <input
+                      type="checkbox"
+                      checked={selectedDocs.includes(doc.id)}
+                      onChange={() => toggleDoc(doc.id)}
+                    />
+                    <span className="truncate">
+                      {doc.document_name}
+                      <span className="ml-1 text-xs text-[var(--slate)]">v{doc.version}</span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
         <div className="flex justify-end">
           <Button
             type="button"

@@ -221,7 +221,7 @@ export interface DealNote {
   deal: string;
   body: string;
   author: number | null;
-  author_username?: string | null;
+  author_username: string | null;
   attachments: string[];
   visibility_roles: string[];
   created_at: string;

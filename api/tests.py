@@ -1725,6 +1725,39 @@ class DealNoteServiceTests(APITestCase):
         self.assertEqual(DealNote.objects.count(), 0)
         self.assertEqual(ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0)
 
+    def test_create_note_rejects_cross_deal_attachment(self):
+        from api.services.notes import create_note
+
+        other_deal = Deal.objects.create(
+            name='Other Service Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='500000.00',
+            assigned_analyst=self.user,
+        )
+        doc = Document.objects.create(
+            id=uuid.uuid4(),
+            deal=other_deal,
+            document_name='OM',
+            category='offering_memo',
+            file_url='deals/other/om.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.user,
+            visibility_roles=['internal'],
+        )
+        with self.assertRaises(ValueError):
+            create_note(
+                deal=self.deal,
+                author=self.user,
+                body='cross-deal attach',
+                attachments=[doc],
+                visibility_roles=None,
+                ip_address=None,
+            )
+        self.assertEqual(DealNote.objects.count(), 0)
+        self.assertEqual(ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0)
+
 
 class DealNoteApiTests(APITestCase):
     def setUp(self):
@@ -1823,6 +1856,18 @@ class DealNoteApiTests(APITestCase):
         self.assertEqual(resp.data['attachments'], [str(doc.id)])
         log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
         self.assertEqual(log.metadata['attachment_ids'], [str(doc.id)])
+
+    def test_author_username_is_present_as_null_when_author_absent(self):
+        # author is SET_NULL on user deletion; the key must still be emitted
+        # (as null) so the response shape is stable and matches the Demo mock.
+        DealNote.objects.create(deal=self.deal, author=None, body='orphaned note')
+        self.client.force_authenticate(self.staff)
+        resp = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        row = response_results(resp)[0]
+        self.assertIn('author_username', row)
+        self.assertIsNone(row['author_username'])
+        self.assertIsNone(row['author'])
 
     def test_staff_can_edit_body_but_not_deal(self):
         note = DealNote.objects.create(deal=self.deal, author=self.staff, body='draft')

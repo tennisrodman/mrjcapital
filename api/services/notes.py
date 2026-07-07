@@ -6,6 +6,15 @@ NOTE_EXCERPT_LENGTH = 80
 
 
 def create_note(*, deal, author, body, attachments=None, visibility_roles=None, ip_address=None):
+    # The API path validates same-deal attachments in DealNoteSerializer, but
+    # this service is exported: guard the data-integrity invariant here too so
+    # no internal caller can link a document from another deal by accident.
+    if attachments:
+        mismatched = [str(doc.id) for doc in attachments if doc.deal_id != deal.id]
+        if mismatched:
+            raise ValueError(
+                f'Cannot attach documents from a different deal: {", ".join(mismatched)}'
+            )
     with transaction.atomic():
         note = DealNote.objects.create(
             deal=deal,
