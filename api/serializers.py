@@ -162,10 +162,15 @@ class PropertySerializer(serializers.ModelSerializer):
         if self.instance:
             existing = existing.exclude(pk=self.instance.pk)
         if existing.exists():
-            raise serializers.ValidationError({
+            match = existing.first()
+            detail = {
                 'address_normalized': 'A property with this normalized address already exists.',
-                'existing_property': str(existing.first().pk),
-            })
+            }
+            request = self.context.get('request')
+            user = getattr(request, 'user', None) if request else None
+            if match and _can_attach_property(user, match):
+                detail['existing_property'] = str(match.pk)
+            raise serializers.ValidationError(detail)
         return attrs
 
 
@@ -284,6 +289,11 @@ class DealSerializer(serializers.ModelSerializer):
         property_ids = [property_obj.pk for property_obj in value]
         if len(property_ids) != len(set(property_ids)):
             raise serializers.ValidationError('property_ids cannot contain duplicates.')
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        for property_obj in value:
+            if not _can_attach_property(user, property_obj):
+                raise serializers.ValidationError('One or more selected properties are not available.')
         return value
 
     def validate(self, attrs):
@@ -386,6 +396,13 @@ class DealCreateSerializer(serializers.ModelSerializer):
         if 'property_ids' in attrs:
             property_inputs = [('existing', property_obj) for property_obj in attrs.pop('property_ids')]
             self._validate_unique_property_inputs(property_inputs, error_field='property_ids')
+            request = self.context.get('request')
+            user = getattr(request, 'user', None) if request else None
+            for property_obj in (payload for _, payload in property_inputs):
+                if not _can_attach_property(user, property_obj):
+                    raise serializers.ValidationError({
+                        'property_ids': 'One or more selected properties are not available.',
+                    })
         elif 'properties' in attrs:
             property_inputs = self._validate_properties(attrs.pop('properties'))
         attrs['_property_inputs'] = property_inputs
@@ -462,7 +479,14 @@ class DealCreateSerializer(serializers.ModelSerializer):
 
     def _validate_property_input(self, value, index):
         if isinstance(value, str):
-            return ('existing', _resolve_existing_uuid(Property, value, f'properties[{index}]'))
+            property_obj = _resolve_existing_uuid(Property, value, f'properties[{index}]')
+            request = self.context.get('request')
+            user = getattr(request, 'user', None) if request else None
+            if not _can_attach_property(user, property_obj):
+                raise serializers.ValidationError({
+                    'properties': {index: 'Selected property is not available.'},
+                })
+            return ('existing', property_obj)
         if isinstance(value, dict):
             serializer = PropertySerializer(data=value, context=self.context)
             try:
@@ -498,7 +522,9 @@ class DealCreateSerializer(serializers.ModelSerializer):
         except IntegrityError as exc:
             existing = Property.objects.filter(address_normalized=payload.get('address_normalized')).first()
             detail = {'address_normalized': 'A property with this normalized address already exists.'}
-            if existing:
+            request = self.context.get('request')
+            user = getattr(request, 'user', None) if request else None
+            if existing and _can_attach_property(user, existing):
                 detail['existing_property'] = str(existing.pk)
             raise serializers.ValidationError({'properties': {index: detail}}) from exc
 
@@ -740,6 +766,25 @@ def _resolve_existing_uuid(model_cls, value, field_name):
     if not obj:
         raise serializers.ValidationError({field_name: 'Selected record does not exist.'})
     return obj
+
+
+def _is_staff_user(user):
+    return bool(user and (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)))
+
+
+def _can_attach_property(user, property_obj):
+    """Staff may attach any property. Non-staff may attach orphans or properties
+    already linked to one of their assigned deals — matching PropertyViewSet scope,
+    plus unlinked rows so create-by-id of a freshly created property still works.
+    """
+    if _is_staff_user(user):
+        return True
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    linked = property_obj.deal_properties.select_related('deal').all()
+    if not linked:
+        return True
+    return any(link.deal.assigned_analyst_id == user.id for link in linked)
 
 
 def _create_deal_property_links(deal, properties):

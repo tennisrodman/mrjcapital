@@ -75,7 +75,7 @@ class DocumentStorageBackend(Protocol):
 
 
 def max_upload_bytes() -> int:
-    return int(getattr(settings, 'DOCUMENT_MAX_UPLOAD_BYTES', 100 * 1024 * 1024))
+    return int(getattr(settings, 'DOCUMENT_MAX_UPLOAD_BYTES', 50 * 1024 * 1024))
 
 
 def sanitize_filename(name: str) -> str:

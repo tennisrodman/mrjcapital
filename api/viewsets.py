@@ -11,7 +11,7 @@ from django.db.models.deletion import ProtectedError
 from django.http import HttpResponse
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
@@ -46,6 +46,7 @@ from api.serializers import (
     SensitiveFieldReadSerializer,
     SponsorSerializer,
     SyndicationTransitionSerializer,
+    _can_attach_property,
 )
 from api.services import (
     allowed_pipeline_statuses,
@@ -166,7 +167,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
             # If ATOMIC_REQUESTS is enabled later, keep this in an inner atomic savepoint.
             self.perform_create(serializer)
         except IntegrityError:
-            return _property_integrity_response(serializer.validated_data.get('address_normalized'))
+            return _property_integrity_response(
+                serializer.validated_data.get('address_normalized'),
+                user=request.user,
+            )
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
@@ -179,7 +183,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
             # If ATOMIC_REQUESTS is enabled later, keep this in an inner atomic savepoint.
             self.perform_update(serializer)
         except IntegrityError:
-            return _property_integrity_response(serializer.validated_data.get('address_normalized'))
+            return _property_integrity_response(
+                serializer.validated_data.get('address_normalized'),
+                user=request.user,
+            )
 
         if getattr(instance, '_prefetched_objects_cache', None):
             instance._prefetched_objects_cache = {}
@@ -420,8 +427,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         deal = data['deal']
+        # Match DealViewSet: inaccessible deals are indistinguishable from missing.
         if not _can_access_deal(request.user, deal):
-            raise PermissionDenied('You cannot add documents to this deal.')
+            raise NotFound()
 
         uploaded_by = request.user if getattr(request.user, 'is_authenticated', False) else None
         visibility_roles = data.get('visibility_roles') or ['internal']
@@ -536,8 +544,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
         document = Document.objects.select_related('deal').filter(pk=pk).first()
         if document is None:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        # Match DealViewSet: do not confirm deal/document existence to outsiders.
         if not _can_access_deal(request.user, document.deal):
-            raise PermissionDenied('You cannot access this document blob.')
+            raise NotFound()
 
         storage = get_document_storage()
         if request.method == 'PUT':
@@ -765,11 +774,12 @@ def _django_validation_response(exc):
     return Response({'detail': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
 
 
-def _property_integrity_response(address_normalized):
+def _property_integrity_response(address_normalized, user=None):
     existing_property = None
     if address_normalized:
         existing_property = Property.objects.filter(address_normalized=address_normalized).first()
     body = {'address_normalized': 'A property with this normalized address already exists.'}
-    if existing_property:
+    # Only reveal the UUID when the caller could already attach that property.
+    if existing_property and (user is None or _can_attach_property(user, existing_property)):
         body['existing_property'] = str(existing_property.pk)
     return Response(body, status=status.HTTP_400_BAD_REQUEST)

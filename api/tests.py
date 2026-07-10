@@ -407,6 +407,73 @@ class DealSpineApiTests(APITestCase):
         self.assertIn('properties', resp.data)
         self.assertFalse(Deal.objects.filter(name='Duplicate Nested Property').exists())
 
+    def test_non_staff_cannot_attach_another_analysts_property(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=self.sponsor,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+        other_deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Steal Property Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'property_ids': [str(self.property.pk)],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('property_ids', resp.data)
+        self.assertFalse(Deal.objects.filter(name='Steal Property Deal').exists())
+
+    def test_nested_property_duplicate_hides_inaccessible_existing_property_id(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=self.sponsor,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+        other_deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Duplicate Nested Property Hidden',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    {
+                        'address': '123 Main St',
+                        'city': 'Los Angeles',
+                        'state': 'CA',
+                        'zip': '90001',
+                        'property_type': 'multifamily',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        nested = resp.data['properties']
+        detail = nested[0] if isinstance(nested, list) else nested[0] if 0 in nested else nested['0']
+        self.assertIn('address_normalized', detail)
+        self.assertNotIn('existing_property', detail)
+        self.assertFalse(Deal.objects.filter(name='Duplicate Nested Property Hidden').exists())
+
     def test_nested_create_rolls_back_if_property_linking_fails(self):
         with patch('api.serializers.DealProperty.objects.bulk_create', side_effect=IntegrityError('bulk failed')):
             with self.assertRaises(IntegrityError):
@@ -1406,6 +1473,37 @@ class DealSpineApiTests(APITestCase):
         self.assertIn('internal', document.visibility_roles)
         # The non-staff analyst can still reach their own doc via complete/blob.
         self.assertEqual(document.visibility_roles, ['investor', 'internal'])
+
+    def test_upload_intent_for_inaccessible_deal_returns_404(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=self.sponsor,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+
+        resp = self._upload_intent(other_deal, 'Should not upload', 'legal')
+
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertFalse(Document.objects.filter(deal=other_deal).exists())
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_blob_for_inaccessible_document_returns_404(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=self.sponsor,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+        document = self._create_ready_document(other_deal, 'Secret memo', 'legal')
+
+        resp = self.client.get(f'/api/documents/{document.pk}/blob/')
+
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
     @override_settings(DOCUMENT_STORAGE_BACKEND='local')
     def test_cleanup_stale_pending_documents_sweeps_old_rows_and_blobs(self):
