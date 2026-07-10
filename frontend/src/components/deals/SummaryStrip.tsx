@@ -1,14 +1,17 @@
-import { CircleDollarSign, FolderOpen, Layers } from 'lucide-react';
+import { CircleDollarSign, Clock3, FolderOpen, Layers } from 'lucide-react';
 import { Skeleton } from '@/components/deals/States';
+import { Button } from '@/components/ui/button';
 import { formatCurrency } from '@/lib/dealChoices';
 import type { DealSummary } from '@/types/deal';
 
 interface SummaryStripProps {
   summary: DealSummary | undefined;
   isLoading: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
-export function SummaryStrip({ summary, isLoading }: SummaryStripProps) {
+export function SummaryStrip({ summary, isLoading, isError = false, onRetry }: SummaryStripProps) {
   const items = [
     {
       label: 'Active deals',
@@ -28,10 +31,29 @@ export function SummaryStrip({ summary, isLoading }: SummaryStripProps) {
       icon: Layers,
       value: summary ? formatCurrency(summary.gross_pipeline_value) : null,
     },
+    {
+      label: 'Average stage age',
+      hint: 'Days in current stage',
+      icon: Clock3,
+      value: summary ? `${summary.average_days_in_current_stage.toLocaleString('en-US')} days` : null,
+    },
   ];
 
+  if (isError) {
+    return (
+      <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--border)] bg-[var(--paper-elevated)] px-5 py-4 text-sm text-[var(--slate)]">
+        <p>Pipeline summary metrics could not be loaded.</p>
+        {onRetry ? (
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+            Try again
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
-    <dl className="grid gap-px overflow-hidden rounded-md border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3">
+    <dl className="grid gap-px overflow-hidden rounded-md border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-4">
       {items.map(({ label, hint, icon: Icon, value }) => (
         <div key={label} className="bg-[var(--paper-elevated)] px-5 py-4">
           <div className="flex items-center justify-between gap-3">

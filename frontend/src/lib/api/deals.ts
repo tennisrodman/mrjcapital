@@ -13,6 +13,7 @@ import type {
   DealDocument,
   DealFilters,
   DealSummary,
+  DealStageEvent,
   Fund,
   PipelineStatus,
   Property,
@@ -101,6 +102,14 @@ export function useDealDocuments(dealId: string | undefined) {
       );
       return page.results;
     },
+    enabled: Boolean(dealId),
+  });
+}
+
+export function useDealStageHistory(dealId: string | undefined) {
+  return useQuery({
+    queryKey: ['deal-stage-history', dealId],
+    queryFn: () => fetchAllPages<DealStageEvent>(`api/deals/${dealId}/stage-history/`),
     enabled: Boolean(dealId),
   });
 }
@@ -259,6 +268,7 @@ function useTransitionMutation(id: string, urlPath: string) {
       void queryClient.invalidateQueries({ queryKey: ['deal-summary'] });
       void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', id] });
       void queryClient.invalidateQueries({ queryKey: ['deal-activity', id] });
+      void queryClient.invalidateQueries({ queryKey: ['deal-stage-history', id] });
     },
   });
 }

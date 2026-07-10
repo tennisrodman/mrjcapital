@@ -15,19 +15,22 @@ import {
   MapPin,
   Pencil,
   Phone,
+  ScanSearch,
   Star,
   Upload,
   UserRound,
 } from 'lucide-react';
 import { DocumentUploadDialog } from '@/components/deals/DocumentUploadDialog';
+import { DealContactsPanel } from '@/components/deals/DealContactsPanel';
 import { AuthContext } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel, Field } from '@/components/deals/Panel';
 import { InvestmentChip, PipelineBadge, SyndicationBadge } from '@/components/deals/StatusBadge';
 import { TransitionDialog } from '@/components/deals/TransitionDialog';
+import { StageHistoryPanel } from '@/components/deals/StageHistoryPanel';
 import { EmptyState, ErrorState, Spinner } from '@/components/deals/States';
-import { useDeal, useDealActivity, useDealDocuments } from '@/lib/api/deals';
+import { useDeal, useDealActivity, useDealDocuments, useDealStageHistory } from '@/lib/api/deals';
 import { formatFileSize, useDownloadDocument } from '@/lib/api/documents';
 import { useDealNotes, useCreateNote, useDeleteNote } from '@/lib/api/notes';
 import { apiErrorMessage } from '@/lib/apiError';
@@ -51,6 +54,7 @@ export default function DealDetailPage() {
 
   const dealQuery = useDeal(id);
   const documentsQuery = useDealDocuments(id);
+  const stageHistoryQuery = useDealStageHistory(id);
   const activityQuery = useDealActivity(id, isStaff);
   const notesQuery = useDealNotes(id, isStaff);
   const [openDialog, setOpenDialog] = useState<'pipeline' | 'syndication' | null>(null);
@@ -99,6 +103,7 @@ export default function DealDetailPage() {
         <div className="animate-fade-up stagger-2 space-y-6">
           <OverviewPanel deal={deal} />
           <PropertiesPanel deal={deal} />
+          <DealContactsPanel dealId={deal.id} />
           <DocumentsPanel
             documents={documentsQuery.data ?? []}
             isLoading={documentsQuery.isLoading}
@@ -108,6 +113,12 @@ export default function DealDetailPage() {
         </div>
 
         <aside className="animate-fade-up stagger-3 space-y-6">
+          <StageHistoryPanel
+            events={stageHistoryQuery.data ?? []}
+            isLoading={stageHistoryQuery.isLoading}
+            isError={stageHistoryQuery.isError}
+            onRetry={() => void stageHistoryQuery.refetch()}
+          />
           <SponsorPanel deal={deal} />
           <BrokerPanel deal={deal} />
           {isStaff ? (
@@ -194,6 +205,12 @@ function DealHeader({
           Syndication
         </Button>
         <Button type="button" variant="outline" asChild>
+          <Link to={`/deals/${deal.id}/screening`}>
+            <ScanSearch className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Screening
+          </Link>
+        </Button>
+        <Button type="button" variant="outline" asChild>
           <Link to={`/deals/${deal.id}/edit`}>
             <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
             Edit deal
@@ -213,6 +230,8 @@ function OverviewPanel({ deal }: { deal: Deal }) {
         <Field label="Sourced">{formatDate(deal.source_date)}</Field>
         <Field label="Fund">{deal.fund_detail?.name ?? 'Unassigned'}</Field>
         <Field label="Analyst">{deal.assigned_analyst_detail?.username ?? 'Unassigned'}</Field>
+        <Field label="Stage age">{deal.days_in_current_stage} days</Field>
+        <Field label="Stage entered">{formatDateTime(deal.current_stage_entered_at)}</Field>
         <Field label="Created">{formatDate(deal.created_at)}</Field>
       </dl>
     </Panel>

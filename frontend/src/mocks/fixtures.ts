@@ -111,6 +111,11 @@ export function buildInitialDeals(): Deal[] {
     source_channel: seed.source_channel as Deal['source_channel'],
     source_date: seed.source_date,
     requested_amount: seed.requested_amount,
+    current_stage_entered_at: `${seed.source_date}T15:00:00Z`,
+    days_in_current_stage: Math.max(
+      0,
+      Math.floor((Date.now() - new Date(`${seed.source_date}T15:00:00Z`).getTime()) / 86_400_000),
+    ),
     details: {},
     properties: dealProps(seed.properties as [string, boolean][]),
     created_at: `${seed.source_date}T15:00:00Z`,

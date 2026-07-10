@@ -7,6 +7,7 @@ import DealsListPage from './pages/deals/DealsListPage';
 import DealDetailPage from './pages/deals/DealDetailPage';
 import DealCreatePage from './pages/deals/DealCreatePage';
 import DealEditPage from './pages/deals/DealEditPage';
+import DealScreeningPage from './pages/deals/DealScreeningPage';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
             <Route path="deals/new" element={<DealCreatePage />} />
             <Route path="deals/:id" element={<DealDetailPage />} />
             <Route path="deals/:id/edit" element={<DealEditPage />} />
+            <Route path="deals/:id/screening" element={<DealScreeningPage />} />
           </Route>
         </Routes>
       </Router>

@@ -4,6 +4,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import viewsets
 from . import views
+from .contact_viewsets import ContactViewSet, DealContactViewSet
+from .screening_viewsets import ScreeningAssessmentViewSet
 
 router = DefaultRouter()
 router.register('sponsors', viewsets.SponsorViewSet, basename='sponsor')
@@ -15,6 +17,9 @@ router.register('deal-properties', viewsets.DealPropertyViewSet, basename='deal-
 router.register('documents', viewsets.DocumentViewSet, basename='document')
 router.register('deal-notes', viewsets.DealNoteViewSet, basename='deal-note')
 router.register('activity-logs', viewsets.ActivityLogViewSet, basename='activity-log')
+router.register('contacts', ContactViewSet, basename='contact')
+router.register('deal-contacts', DealContactViewSet, basename='deal-contact')
+router.register('screening-assessments', ScreeningAssessmentViewSet, basename='screening-assessment')
 
 urlpatterns = [
     path('auth/login/', views.login_view, name='login'),

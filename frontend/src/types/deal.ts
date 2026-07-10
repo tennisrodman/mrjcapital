@@ -153,6 +153,8 @@ export interface Deal {
   source_channel: SourceChannel;
   source_date: string;
   requested_amount: string;
+  current_stage_entered_at: string;
+  days_in_current_stage: number;
   details: Record<string, unknown>;
   properties: DealPropertySummary[];
   created_at: string;
@@ -216,6 +218,19 @@ export interface ActivityLogEntry {
   metadata: Record<string, unknown>;
 }
 
+export interface DealStageEvent {
+  id: string;
+  deal: string;
+  from_status: PipelineStatus | null;
+  to_status: PipelineStatus;
+  entered_at: string;
+  exited_at: string | null;
+  performed_by: number | null;
+  performed_by_detail: AnalystSummary | null;
+  reason: string;
+  is_override: boolean;
+}
+
 export interface DealNote {
   id: string;
   deal: string;
@@ -232,7 +247,18 @@ export interface DealSummary {
   active_deals: number;
   pipeline_value: string | number;
   gross_pipeline_value: string | number;
-  by_pipeline_status: { pipeline_status: PipelineStatus; count: number }[];
+  average_days_in_current_stage: number;
+  by_pipeline_status: {
+    pipeline_status: PipelineStatus;
+    count: number;
+    requested_amount: string | number;
+    average_days_in_current_stage: number;
+  }[];
+  average_stage_duration_days: {
+    pipeline_status: PipelineStatus;
+    average_days: number;
+    completed_events: number;
+  }[];
 }
 
 export interface Paginated<T> {

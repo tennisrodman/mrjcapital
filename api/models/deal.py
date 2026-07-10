@@ -67,6 +67,9 @@ class Deal(models.Model):
         validators=[MinValueValidator(Decimal('0.01'))],
     )
     details = models.JSONField(default=dict, blank=True)
+    # This is intentionally cached on the Deal row so current-stage timing does
+    # not require scanning the stage-event history for list and summary views.
+    current_stage_entered_at = models.DateTimeField(default=timezone.now, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -99,3 +102,9 @@ class Deal(models.Model):
         }:
             return 'hybrid'
         return 'equity'
+
+    @property
+    def days_in_current_stage(self):
+        if not self.current_stage_entered_at:
+            return 0
+        return max(0, (timezone.now() - self.current_stage_entered_at).days)

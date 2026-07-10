@@ -1,0 +1,138 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const api = vi.hoisted(() => ({ request: vi.fn() }));
+
+vi.mock('@/config/api', () => ({ apiRequest: api.request }));
+
+import {
+  createScreeningAssessment,
+  finalizeScreeningAssessment,
+  listScreeningAssessments,
+  updateScreeningAssessment,
+} from './screening';
+import type {
+  CreateScreeningAssessmentPayload,
+  ScreeningAssessment,
+  UpdateScreeningAssessmentPayload,
+} from '@/types/screening';
+
+const assessment = (version: number): ScreeningAssessment => ({
+  id: `assessment-${version}`,
+  deal: 'deal-1',
+  version,
+  is_current: version === 2,
+  status: version === 1 ? 'finalized' : 'draft',
+  reviewer: version === 1 ? 1 : null,
+  reviewer_detail: version === 1 ? { id: 1, username: 'analyst' } : null,
+  loan_amount: '6500000',
+  as_is_value: '10000000',
+  stabilized_value: '12000000',
+  project_cost: '8000000',
+  noi: '1000000',
+  annual_debt_service: '700000',
+  occupancy: '92.50',
+  proposed_rate: '8.2500',
+  proposed_term_months: 24,
+  max_ltv: '0.7500',
+  max_ltc: '0.8500',
+  min_dscr: '1.2000',
+  min_debt_yield: '0.0800',
+  ltv_as_is: '0.6500',
+  ltv_stabilized: '0.5417',
+  ltc: '0.8125',
+  dscr: '1.4286',
+  debt_yield: '0.1538',
+  quick_score: 100,
+  equity_summary: '',
+  equity_target_irr: null,
+  equity_target_multiple: null,
+  equity_target_hold_months: null,
+  decision: version === 1 ? 'advance' : '',
+  notes: '',
+  created_at: '2026-01-01T12:00:00Z',
+  updated_at: `2026-01-0${version}T12:00:00Z`,
+  finalized_at: version === 1 ? '2026-01-01T12:00:00Z' : null,
+});
+
+const createPayload: CreateScreeningAssessmentPayload = {
+  deal: 'deal-1',
+  loan_amount: '6500000',
+  as_is_value: '10000000',
+  stabilized_value: '12000000',
+  project_cost: '8000000',
+  noi: '1000000',
+  annual_debt_service: '700000',
+  occupancy: '92.50',
+  proposed_rate: '8.25',
+  proposed_term_months: 24,
+  equity_summary: 'Sponsor is funding its co-investment from cash on hand.',
+  equity_target_irr: null,
+  equity_target_multiple: null,
+  equity_target_hold_months: null,
+  decision: 'advance',
+  notes: 'Confirm the rent roll during diligence.',
+};
+
+const updatePayload: UpdateScreeningAssessmentPayload = {
+  loan_amount: createPayload.loan_amount,
+  as_is_value: createPayload.as_is_value,
+  stabilized_value: createPayload.stabilized_value,
+  project_cost: createPayload.project_cost,
+  noi: createPayload.noi,
+  annual_debt_service: createPayload.annual_debt_service,
+  occupancy: createPayload.occupancy,
+  proposed_rate: createPayload.proposed_rate,
+  proposed_term_months: createPayload.proposed_term_months,
+  equity_summary: createPayload.equity_summary,
+  equity_target_irr: createPayload.equity_target_irr,
+  equity_target_multiple: createPayload.equity_target_multiple,
+  equity_target_hold_months: createPayload.equity_target_hold_months,
+  decision: createPayload.decision,
+  notes: createPayload.notes,
+};
+
+describe('screening assessment API contract', () => {
+  beforeEach(() => api.request.mockReset());
+
+  it('filters assessments by an encoded deal id and normalizes a paginated response', async () => {
+    api.request.mockResolvedValue({
+      count: 2,
+      next: null,
+      previous: null,
+      results: [assessment(1), assessment(2)],
+    });
+
+    await expect(listScreeningAssessments('deal / 1')).resolves.toMatchObject([
+      { id: 'assessment-2' },
+      { id: 'assessment-1' },
+    ]);
+    expect(api.request).toHaveBeenCalledWith('api/screening-assessments/?deal=deal%20%2F%201');
+  });
+
+  it('posts decimal-string inputs, patches drafts, and finalizes through the dedicated action', async () => {
+    api.request.mockResolvedValue(assessment(2));
+
+    await createScreeningAssessment(createPayload);
+    await updateScreeningAssessment('assessment-2', updatePayload);
+    await finalizeScreeningAssessment('assessment-2', {
+      decision: 'advance',
+      notes: 'Confirm the rent roll during diligence.',
+    });
+
+    expect(api.request).toHaveBeenNthCalledWith(1, 'api/screening-assessments/', {
+      method: 'POST',
+      body: JSON.stringify(createPayload),
+    });
+    expect(api.request).toHaveBeenNthCalledWith(2, 'api/screening-assessments/assessment-2/', {
+      method: 'PATCH',
+      body: JSON.stringify(updatePayload),
+    });
+    expect(api.request).toHaveBeenNthCalledWith(3, 'api/screening-assessments/assessment-2/finalize/', {
+      method: 'POST',
+      body: JSON.stringify({
+        decision: 'advance',
+        notes: 'Confirm the rent roll during diligence.',
+      }),
+    });
+  });
+});

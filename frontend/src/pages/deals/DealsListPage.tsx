@@ -97,7 +97,12 @@ export default function DealsListPage() {
       </header>
 
       <div className="animate-fade-up stagger-1">
-        <SummaryStrip summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
+        <SummaryStrip
+          summary={summaryQuery.data}
+          isLoading={summaryQuery.isLoading}
+          isError={summaryQuery.isError}
+          onRetry={() => void summaryQuery.refetch()}
+        />
       </div>
 
       <div className="animate-fade-up stagger-2 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

@@ -1,7 +1,21 @@
 from django.contrib import admin
 from django.conf import settings
 
-from api.models import ActivityLog, Broker, Deal, DealNote, DealProperty, Document, Fund, Property, Sponsor
+from api.models import (
+    ActivityLog,
+    Broker,
+    Contact,
+    Deal,
+    DealContact,
+    DealNote,
+    DealProperty,
+    DealStageEvent,
+    Document,
+    Fund,
+    Property,
+    ScreeningAssessment,
+    Sponsor,
+)
 
 
 class DealPropertyInline(admin.TabularInline):
@@ -14,8 +28,25 @@ class DealAdmin(admin.ModelAdmin):
     list_display = ['name', 'investment_type', 'pipeline_status', 'syndication_status', 'requested_amount', 'source_date']
     list_filter = ['investment_type', 'pipeline_status', 'syndication_status', 'source_channel']
     search_fields = ['name', 'sponsor__entity_name', 'broker__company_name']
-    readonly_fields = ['created_at', 'updated_at', 'investment_category']
+    readonly_fields = [
+        'pipeline_status',
+        'syndication_status',
+        'paused_from_status',
+        'current_stage_entered_at',
+        'created_at',
+        'updated_at',
+        'investment_category',
+    ]
     inlines = [DealPropertyInline]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Property)
@@ -100,3 +131,72 @@ class DealNoteAdmin(admin.ModelAdmin):
     search_fields = ['deal__name', 'body']
     filter_horizontal = ['attachments']
     readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(Contact)
+class ContactAdmin(admin.ModelAdmin):
+    list_display = ['full_name', 'company_name', 'email', 'phone', 'created_by', 'updated_at']
+    search_fields = ['full_name', 'company_name', 'email', 'phone']
+
+
+@admin.register(DealContact)
+class DealContactAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'contact', 'role', 'is_primary', 'updated_at']
+    list_filter = ['role', 'is_primary']
+    search_fields = ['deal__name', 'contact__full_name', 'contact__company_name']
+
+
+@admin.register(ScreeningAssessment)
+class ScreeningAssessmentAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'version', 'status', 'decision', 'quick_score', 'reviewer', 'updated_at']
+    list_filter = ['status', 'decision']
+    search_fields = ['deal__name', 'notes', 'equity_summary']
+    readonly_fields = [
+        'version',
+        'status',
+        'reviewer',
+        'finalized_at',
+        'ltv_as_is',
+        'ltv_stabilized',
+        'ltc',
+        'dscr',
+        'debt_yield',
+        'quick_score',
+        'created_at',
+        'updated_at',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DealStageEvent)
+class DealStageEventAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'from_status', 'to_status', 'entered_at', 'exited_at', 'performed_by']
+    list_filter = ['to_status', 'entered_at']
+    search_fields = ['deal__name', 'reason']
+    readonly_fields = [
+        'deal',
+        'from_status',
+        'to_status',
+        'entered_at',
+        'exited_at',
+        'performed_by',
+        'reason',
+        'is_override',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

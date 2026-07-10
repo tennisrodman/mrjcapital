@@ -11,6 +11,7 @@ from api.models import (
     Deal,
     DealNote,
     DealProperty,
+    DealStageEvent,
     Document,
     DocumentCategory,
     Fund,
@@ -18,6 +19,11 @@ from api.models import (
     Sponsor,
 )
 from api.services import normalize_address
+from api.services.deals import (
+    capture_deal_field_values,
+    initialize_deal_stage_event,
+    log_deal_field_updates,
+)
 from api.services.audit import SENSITIVE_SPONSOR_FIELDS
 
 
@@ -218,8 +224,29 @@ class AnalystSummarySerializer(serializers.Serializer):
     username = serializers.CharField(read_only=True)
 
 
+class DealStageEventSerializer(serializers.ModelSerializer):
+    performed_by_detail = AnalystSummarySerializer(source='performed_by', read_only=True)
+
+    class Meta:
+        model = DealStageEvent
+        fields = [
+            'id',
+            'deal',
+            'from_status',
+            'to_status',
+            'entered_at',
+            'exited_at',
+            'performed_by',
+            'performed_by_detail',
+            'reason',
+            'is_override',
+        ]
+        read_only_fields = fields
+
+
 class DealSerializer(serializers.ModelSerializer):
     investment_category = serializers.CharField(read_only=True)
+    days_in_current_stage = serializers.IntegerField(read_only=True)
     properties = DealPropertySummarySerializer(source='deal_properties', many=True, read_only=True)
     property_ids = serializers.PrimaryKeyRelatedField(
         queryset=Property.objects.all(),
@@ -264,6 +291,8 @@ class DealSerializer(serializers.ModelSerializer):
             'pipeline_status',
             'syndication_status',
             'paused_from_status',
+            'current_stage_entered_at',
+            'days_in_current_stage',
             'sponsor',
             'sponsor_detail',
             'broker',
@@ -281,7 +310,7 @@ class DealSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['current_stage_entered_at', 'created_at', 'updated_at']
 
     def validate_property_ids(self, value):
         if not value:
@@ -294,6 +323,10 @@ class DealSerializer(serializers.ModelSerializer):
         for property_obj in value:
             if not _can_attach_property(user, property_obj):
                 raise serializers.ValidationError('One or more selected properties are not available.')
+        return value
+
+    def validate_details(self, value):
+        _reject_sensitive_details(value)
         return value
 
     def validate(self, attrs):
@@ -314,17 +347,29 @@ class DealSerializer(serializers.ModelSerializer):
         with transaction.atomic():
             property_ids = validated_data.pop('property_ids', [])
             deal = super().create(validated_data)
+            initialize_deal_stage_event(deal, performed_by=self._request_user())
             self._replace_properties(deal, property_ids)
             return deal
 
     def update(self, instance, validated_data):
         with transaction.atomic():
+            previous_values = capture_deal_field_values(instance, validated_data)
             has_property_ids = 'property_ids' in validated_data
             property_ids = validated_data.pop('property_ids', [])
             deal = super().update(instance, validated_data)
             if has_property_ids:
                 self._replace_properties(deal, property_ids)
+            log_deal_field_updates(
+                deal,
+                previous_values,
+                performed_by=self._request_user(),
+                ip_address=self.context.get('audit_ip_address'),
+            )
             return deal
+
+    def _request_user(self):
+        request = self.context.get('request')
+        return getattr(request, 'user', None) if request else None
 
     def _replace_properties(self, deal, properties):
         with transaction.atomic():
@@ -417,6 +462,11 @@ class DealCreateSerializer(serializers.ModelSerializer):
             if broker_input is not None:
                 validated_data['broker'] = self._realize_nested_input(Broker, broker_input)
             deal = Deal.objects.create(**validated_data)
+            request = self.context.get('request')
+            initialize_deal_stage_event(
+                deal,
+                performed_by=getattr(request, 'user', None) if request else None,
+            )
             properties = [
                 self._realize_property_input(property_input, index)
                 for index, property_input in enumerate(property_inputs)

@@ -9,6 +9,7 @@ from django.db import connection, IntegrityError, transaction
 from django.db.models import Count, Max, Sum
 from django.db.models.deletion import ProtectedError
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError as DRFValidationError
@@ -22,6 +23,7 @@ from api.models import (
     Deal,
     DealNote,
     DealProperty,
+    DealStageEvent,
     Document,
     DocumentStorageStatus,
     Fund,
@@ -36,6 +38,7 @@ from api.serializers import (
     DealNoteSerializer,
     DealPropertySerializer,
     DealSerializer,
+    DealStageEventSerializer,
     DocumentDownloadSerializer,
     DocumentSerializer,
     DocumentUploadCompleteSerializer,
@@ -261,6 +264,10 @@ class DealViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(assigned_analyst=self.request.user)
 
+    def perform_update(self, serializer):
+        serializer.context['audit_ip_address'] = _client_ip(self.request)
+        serializer.save()
+
     @action(detail=True, methods=['post'], url_path='transition')
     def transition(self, request, pk=None):
         deal = self.get_object()
@@ -303,19 +310,34 @@ class DealViewSet(viewsets.ModelViewSet):
             'syndication_status': allowed_syndication_statuses(deal),
         })
 
+    @action(detail=True, methods=['get'], url_path='stage-history')
+    def stage_history(self, request, pk=None):
+        deal = self.get_object()
+        events = deal.stage_events.select_related('performed_by').order_by('-entered_at', '-id')
+        page = self.paginate_queryset(events)
+        if page is not None:
+            return self.get_paginated_response(DealStageEventSerializer(page, many=True).data)
+        return Response(DealStageEventSerializer(events, many=True).data)
+
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
         queryset = self.filter_queryset(self.get_queryset())
         active_queryset = queryset.exclude(pipeline_status__in=[PipelineStatus.DEAD, PipelineStatus.EXITED])
-        status_counts = queryset.values('pipeline_status').annotate(count=Count('id')).order_by('pipeline_status')
+        status_counts = list(
+            queryset.values('pipeline_status')
+            .annotate(count=Count('id'), requested_amount=Sum('requested_amount'))
+            .order_by('pipeline_status')
+        )
         active_requested = active_queryset.aggregate(total=Sum('requested_amount'))['total']
         gross_requested = queryset.aggregate(total=Sum('requested_amount'))['total']
         active_count = active_queryset.count()
+        timing_metrics = _stage_timing_metrics(queryset, status_counts)
         return Response({
             'active_deals': active_count,
             'pipeline_value': active_requested or 0,
             'gross_pipeline_value': gross_requested or 0,
-            'by_pipeline_status': list(status_counts),
+            'by_pipeline_status': status_counts,
+            **timing_metrics,
         })
 
     def destroy(self, request, *args, **kwargs):
@@ -668,6 +690,46 @@ def _client_ip(request):
     if remote_addr and _valid_ip(remote_addr):
         return remote_addr
     return None
+
+
+def _stage_timing_metrics(queryset, status_counts):
+    """Small, portable timing metrics without database-specific duration SQL."""
+    now = timezone.now()
+    current_totals = {}
+    total_current_days = 0
+    current_count = 0
+    for pipeline_status, entered_at in queryset.values_list('pipeline_status', 'current_stage_entered_at'):
+        days = max(0, (now - entered_at).days) if entered_at else 0
+        total, count = current_totals.get(pipeline_status, (0, 0))
+        current_totals[pipeline_status] = (total + days, count + 1)
+        total_current_days += days
+        current_count += 1
+
+    for row in status_counts:
+        total, count = current_totals.get(row['pipeline_status'], (0, 0))
+        row['average_days_in_current_stage'] = round(total / count, 2) if count else 0
+
+    completed_totals = {}
+    stage_events = DealStageEvent.objects.filter(
+        deal_id__in=queryset.values('pk'),
+        exited_at__isnull=False,
+    ).values_list('to_status', 'entered_at', 'exited_at')
+    for pipeline_status, entered_at, exited_at in stage_events:
+        days = max(0, (exited_at - entered_at).total_seconds() / 86400)
+        total, count = completed_totals.get(pipeline_status, (0, 0))
+        completed_totals[pipeline_status] = (total + days, count + 1)
+
+    return {
+        'average_days_in_current_stage': round(total_current_days / current_count, 2) if current_count else 0,
+        'average_stage_duration_days': [
+            {
+                'pipeline_status': pipeline_status,
+                'average_days': round(total / count, 2),
+                'completed_events': count,
+            }
+            for pipeline_status, (total, count) in sorted(completed_totals.items())
+        ],
+    }
 
 
 def _valid_ip(value):

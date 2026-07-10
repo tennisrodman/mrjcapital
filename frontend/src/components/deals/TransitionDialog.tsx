@@ -92,7 +92,7 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
                 Every change is logged with your reason.
               </Dialog.Description>
             </div>
-            <Dialog.Close className="rounded-sm p-1 text-[var(--slate)] transition-colors hover:bg-[var(--ink)]/5 hover:text-[var(--ink)]">
+            <Dialog.Close aria-label="Close transition dialog" className="rounded-sm p-1 text-[var(--slate)] transition-colors hover:bg-[var(--ink)]/5 hover:text-[var(--ink)]">
               <X className="h-4 w-4" strokeWidth={1.75} />
             </Dialog.Close>
           </div>
@@ -105,16 +105,18 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-              <FormField label="Move to">
+              <FormField label="Move to" htmlFor={`${kind}-transition-status`}>
                 <SelectNative
+                  id={`${kind}-transition-status`}
                   placeholder="Select a status"
                   options={options}
                   value={toStatus}
                   onChange={(event) => setToStatus(event.target.value)}
                 />
               </FormField>
-              <FormField label="Reason" required>
+              <FormField label="Reason" htmlFor={`${kind}-transition-reason`} required>
                 <Textarea
+                  id={`${kind}-transition-reason`}
                   value={reason}
                   onChange={(event) => setReason(event.target.value)}
                   placeholder="Why is this deal moving? This is recorded in the activity log."
