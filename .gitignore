@@ -31,8 +31,7 @@ frontend/.eslintcache
 .idea/
 .vscode/
 .cursor/
-docs/*
-!docs/*.md
+docs/
 *.swp
 *.swo
 
