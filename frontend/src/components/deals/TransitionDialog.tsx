@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { ArrowRight, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/field';
 import { SelectNative } from '@/components/ui/select-native';
@@ -15,6 +15,12 @@ import { apiErrorMessage, fieldErrors } from '@/lib/apiError';
 import type { Deal } from '@/types/deal';
 
 type TransitionKind = 'pipeline' | 'syndication';
+
+const READINESS_BLOCKER_LABELS: Record<string, string> = {
+  screening_assessment_missing: 'Create a screening assessment before moving to Quoting.',
+  screening_assessment_not_finalized: 'Finalize the current screening assessment before moving to Quoting.',
+  screening_decision_not_advance: 'The current screening decision must be Advance before moving to Quoting.',
+};
 
 interface TransitionDialogProps {
   deal: Deal;
@@ -31,12 +37,14 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
 
   const [toStatus, setToStatus] = useState('');
   const [reason, setReason] = useState('');
+  const [overrideReadiness, setOverrideReadiness] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setToStatus('');
       setReason('');
+      setOverrideReadiness(false);
       setError(null);
     }
   }, [open]);
@@ -46,6 +54,10 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
     ? allowed.data?.pipeline_status
     : allowed.data?.syndication_status) ?? [];
   const options = targets.map((value) => ({ value, label: labels[value as keyof typeof labels] }));
+  const readiness = kind === 'pipeline' && toStatus
+    ? allowed.data?.readiness?.[toStatus as Deal['pipeline_status']]
+    : undefined;
+  const readinessBlocked = Boolean(readiness && !readiness.ready);
 
   const currentLabel =
     kind === 'pipeline'
@@ -65,11 +77,20 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
       setError('A reason is required for every status change.');
       return;
     }
+    if (readinessBlocked && !overrideReadiness) {
+      setError('Resolve the readiness requirements or explicitly record a staff override.');
+      return;
+    }
     mutation.mutate(
-      { to_status: toStatus, reason: reason.trim() },
+      {
+        to_status: toStatus,
+        reason: reason.trim(),
+        ...(kind === 'pipeline' ? { override_readiness: overrideReadiness } : {}),
+      },
       {
         onSuccess: () => onOpenChange(false),
         onError: (err) => {
+          if (kind === 'pipeline') void allowed.refetch();
           const fields = fieldErrors(err);
           setError(Object.keys(fields).length ? Object.values(fields)[0] : apiErrorMessage(err));
         },
@@ -81,7 +102,7 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--ink)]/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-[var(--border)] bg-[var(--paper-elevated)] p-6 shadow-2xl focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--paper-elevated)] p-6 shadow-2xl focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
           <div className="flex items-start justify-between gap-4">
             <div>
               <Dialog.Title className="font-display text-lg font-medium text-[var(--ink)]">
@@ -99,6 +120,23 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
 
           {allowed.isLoading ? (
             <p className="mt-5 text-sm text-[var(--slate)]">Loading available moves…</p>
+          ) : allowed.isError ? (
+            <div
+              role="alert"
+              className="mt-5 rounded-sm border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700"
+            >
+              <p>Available moves could not be loaded.</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                disabled={allowed.isFetching}
+                onClick={() => void allowed.refetch()}
+              >
+                {allowed.isFetching ? 'Trying again…' : 'Try again'}
+              </Button>
+            </div>
           ) : options.length === 0 ? (
             <div className="mt-5 rounded-sm border border-dashed border-[var(--border)] bg-[var(--paper)] px-4 py-6 text-center text-sm text-[var(--slate)]">
               No moves are available from {currentLabel.toLowerCase()}.
@@ -111,9 +149,45 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
                   placeholder="Select a status"
                   options={options}
                   value={toStatus}
-                  onChange={(event) => setToStatus(event.target.value)}
+                  onChange={(event) => {
+                    setToStatus(event.target.value);
+                    setOverrideReadiness(false);
+                    setError(null);
+                  }}
                 />
               </FormField>
+
+              {readinessBlocked ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="rounded-sm border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900"
+                >
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
+                    <div className="min-w-0">
+                      <p className="font-medium">This stage is not ready.</p>
+                      <ul className="mt-1 space-y-1 text-xs">
+                        {readiness?.blockers.map((blocker) => (
+                          <li key={blocker}>{READINESS_BLOCKER_LABELS[blocker] ?? blocker}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                  {readiness?.can_override ? (
+                    <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-amber-200 pt-3 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={overrideReadiness}
+                        onChange={(event) => setOverrideReadiness(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-[var(--brass)]"
+                      />
+                      <span>Override readiness and record this exception in stage history.</span>
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
+
               <FormField label="Reason" htmlFor={`${kind}-transition-reason`} required>
                 <Textarea
                   id={`${kind}-transition-reason`}
@@ -123,13 +197,20 @@ export function TransitionDialog({ deal, kind, open, onOpenChange }: TransitionD
                 />
               </FormField>
 
-              {error ? <p className="text-sm text-red-600">{error}</p> : null}
+              {error ? (
+                <p role="alert" className="text-sm text-red-600">
+                  {error}
+                </p>
+              ) : null}
 
               <div className="flex items-center justify-end gap-3 pt-1">
                 <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={mutation.isPending}>
+                <Button
+                  type="submit"
+                  disabled={mutation.isPending || (readinessBlocked && !overrideReadiness)}
+                >
                   {mutation.isPending ? 'Saving…' : 'Confirm move'}
                   {!mutation.isPending ? <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} /> : null}
                 </Button>

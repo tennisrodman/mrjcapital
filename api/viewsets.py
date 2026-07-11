@@ -52,6 +52,7 @@ from api.serializers import (
     _can_attach_property,
 )
 from api.services import (
+    allowed_pipeline_transition_readiness,
     allowed_pipeline_statuses,
     allowed_syndication_statuses,
     create_note,
@@ -59,6 +60,8 @@ from api.services import (
     normalize_address,
     transition_pipeline_status,
     transition_syndication_status,
+    update_property_facts,
+    update_sponsor_facts,
 )
 from api.services.storage import (
     PresignedDownload,
@@ -90,6 +93,22 @@ class SponsorViewSet(viewsets.ModelViewSet):
         if rating:
             queryset = queryset.filter(relationship_rating=rating)
         return queryset
+
+    def perform_update(self, serializer):
+        update_sponsor_facts(
+            serializer,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        if not _is_staff_user(self.request.user):
+            raise PermissionDenied('Only staff may delete sponsors.')
+        if instance.deals.exists():
+            raise DRFValidationError({
+                'detail': 'This sponsor is linked to one or more deals and cannot be deleted.',
+            })
+        return super().perform_destroy(instance)
 
     @action(detail=True, methods=['post'], url_path='sensitive-fields')
     def sensitive_fields(self, request, pk=None):
@@ -162,6 +181,22 @@ class PropertyViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(address__icontains=search)
         return queryset
+
+    def perform_update(self, serializer):
+        update_property_facts(
+            serializer,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        if not _is_staff_user(self.request.user):
+            raise PermissionDenied('Only staff may delete properties.')
+        if instance.deal_properties.exists():
+            raise DRFValidationError({
+                'detail': 'This property is linked to one or more deals and cannot be deleted.',
+            })
+        return super().perform_destroy(instance)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -280,6 +315,7 @@ class DealViewSet(viewsets.ModelViewSet):
                 request.user,
                 serializer.validated_data['reason'],
                 ip_address=_client_ip(request),
+                override_readiness=serializer.validated_data['override_readiness'],
             )
         except DjangoValidationError as exc:
             return _django_validation_response(exc)
@@ -308,6 +344,7 @@ class DealViewSet(viewsets.ModelViewSet):
         return Response({
             'pipeline_status': allowed_pipeline_statuses(deal),
             'syndication_status': allowed_syndication_statuses(deal),
+            'readiness': allowed_pipeline_transition_readiness(deal, request.user),
         })
 
     @action(detail=True, methods=['get'], url_path='stage-history')
@@ -832,7 +869,11 @@ def _build_download_target(request, document) -> PresignedDownload:
 
 def _django_validation_response(exc):
     if hasattr(exc, 'message_dict'):
-        return Response(exc.message_dict, status=status.HTTP_400_BAD_REQUEST)
+        body = dict(exc.message_dict)
+        readiness = getattr(exc, 'readiness', None)
+        if readiness is not None:
+            body['readiness'] = readiness
+        return Response(body, status=status.HTTP_400_BAD_REQUEST)
     return Response({'detail': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
 
 

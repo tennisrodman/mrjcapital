@@ -3,6 +3,7 @@
 // exercise every view. State lives for the page session and resets on reload.
 
 import { ApiError } from '@/lib/apiError';
+import { isOptionalHttpUrl } from '@/lib/formValidation';
 import { calculateDebtMetrics } from '@/components/deals/screening/calculations';
 import type {
   ActivityLogEntry,
@@ -195,6 +196,73 @@ const SYNDICATION_TRANSITIONS: Record<SyndicationStatus, SyndicationStatus[]> = 
 
 const SYNDICATION_START_STAGES: PipelineStatus[] = ['quoting', 'negotiating', 'signed', 'closing'];
 const SYNDICATION_TERMINAL_STAGES: PipelineStatus[] = ['dead', 'exited'];
+const INVESTMENT_TYPES: InvestmentType[] = [
+  'whole_loan_bridge',
+  'whole_loan_permanent',
+  'mezzanine',
+  'preferred_equity',
+  'co_gp_equity',
+  'lp_equity',
+];
+const SOURCE_CHANNELS: Deal['source_channel'][] = [
+  'broker',
+  'direct',
+  'referral',
+  'repeat_sponsor',
+  'internal_prospecting',
+];
+const SPONSOR_ENTITY_TYPES: Sponsor['entity_type'][] = ['llc', 'lp', 'corp', 'trust', 'individual'];
+const RELATIONSHIP_RATINGS: Sponsor['relationship_rating'][] = [
+  'new',
+  'developing',
+  'established',
+  'strategic',
+];
+const PROPERTY_TYPES: Property['property_type'][] = [
+  'multifamily',
+  'office',
+  'retail',
+  'industrial',
+  'hotel',
+  'self_storage',
+  'land',
+  'mixed_use',
+  'data_center',
+  'condo',
+  'master_planned_residential',
+  'other',
+];
+const POSITIVE_INTEGER_MAX = 2_147_483_647;
+const POSITIVE_BIG_INTEGER_MAX = 9_223_372_036_854_775_807n;
+const SPONSOR_PROMOTED_FACT_FIELDS = [
+  'website',
+  'years_experience',
+  'completed_projects',
+  'bankruptcy_history',
+] as const;
+const PROPERTY_PROMOTED_FACT_FIELDS = [
+  'subtype',
+  'units',
+  'rentable_square_feet',
+  'year_built',
+  'year_renovated',
+  'county',
+] as const;
+const DEAL_AUDIT_FIELDS = [
+  'name',
+  'investment_type',
+  'source_channel',
+  'source_date',
+  'requested_amount',
+  'purpose',
+  'profile',
+  'estimated_value',
+  'renovation_budget',
+  'description',
+  'sponsor',
+  'broker',
+  'fund',
+] as const;
 
 let idCounter = 1000;
 const newId = (prefix: string) => `${prefix}-${idCounter++}`;
@@ -218,10 +286,86 @@ function requireString(data: Record<string, unknown>, field: string, errorField 
   return value;
 }
 
-function requireEmail(data: Record<string, unknown>, field: string, errorField = field): string {
+function requireStringMax(
+  data: Record<string, unknown>,
+  field: string,
+  maxLength: number,
+  errorField = field,
+): string {
   const value = requireString(data, field, errorField);
+  if (value.length > maxLength) {
+    badRequest(errorField, `Ensure this field has no more than ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function requireEmail(data: Record<string, unknown>, field: string, errorField = field): string {
+  const value = requireStringMax(data, field, 254, errorField);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) badRequest(errorField, `${field} must be a valid email.`);
   return value;
+}
+
+function nullableMoney(data: Record<string, unknown>, field: string): string | null {
+  const raw = data[field];
+  if (raw === null || raw === undefined || raw === '') return null;
+  return moneyValue(raw, field, false);
+}
+
+function moneyValue(raw: unknown, field: string, positive: boolean): string {
+  const value = String(raw).trim();
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value);
+  if (!match) badRequest(field, 'Enter a valid amount with no more than 2 decimal places.');
+  const integer = match[1].replace(/^0+(?=\d)/, '');
+  const fraction = (match[2] ?? '').padEnd(2, '0');
+  if (integer.length + fraction.length > 16) {
+    badRequest(field, 'Ensure that there are no more than 16 digits in total.');
+  }
+  if (positive && Number(`${integer}.${fraction}`) <= 0) {
+    badRequest(field, 'Ensure this value is greater than 0.');
+  }
+  return `${integer}.${fraction}`;
+}
+
+function requiredChoice<T extends string>(
+  data: Record<string, unknown>,
+  field: string,
+  choices: readonly T[],
+): T {
+  const value = requireString(data, field);
+  if (!choices.includes(value as T)) badRequest(field, `Unsupported value: ${value}.`);
+  return value as T;
+}
+
+function nullableWholeNumber(
+  data: Record<string, unknown>,
+  field: string,
+  options: { min?: number; max?: number | bigint } = {},
+): number | null {
+  const raw = data[field];
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string' && !raw.trim()) {
+    badRequest(field, 'Enter a valid non-negative whole number.');
+  }
+  const value = Number(raw);
+  const min = options.min ?? 0;
+  if (!Number.isInteger(value) || value < min) badRequest(field, 'Enter a valid non-negative whole number.');
+  if (options.max !== undefined) {
+    const rawInteger = String(raw).trim().replace(/\.0+$/, '');
+    const exceedsMaximum = typeof options.max === 'bigint' && /^[+-]?\d+$/.test(rawInteger)
+      ? BigInt(rawInteger) > options.max
+      : value > Number(options.max);
+    if (exceedsMaximum) {
+      badRequest(field, `Ensure this value is less than or equal to ${options.max}.`);
+    }
+  }
+  return value;
+}
+
+function nullableBoolean(data: Record<string, unknown>, field: string): boolean | null {
+  const raw = data[field];
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw !== 'boolean') badRequest(field, 'Must be a valid boolean.');
+  return raw;
 }
 
 function deriveCategory(type: InvestmentType): Deal['investment_category'] {
@@ -294,14 +438,26 @@ function resolveSponsor(input: unknown): Sponsor | null {
     return existing!;
   }
   if (!isObject(input)) badRequest('sponsor', 'Expected an existing sponsor id, an object, or null.');
+  const website = 'website' in input ? stringFieldMax(input, 'website', 200) : '';
+  if (website && !isOptionalHttpUrl(website)) {
+    badRequest('sponsor', 'Enter a valid URL.');
+  }
   const created: Sponsor = {
     id: newId('sp'),
-    entity_name: requireString(input, 'entity_name', 'sponsor'),
-    entity_type: requireString(input, 'entity_type', 'sponsor') as Sponsor['entity_type'],
-    primary_contact_name: requireString(input, 'primary_contact_name', 'sponsor'),
+    entity_name: requireStringMax(input, 'entity_name', 255, 'sponsor'),
+    entity_type: requiredChoice(input, 'entity_type', SPONSOR_ENTITY_TYPES),
+    primary_contact_name: requireStringMax(input, 'primary_contact_name', 255, 'sponsor'),
     primary_contact_email: requireEmail(input, 'primary_contact_email', 'sponsor'),
-    primary_contact_phone: stringValue(input.primary_contact_phone),
-    relationship_rating: (stringValue(input.relationship_rating) || 'new') as Sponsor['relationship_rating'],
+    primary_contact_phone: 'primary_contact_phone' in input
+      ? stringFieldMax(input, 'primary_contact_phone', 40)
+      : '',
+    relationship_rating: input.relationship_rating === undefined
+      ? 'new'
+      : requiredChoice(input, 'relationship_rating', RELATIONSHIP_RATINGS),
+    website,
+    years_experience: nullableWholeNumber(input, 'years_experience', { max: 200 }),
+    completed_projects: nullableWholeNumber(input, 'completed_projects', { max: POSITIVE_INTEGER_MAX }),
+    bankruptcy_history: nullableBoolean(input, 'bankruptcy_history'),
     details: {},
   };
   sponsors.push(created);
@@ -350,6 +506,78 @@ function resolveExistingBroker(input: unknown): Broker | null {
   return resolveBroker(input);
 }
 
+function findSponsor(id: string): Sponsor {
+  const sponsor = sponsors.find((row) => row.id === id);
+  if (!sponsor) throw new ApiError('Not found.', 404, { detail: 'Not found.' });
+  return sponsor;
+}
+
+function deleteSponsor(sponsor: Sponsor): Record<string, never> {
+  if (deals.some((deal) => deal.sponsor === sponsor.id)) {
+    const message = 'This sponsor is linked to one or more deals and cannot be deleted.';
+    throw new ApiError(message, 400, { detail: message });
+  }
+  sponsors.splice(sponsors.indexOf(sponsor), 1);
+  return {};
+}
+
+function updateSponsor(
+  sponsor: Sponsor,
+  body: Record<string, unknown>,
+  partial: boolean,
+): Sponsor {
+  const candidate = clone(sponsor);
+  if (!partial) {
+    for (const field of ['entity_name', 'entity_type', 'primary_contact_name', 'primary_contact_email']) {
+      if (!(field in body)) badRequest(field, 'This field is required.');
+    }
+  }
+  if ('entity_name' in body) candidate.entity_name = requireString(body, 'entity_name');
+  if ('entity_type' in body) {
+    candidate.entity_type = requiredChoice(body, 'entity_type', SPONSOR_ENTITY_TYPES);
+  }
+  if ('primary_contact_name' in body) {
+    candidate.primary_contact_name = requireString(body, 'primary_contact_name');
+  }
+  if ('primary_contact_email' in body) {
+    candidate.primary_contact_email = requireEmail(body, 'primary_contact_email');
+  }
+  if ('primary_contact_phone' in body) {
+    candidate.primary_contact_phone = stringField(body, 'primary_contact_phone');
+  }
+  if ('relationship_rating' in body) {
+    candidate.relationship_rating = requiredChoice(body, 'relationship_rating', RELATIONSHIP_RATINGS);
+  }
+  if ('website' in body) {
+    const website = stringFieldMax(body, 'website', 200);
+    if (website && !isOptionalHttpUrl(website)) {
+      badRequest('website', 'Enter a valid URL.');
+    }
+    candidate.website = website;
+  }
+  if ('years_experience' in body) {
+    candidate.years_experience = nullableWholeNumber(body, 'years_experience', { max: 200 });
+  }
+  if ('completed_projects' in body) {
+    candidate.completed_projects = nullableWholeNumber(body, 'completed_projects', {
+      max: POSITIVE_INTEGER_MAX,
+    });
+  }
+  if ('bankruptcy_history' in body) {
+    candidate.bankruptcy_history = nullableBoolean(body, 'bankruptcy_history');
+  }
+  logEntityFactUpdates(
+    sponsor,
+    candidate,
+    body,
+    SPONSOR_PROMOTED_FACT_FIELDS,
+    'Sponsor',
+    deals.filter((deal) => deal.sponsor === sponsor.id).map((deal) => deal.id),
+  );
+  Object.assign(sponsor, candidate);
+  return sponsor;
+}
+
 function resolveProperty(input: unknown): Property {
   if (typeof input === 'string') {
     const existing = properties.find((p) => p.id === input);
@@ -357,11 +585,17 @@ function resolveProperty(input: unknown): Property {
     return existing!;
   }
   if (!isObject(input)) badRequest('properties', 'Expected an existing property id or an object.');
-  const address = requireString(input, 'address', 'properties');
-  const city = requireString(input, 'city', 'properties');
+  const address = requireStringMax(input, 'address', 255, 'properties');
+  const city = requireStringMax(input, 'city', 120, 'properties');
   const state = requireString(input, 'state', 'properties').toUpperCase();
-  const zip = requireString(input, 'zip', 'properties');
-  const propertyType = requireString(input, 'property_type', 'properties') as Property['property_type'];
+  if (state.length > 2) badRequest('properties', 'state must contain no more than 2 characters.');
+  const zip = requireStringMax(input, 'zip', 20, 'properties');
+  const propertyType = requiredChoice(input, 'property_type', PROPERTY_TYPES);
+  const yearBuilt = nullableWholeNumber(input, 'year_built', { min: 1700, max: 2200 });
+  const yearRenovated = nullableWholeNumber(input, 'year_renovated', { min: 1700, max: 2200 });
+  if (yearBuilt !== null && yearRenovated !== null && yearRenovated < yearBuilt) {
+    badRequest('year_renovated', 'Year renovated cannot be earlier than year built.');
+  }
   const addressNormalized = normalizePropertyInput(input);
   if (properties.some((property) => property.address_normalized === addressNormalized)) {
     badRequest('properties', 'A property with this normalized address already exists.');
@@ -374,11 +608,98 @@ function resolveProperty(input: unknown): Property {
     state,
     zip,
     property_type: propertyType,
-    msa: stringValue(input.msa),
+    subtype: 'subtype' in input ? stringFieldMax(input, 'subtype', 120) : '',
+    units: nullableWholeNumber(input, 'units', { max: POSITIVE_INTEGER_MAX }),
+    rentable_square_feet: nullableWholeNumber(input, 'rentable_square_feet', {
+      max: POSITIVE_BIG_INTEGER_MAX,
+    }),
+    year_built: yearBuilt,
+    year_renovated: yearRenovated,
+    county: 'county' in input ? stringFieldMax(input, 'county', 120) : '',
+    msa: 'msa' in input ? stringFieldMax(input, 'msa', 160) : '',
     details: {},
   };
   properties.push(created);
   return created;
+}
+
+function findProperty(id: string): Property {
+  const property = properties.find((row) => row.id === id);
+  if (!property) throw new ApiError('Not found.', 404, { detail: 'Not found.' });
+  return property;
+}
+
+function deleteProperty(property: Property): Record<string, never> {
+  if (deals.some((deal) => deal.properties.some((link) => link.property.id === property.id))) {
+    const message = 'This property is linked to one or more deals and cannot be deleted.';
+    throw new ApiError(message, 400, { detail: message });
+  }
+  properties.splice(properties.indexOf(property), 1);
+  return {};
+}
+
+function updateProperty(
+  property: Property,
+  body: Record<string, unknown>,
+  partial: boolean,
+): Property {
+  const candidate = clone(property);
+  if (!partial) {
+    for (const field of ['address', 'city', 'state', 'zip', 'property_type']) {
+      if (!(field in body)) badRequest(field, 'This field is required.');
+    }
+  }
+  if ('address' in body) candidate.address = requireString(body, 'address');
+  if ('city' in body) candidate.city = requireString(body, 'city');
+  if ('state' in body) {
+    const state = requireString(body, 'state').toUpperCase();
+    if (state.length > 2) badRequest('state', 'Ensure this field has no more than 2 characters.');
+    candidate.state = state;
+  }
+  if ('zip' in body) candidate.zip = requireString(body, 'zip');
+  if ('property_type' in body) {
+    candidate.property_type = requiredChoice(body, 'property_type', PROPERTY_TYPES);
+  }
+  if ('subtype' in body) candidate.subtype = stringFieldMax(body, 'subtype', 120);
+  if ('units' in body) {
+    candidate.units = nullableWholeNumber(body, 'units', { max: POSITIVE_INTEGER_MAX });
+  }
+  if ('rentable_square_feet' in body) {
+    candidate.rentable_square_feet = nullableWholeNumber(body, 'rentable_square_feet', {
+      max: POSITIVE_BIG_INTEGER_MAX,
+    });
+  }
+  if ('year_built' in body) {
+    candidate.year_built = nullableWholeNumber(body, 'year_built', { min: 1700, max: 2200 });
+  }
+  if ('year_renovated' in body) {
+    candidate.year_renovated = nullableWholeNumber(body, 'year_renovated', { min: 1700, max: 2200 });
+  }
+  if ('county' in body) candidate.county = stringFieldMax(body, 'county', 120);
+  if ('msa' in body) candidate.msa = stringFieldMax(body, 'msa', 160);
+  if (
+    candidate.year_built !== null
+    && candidate.year_renovated !== null
+    && candidate.year_renovated < candidate.year_built
+  ) {
+    badRequest('year_renovated', 'Year renovated cannot be earlier than year built.');
+  }
+  candidate.address_normalized = normalizePropertyInput(candidate as unknown as Record<string, unknown>);
+  if (properties.some((row) => row.id !== property.id && row.address_normalized === candidate.address_normalized)) {
+    badRequest('address_normalized', 'A property with this normalized address already exists.');
+  }
+  logEntityFactUpdates(
+    property,
+    candidate,
+    body,
+    PROPERTY_PROMOTED_FACT_FIELDS,
+    'Property',
+    deals
+      .filter((deal) => deal.properties.some((link) => link.property.id === property.id))
+      .map((deal) => deal.id),
+  );
+  Object.assign(property, candidate);
+  return property;
 }
 
 function normalizePropertyInput(input: Record<string, unknown>): string {
@@ -425,6 +746,26 @@ function toDealProperties(props: Property[]): DealPropertySummary[] {
 }
 
 function createDeal(body: Record<string, unknown>): Deal {
+  const collectionLengths = {
+    sponsors: sponsors.length,
+    brokers: brokers.length,
+    properties: properties.length,
+  };
+  try {
+    return createDealUnchecked(body);
+  } catch (error) {
+    sponsors.splice(collectionLengths.sponsors);
+    brokers.splice(collectionLengths.brokers);
+    properties.splice(collectionLengths.properties);
+    throw error;
+  }
+}
+
+function createDealUnchecked(body: Record<string, unknown>): Deal {
+  const name = requireStringMax(body, 'name', 255);
+  const investmentType = requiredChoice(body, 'investment_type', INVESTMENT_TYPES);
+  const sourceChannel = requiredChoice(body, 'source_channel', SOURCE_CHANNELS);
+  const requestedAmount = moneyValue(body.requested_amount, 'requested_amount', true);
   const sponsor = resolveSponsor(body.sponsor);
   const broker = resolveBroker(body.broker);
   const fund = resolveFund(body.fund);
@@ -444,11 +785,10 @@ function createDeal(body: Record<string, unknown>): Deal {
       : [];
   validateUniquePropertyInputs(propertyInputs, Array.isArray(body.property_ids) ? 'property_ids' : 'properties');
   const resolvedProperties = propertyInputs.map(resolveProperty);
-  const investmentType = body.investment_type as InvestmentType;
 
   const deal: Deal = {
     id: newId('deal'),
-    name: String(body.name ?? 'Untitled deal'),
+    name,
     investment_type: investmentType,
     investment_category: deriveCategory(investmentType),
     pipeline_status: 'sourced',
@@ -462,9 +802,14 @@ function createDeal(body: Record<string, unknown>): Deal {
     assigned_analyst_detail: { id: MOCK_USER_ID, username: MOCK_USER.username },
     fund: fund?.id ?? null,
     fund_detail: fund,
-    source_channel: body.source_channel as Deal['source_channel'],
+    source_channel: sourceChannel,
     source_date: String(body.source_date ?? nowIso().slice(0, 10)),
-    requested_amount: String(body.requested_amount ?? '0'),
+    requested_amount: requestedAmount,
+    purpose: optionalStringFieldMax(body, 'purpose', 160),
+    profile: optionalStringFieldMax(body, 'profile', 160),
+    estimated_value: nullableMoney(body, 'estimated_value'),
+    renovation_budget: nullableMoney(body, 'renovation_budget'),
+    description: optionalStringField(body, 'description'),
     current_stage_entered_at: nowIso(),
     days_in_current_stage: 0,
     details: {},
@@ -489,14 +834,37 @@ function createDeal(body: Record<string, unknown>): Deal {
 }
 
 function updateDeal(deal: Deal, body: Record<string, unknown>): Deal {
-  if (typeof body.name === 'string') deal.name = body.name;
-  if (typeof body.investment_type === 'string') {
-    deal.investment_type = body.investment_type as InvestmentType;
+  // Deal edits replace relationship/property references rather than mutating
+  // their nested records. Preserve those shared store references on rollback.
+  const snapshot: Deal = { ...deal };
+  try {
+    const updated = updateDealUnchecked(deal, body);
+    logDealFieldUpdates(updated, snapshot, body);
+    return updated;
+  } catch (error) {
+    Object.assign(deal, snapshot);
+    throw error;
+  }
+}
+
+function updateDealUnchecked(deal: Deal, body: Record<string, unknown>): Deal {
+  if ('name' in body) deal.name = requireStringMax(body, 'name', 255);
+  if ('investment_type' in body) {
+    deal.investment_type = requiredChoice(body, 'investment_type', INVESTMENT_TYPES);
     deal.investment_category = deriveCategory(deal.investment_type);
   }
-  if (body.requested_amount !== undefined) deal.requested_amount = String(body.requested_amount);
-  if (typeof body.source_channel === 'string') deal.source_channel = body.source_channel as Deal['source_channel'];
-  if (typeof body.source_date === 'string') deal.source_date = body.source_date;
+  if ('requested_amount' in body) {
+    deal.requested_amount = moneyValue(body.requested_amount, 'requested_amount', true);
+  }
+  if ('purpose' in body) deal.purpose = stringFieldMax(body, 'purpose', 160);
+  if ('profile' in body) deal.profile = stringFieldMax(body, 'profile', 160);
+  if ('estimated_value' in body) deal.estimated_value = nullableMoney(body, 'estimated_value');
+  if ('renovation_budget' in body) deal.renovation_budget = nullableMoney(body, 'renovation_budget');
+  if ('description' in body) deal.description = stringField(body, 'description');
+  if ('source_channel' in body) {
+    deal.source_channel = requiredChoice(body, 'source_channel', SOURCE_CHANNELS);
+  }
+  if ('source_date' in body) deal.source_date = requireString(body, 'source_date');
   if ('sponsor' in body) {
     const sponsor = resolveExistingSponsor(body.sponsor);
     if (deal.sponsor && sponsor?.id !== deal.sponsor) {
@@ -537,12 +905,121 @@ function updateDeal(deal: Deal, body: Record<string, unknown>): Deal {
       return property;
     });
     deal.properties = toDealProperties(resolved);
+  } else if ('property_ids' in body) {
+    badRequest('property_ids', 'Expected a list of property ids.');
   }
   deal.updated_at = nowIso();
   return deal;
 }
 
-function logTransition(deal: Deal, field: string, from: string, to: string, reason: string) {
+function stringField(data: Record<string, unknown>, field: string): string {
+  if (typeof data[field] !== 'string') badRequest(field, 'Not a valid string.');
+  return String(data[field]).trim();
+}
+
+function stringFieldMax(data: Record<string, unknown>, field: string, maxLength: number): string {
+  const value = stringField(data, field);
+  if (value.length > maxLength) {
+    badRequest(field, `Ensure this field has no more than ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function optionalStringField(data: Record<string, unknown>, field: string): string {
+  return field in data ? stringField(data, field) : '';
+}
+
+function optionalStringFieldMax(
+  data: Record<string, unknown>,
+  field: string,
+  maxLength: number,
+): string {
+  return field in data ? stringFieldMax(data, field, maxLength) : '';
+}
+
+function canonicalDealField(deal: Deal, field: (typeof DEAL_AUDIT_FIELDS)[number]): string {
+  const value = deal[field];
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function auditDealField(field: (typeof DEAL_AUDIT_FIELDS)[number], value: string): string {
+  return field === 'description' && value.length > 500 ? `${value.slice(0, 497)}...` : value;
+}
+
+function auditFactValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return String(value).toLowerCase();
+  return String(value);
+}
+
+function logEntityFactUpdates(
+  previous: Sponsor | Property,
+  updated: Sponsor | Property,
+  body: Record<string, unknown>,
+  promotedFields: readonly string[],
+  subjectModel: 'Sponsor' | 'Property',
+  linkedDealIds: string[],
+) {
+  const oldValues = previous as unknown as Record<string, unknown>;
+  const newValues = updated as unknown as Record<string, unknown>;
+  const changes = promotedFields.filter(
+    (field) => field in body && oldValues[field] !== newValues[field],
+  );
+  if (!changes.length) return;
+  const contextualDealIds: Array<string | null> = linkedDealIds.length ? linkedDealIds : [null];
+  for (const dealId of contextualDealIds) {
+    for (const field of changes) {
+      activity.unshift({
+        id: newId('act'),
+        deal: dealId,
+        action_type: 'field_updated',
+        performed_by: MOCK_USER_ID,
+        performed_at: nowIso(),
+        ip_address: null,
+        description: `${subjectModel} ${field} updated`,
+        old_value: auditFactValue(oldValues[field]),
+        new_value: auditFactValue(newValues[field]),
+        reason: '',
+        metadata: { field, subject_model: subjectModel, subject_id: updated.id },
+      });
+    }
+  }
+}
+
+function logDealFieldUpdates(
+  deal: Deal,
+  previous: Deal,
+  body: Record<string, unknown>,
+) {
+  for (const field of DEAL_AUDIT_FIELDS) {
+    if (!(field in body)) continue;
+    const oldValue = canonicalDealField(previous, field);
+    const newValue = canonicalDealField(deal, field);
+    if (oldValue === newValue) continue;
+    activity.unshift({
+      id: newId('act'),
+      deal: deal.id,
+      action_type: 'field_updated',
+      performed_by: MOCK_USER_ID,
+      performed_at: nowIso(),
+      ip_address: null,
+      description: `${field} updated`,
+      old_value: auditDealField(field, oldValue),
+      new_value: auditDealField(field, newValue),
+      reason: '',
+      metadata: { field, subject_model: 'Deal', subject_id: deal.id },
+    });
+  }
+}
+
+function logTransition(
+  deal: Deal,
+  field: string,
+  from: string,
+  to: string,
+  reason: string,
+  extraMetadata: Record<string, unknown> = {},
+) {
   activity.unshift({
     id: newId('act'),
     deal: deal.id,
@@ -554,7 +1031,7 @@ function logTransition(deal: Deal, field: string, from: string, to: string, reas
     old_value: from,
     new_value: to,
     reason,
-    metadata: { field, from, to },
+    metadata: { field, from, to, ...extraMetadata },
   } as ActivityLogEntry);
 }
 
@@ -601,22 +1078,41 @@ function createNote(body: Record<string, unknown>): DealNote {
   return note;
 }
 
-function transitionPipeline(deal: Deal, to: PipelineStatus, reason: string): Deal {
+function transitionPipeline(
+  deal: Deal,
+  to: PipelineStatus,
+  reason: string,
+  overrideReadiness = false,
+): Deal {
   if (!reason?.trim()) badRequest('reason', 'A reason is required for every status transition.');
   const from = deal.pipeline_status;
   if (to === from) badRequest('to_status', 'Deal is already in that pipeline status.');
+  let pausedFromStatus: PipelineStatus | null = null;
 
   if (from === 'on_hold') {
     if (!deal.paused_from_status) badRequest('paused_from_status', 'Cannot resume; paused_from_status is missing.');
     if (to !== 'dead' && to !== deal.paused_from_status) {
       badRequest('to_status', `On-hold deals can only resume to ${deal.paused_from_status} or move to dead.`);
     }
+    pausedFromStatus = deal.paused_from_status;
     deal.paused_from_status = null;
   } else {
     if (!PIPELINE_TRANSITIONS[from].includes(to)) {
       badRequest('to_status', `Cannot transition pipeline status from ${from} to ${to}.`);
     }
-    if (to === 'on_hold') deal.paused_from_status = from;
+    if (to === 'on_hold') {
+      deal.paused_from_status = from;
+      pausedFromStatus = from;
+    }
+  }
+  const readiness = pipelineTransitionReadiness(deal, to);
+  const isReadinessOverride = Boolean(!readiness.ready && overrideReadiness && MOCK_USER.is_staff);
+  if (!readiness.ready && !isReadinessOverride) {
+    const message = 'This pipeline transition is blocked by readiness requirements.';
+    throw new ApiError(message, 400, {
+      to_status: [message],
+      readiness,
+    });
   }
   const transitionedAt = nowIso();
   const openEvent = stageEvents.find((event) => event.deal === deal.id && event.exited_at === null);
@@ -631,13 +1127,25 @@ function transitionPipeline(deal: Deal, to: PipelineStatus, reason: string): Dea
     performed_by: MOCK_USER_ID,
     performed_by_detail: { id: MOCK_USER_ID, username: MOCK_USER.username },
     reason,
-    is_override: false,
+    is_override: isReadinessOverride,
   });
   deal.pipeline_status = to;
   deal.current_stage_entered_at = transitionedAt;
   deal.days_in_current_stage = 0;
   deal.updated_at = nowIso();
-  logTransition(deal, 'pipeline_status', from, to, reason);
+  logTransition(
+    deal,
+    'pipeline_status',
+    from,
+    to,
+    reason,
+    {
+      is_override: isReadinessOverride,
+      readiness_code: readiness.code,
+      readiness_blockers: readiness.blockers,
+      ...(pausedFromStatus ? { paused_from_status: pausedFromStatus } : {}),
+    },
+  );
   return deal;
 }
 
@@ -829,6 +1337,10 @@ function screeningInput(body: Record<string, unknown>): CreateScreeningAssessmen
   if (proposedRate !== null && Number(proposedRate) > 100) {
     badRequest('proposed_rate', 'Ensure this value is less than or equal to 100.');
   }
+  const equityTargetIrr = nullableDecimal('equity_target_irr');
+  if (equityTargetIrr !== null && Number(equityTargetIrr) > 100) {
+    badRequest('equity_target_irr', 'Ensure this value is less than or equal to 100.');
+  }
   const decision = String(body.decision ?? '');
   if (!['', 'advance', 'refer', 'decline'].includes(decision)) {
     badRequest('decision', 'Select a supported screening decision.');
@@ -845,7 +1357,7 @@ function screeningInput(body: Record<string, unknown>): CreateScreeningAssessmen
     proposed_rate: proposedRate,
     proposed_term_months: positiveInteger('proposed_term_months'),
     equity_summary: String(body.equity_summary ?? ''),
-    equity_target_irr: nullableDecimal('equity_target_irr'),
+    equity_target_irr: equityTargetIrr,
     equity_target_multiple: nullableDecimal('equity_target_multiple'),
     equity_target_hold_months: positiveInteger('equity_target_hold_months'),
     decision: decision as ScreeningAssessment['decision'],
@@ -855,6 +1367,7 @@ function screeningInput(body: Record<string, unknown>): CreateScreeningAssessmen
 
 function createScreeningAssessment(body: Record<string, unknown>): ScreeningAssessment {
   const input = screeningInput(body);
+  if (!input.deal) badRequest('deal', 'A deal is required to create a screening assessment.');
   findDeal(input.deal);
   const current = screeningAssessments.find(
     (assessment) => assessment.deal === input.deal && assessment.is_current,
@@ -904,6 +1417,9 @@ function updateScreeningAssessment(
   if (assessment.status === 'finalized') {
     badRequest('status', 'Finalized screening assessments are immutable.');
   }
+  if ('deal' in body && String(body.deal) !== assessment.deal) {
+    badRequest('deal', 'An assessment cannot be moved to another deal.');
+  }
   const input = screeningInput({ ...assessment, ...body, deal: assessment.deal });
   Object.assign(assessment, input, calculateDebtMetrics(input), { updated_at: nowIso() });
   return assessment;
@@ -930,14 +1446,72 @@ function finalizeScreeningAssessment(
   return assessment;
 }
 
+function pipelineTransitionReadiness(deal: Deal, to: PipelineStatus) {
+  if (deal.pipeline_status !== 'screening' || to !== 'quoting') {
+    return { ready: true, code: 'ready', blockers: [], can_override: false };
+  }
+  const latest = screeningAssessments
+    .filter((assessment) => assessment.deal === deal.id)
+    .sort((a, b) => b.version - a.version)[0];
+  if (!latest) {
+    return {
+      ready: false,
+      code: 'screening_approval_required',
+      blockers: ['screening_assessment_missing'],
+      can_override: MOCK_USER.is_staff,
+    };
+  }
+  if (latest.status !== 'finalized') {
+    return {
+      ready: false,
+      code: 'screening_approval_required',
+      blockers: ['screening_assessment_not_finalized'],
+      can_override: MOCK_USER.is_staff,
+    };
+  }
+  if (latest.decision !== 'advance') {
+    return {
+      ready: false,
+      code: 'screening_approval_required',
+      blockers: ['screening_decision_not_advance'],
+      can_override: MOCK_USER.is_staff,
+    };
+  }
+  return {
+    ready: true,
+    code: 'ready',
+    blockers: [],
+    can_override: false,
+  };
+}
+
+function allowedSyndicationTransitions(deal: Deal): SyndicationStatus[] {
+  if (
+    deal.syndication_status === 'not_started'
+    && !SYNDICATION_START_STAGES.includes(deal.pipeline_status)
+  ) {
+    return [];
+  }
+  if (
+    deal.syndication_status !== 'not_started'
+    && SYNDICATION_TERMINAL_STAGES.includes(deal.pipeline_status)
+  ) {
+    return [];
+  }
+  return SYNDICATION_TRANSITIONS[deal.syndication_status];
+}
+
 function allowedTransitions(deal: Deal) {
-  const pipeline =
+  const pipeline: PipelineStatus[] =
     deal.pipeline_status === 'on_hold' && deal.paused_from_status
       ? [deal.paused_from_status, 'dead']
       : PIPELINE_TRANSITIONS[deal.pipeline_status];
   return {
     pipeline_status: pipeline,
-    syndication_status: SYNDICATION_TRANSITIONS[deal.syndication_status],
+    syndication_status: allowedSyndicationTransitions(deal),
+    readiness: Object.fromEntries(
+      pipeline.map((to) => [to, pipelineTransitionReadiness(deal, to)]),
+    ),
   };
 }
 
@@ -990,7 +1564,14 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
         .sort((a, b) => b.entered_at.localeCompare(a.entered_at));
       return paginate(filtered, query);
     }
-    if (third === 'transition') return transitionPipeline(deal, body.to_status as PipelineStatus, String(body.reason ?? ''));
+    if (third === 'transition') {
+      return transitionPipeline(
+        deal,
+        body.to_status as PipelineStatus,
+        String(body.reason ?? ''),
+        body.override_readiness === true,
+      );
+    }
     if (third === 'transition-syndication') {
       return transitionSyndication(deal, body.to_status as SyndicationStatus, String(body.reason ?? ''));
     }
@@ -1017,10 +1598,22 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
     if (!second) {
       if (method === 'POST') return createScreeningAssessment(body);
       const dealId = query.get('deal');
-      const currentOnly = query.get('current') === 'true';
+      const status = query.get('status');
+      if (status && !['draft', 'finalized'].includes(status)) {
+        badRequest('status', 'Unsupported screening status.');
+      }
+      const currentFilter = query.get('current');
+      if (currentFilter !== null && !['true', 'false', '1', '0'].includes(currentFilter.toLowerCase())) {
+        badRequest('current', 'Expected true or false.');
+      }
+      const currentOnly = currentFilter === null
+        ? null
+        : ['true', '1'].includes(currentFilter.toLowerCase());
       const filtered = screeningAssessments.filter(
         (assessment) =>
-          (!dealId || assessment.deal === dealId) && (!currentOnly || assessment.is_current),
+          (!dealId || assessment.deal === dealId)
+          && (!status || assessment.status === status)
+          && (currentOnly === null || assessment.is_current === currentOnly),
       );
       return paginate(filtered, query);
     }
@@ -1030,11 +1623,7 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
     }
     if (method === 'PATCH' || method === 'PUT') return updateScreeningAssessment(assessment, body);
     if (method === 'DELETE') {
-      if (assessment.status === 'finalized') {
-        badRequest('status', 'Finalized screening assessments cannot be deleted.');
-      }
-      screeningAssessments.splice(screeningAssessments.indexOf(assessment), 1);
-      return {};
+      badRequest('status', 'Screening assessment versions cannot be deleted; create a new version instead.');
     }
     return assessment;
   }
@@ -1089,6 +1678,14 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
   }
 
   if (resource === 'sponsors') {
+    if (second) {
+      const sponsor = findSponsor(second);
+      if (method === 'DELETE') return deleteSponsor(sponsor);
+      if (method === 'PATCH' || method === 'PUT') {
+        return updateSponsor(sponsor, body, method === 'PATCH');
+      }
+      return sponsor;
+    }
     if (method === 'POST') return resolveSponsor(body);
     return paginate(sponsors, query);
   }
@@ -1098,6 +1695,14 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
   }
   if (resource === 'funds') return paginate(funds, query);
   if (resource === 'properties') {
+    if (second) {
+      const property = findProperty(second);
+      if (method === 'DELETE') return deleteProperty(property);
+      if (method === 'PATCH' || method === 'PUT') {
+        return updateProperty(property, body, method === 'PATCH');
+      }
+      return property;
+    }
     if (method === 'POST') return resolveProperty(body);
     return paginate(properties, query);
   }

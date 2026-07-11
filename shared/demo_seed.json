@@ -29,7 +29,11 @@
       "primary_contact_name": "Dana Reyes",
       "primary_contact_email": "dana@larkspurcap.com",
       "primary_contact_phone": "(512) 555-0142",
-      "relationship_rating": "strategic"
+      "relationship_rating": "strategic",
+      "website": "https://larkspurcap.com",
+      "years_experience": 18,
+      "completed_projects": 27,
+      "bankruptcy_history": false
     },
     {
       "id": "sp-cobalt",
@@ -205,6 +209,12 @@
       "state": "TX",
       "zip": "78745",
       "property_type": "multifamily",
+      "subtype": "garden_style",
+      "units": 184,
+      "rentable_square_feet": 156400,
+      "year_built": 1988,
+      "year_renovated": 2021,
+      "county": "Travis",
       "msa": "Austin-Round Rock"
     },
     {
@@ -480,6 +490,11 @@
       "source_channel": "broker",
       "source_date": "2026-05-18",
       "requested_amount": "12400000.00",
+      "purpose": "Acquisition and light renovation",
+      "profile": "Value-add multifamily bridge",
+      "estimated_value": "19000000.00",
+      "renovation_budget": "1350000.00",
+      "description": "Bridge financing for the acquisition and renovation of a 184-unit garden-style community.",
       "properties": [
         [
           "pr-larkspur",

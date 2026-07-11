@@ -1,5 +1,6 @@
 import uuid
 
+from django.core.validators import MaxValueValidator
 from django.db import models
 
 from api.fields import EncryptedTextField
@@ -23,10 +24,24 @@ class Sponsor(models.Model):
     guarantor_net_worth = EncryptedTextField(blank=True)
     guarantor_liquidity = EncryptedTextField(blank=True)
     guarantor_credit_score = EncryptedTextField(blank=True)
+    website = models.URLField(blank=True)
+    years_experience = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(200)],
+    )
+    completed_projects = models.PositiveIntegerField(null=True, blank=True)
+    bankruptcy_history = models.BooleanField(null=True, blank=True)
     details = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ['entity_name']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(years_experience__isnull=True) | models.Q(years_experience__lte=200),
+                name='sponsor_years_experience_range',
+            ),
+        ]
 
     def __str__(self):
         return self.entity_name

@@ -18,6 +18,12 @@ const emptyRow = {
   state: '',
   zip: '',
   property_type: '',
+  subtype: '',
+  units: '',
+  rentable_square_feet: '',
+  year_built: '',
+  year_renovated: '',
+  county: '',
   msa: '',
 };
 
@@ -132,6 +138,54 @@ export function PropertiesSection() {
                       aria-invalid={Boolean(rowErrors?.property_type)}
                       {...register(`properties.${index}.property_type`)}
                     />
+                  </FormField>
+                  <FormField label="Subtype" hint="Optional">
+                    <Input placeholder="e.g. Garden-style" {...register(`properties.${index}.subtype`)} />
+                  </FormField>
+                  <FormField label="Units" hint="Optional" error={rowErrors?.units?.message}>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      aria-invalid={Boolean(rowErrors?.units)}
+                      {...register(`properties.${index}.units`)}
+                    />
+                  </FormField>
+                  <FormField label="Rentable square feet" hint="Optional" error={rowErrors?.rentable_square_feet?.message}>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      aria-invalid={Boolean(rowErrors?.rentable_square_feet)}
+                      {...register(`properties.${index}.rentable_square_feet`)}
+                    />
+                  </FormField>
+                  <FormField label="Year built" hint="Optional" error={rowErrors?.year_built?.message}>
+                    <Input
+                      type="number"
+                      min="1700"
+                      max="2200"
+                      step="1"
+                      inputMode="numeric"
+                      aria-invalid={Boolean(rowErrors?.year_built)}
+                      {...register(`properties.${index}.year_built`)}
+                    />
+                  </FormField>
+                  <FormField label="Year renovated" hint="Optional" error={rowErrors?.year_renovated?.message}>
+                    <Input
+                      type="number"
+                      min="1700"
+                      max="2200"
+                      step="1"
+                      inputMode="numeric"
+                      aria-invalid={Boolean(rowErrors?.year_renovated)}
+                      {...register(`properties.${index}.year_renovated`)}
+                    />
+                  </FormField>
+                  <FormField label="County" hint="Optional">
+                    <Input {...register(`properties.${index}.county`)} />
                   </FormField>
                   <FormField label="MSA" hint="Optional">
                     <Input {...register(`properties.${index}.msa`)} />

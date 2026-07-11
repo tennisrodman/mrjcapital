@@ -13,6 +13,7 @@ from django.db import connection, IntegrityError
 from django.test import RequestFactory, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -29,6 +30,7 @@ from api.models import (
     Fund,
     PipelineStatus,
     Property,
+    ScreeningAssessment,
     Sponsor,
 )
 from api.services import normalize_address
@@ -169,6 +171,16 @@ class DealSpineApiTests(APITestCase):
             source_channel='direct',
             requested_amount='2500000.00',
             details={'source_contact_name': 'Avery Sponsor'},
+        )
+
+    def approve_for_quoting(self, deal):
+        return ScreeningAssessment.objects.create(
+            deal=deal,
+            version=1,
+            status=ScreeningAssessment.Status.FINALIZED,
+            decision=ScreeningAssessment.Decision.ADVANCE,
+            reviewer=self.user,
+            finalized_at=timezone.now(),
         )
 
     def _upload_intent(self, deal, name, category, file_type='pdf', visibility_roles=None,
@@ -411,7 +423,7 @@ class DealSpineApiTests(APITestCase):
         other_deal = Deal.objects.create(
             name='Other Analyst Deal',
             investment_type='whole_loan_bridge',
-            sponsor=self.sponsor,
+            sponsor=None,
             assigned_analyst=self.other_user,
             source_channel='direct',
             requested_amount='1000000.00',
@@ -439,7 +451,7 @@ class DealSpineApiTests(APITestCase):
         other_deal = Deal.objects.create(
             name='Other Analyst Deal',
             investment_type='whole_loan_bridge',
-            sponsor=self.sponsor,
+            sponsor=None,
             assigned_analyst=self.other_user,
             source_channel='direct',
             requested_amount='1000000.00',
@@ -747,6 +759,7 @@ class DealSpineApiTests(APITestCase):
             {'to_status': 'screening', 'reason': 'Start screening'},
             format='json',
         )
+        self.approve_for_quoting(deal)
         self.client.post(
             f'/api/deals/{deal.pk}/transition/',
             {'to_status': 'quoting', 'reason': 'Ready to quote'},
@@ -868,6 +881,7 @@ class DealSpineApiTests(APITestCase):
             {'to_status': 'screening', 'reason': 'Start screening'},
             format='json',
         )
+        self.approve_for_quoting(deal)
         self.client.post(
             f'/api/deals/{deal.pk}/transition/',
             {'to_status': 'quoting', 'reason': 'Advance to quoting'},
@@ -887,6 +901,7 @@ class DealSpineApiTests(APITestCase):
 
     def test_syndication_cannot_start_after_pipeline_status_closes(self):
         deal = self.create_deal()
+        self.approve_for_quoting(deal)
         for to_status in ['screening', 'quoting', 'negotiating', 'signed', 'closing', 'closed']:
             self.client.post(
                 f'/api/deals/{deal.pk}/transition/',
@@ -905,6 +920,7 @@ class DealSpineApiTests(APITestCase):
 
     def test_syndication_can_close_after_pipeline_moves_to_servicing(self):
         deal = self.create_deal()
+        self.approve_for_quoting(deal)
         for to_status in ['screening', 'quoting']:
             self.client.post(
                 f'/api/deals/{deal.pk}/transition/',

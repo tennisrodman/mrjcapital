@@ -28,8 +28,14 @@ export const FUNDS: Fund[] = demoSeed.funds.map((row) =>
   withDetails({ id: row.id, name: row.name, status: row.status as Fund['status'] }),
 );
 
-export const SPONSORS: Sponsor[] = demoSeed.sponsors.map((row) =>
-  withDetails({
+export const SPONSORS: Sponsor[] = demoSeed.sponsors.map((row) => {
+  const optional = row as typeof row & {
+    website?: string;
+    years_experience?: number;
+    completed_projects?: number;
+    bankruptcy_history?: boolean;
+  };
+  return withDetails({
     id: row.id,
     entity_name: row.entity_name,
     entity_type: row.entity_type as Sponsor['entity_type'],
@@ -37,8 +43,12 @@ export const SPONSORS: Sponsor[] = demoSeed.sponsors.map((row) =>
     primary_contact_email: row.primary_contact_email,
     primary_contact_phone: row.primary_contact_phone,
     relationship_rating: row.relationship_rating as Sponsor['relationship_rating'],
-  }),
-);
+    website: optional.website ?? '',
+    years_experience: optional.years_experience ?? null,
+    completed_projects: optional.completed_projects ?? null,
+    bankruptcy_history: optional.bankruptcy_history ?? null,
+  });
+});
 
 export const BROKERS: Broker[] = demoSeed.brokers.map((row) =>
   withDetails({
@@ -52,6 +62,14 @@ export const BROKERS: Broker[] = demoSeed.brokers.map((row) =>
 );
 
 function propertyRow(row: (typeof demoSeed.properties)[number]): Property {
+  const optional = row as typeof row & {
+    subtype?: string;
+    units?: number;
+    rentable_square_feet?: number;
+    year_built?: number;
+    year_renovated?: number;
+    county?: string;
+  };
   return withDetails({
     id: row.id,
     address_normalized: `${row.address} ${row.city} ${row.state} ${row.zip}`.toUpperCase(),
@@ -60,6 +78,12 @@ function propertyRow(row: (typeof demoSeed.properties)[number]): Property {
     state: row.state,
     zip: row.zip,
     property_type: row.property_type as Property['property_type'],
+    subtype: optional.subtype ?? '',
+    units: optional.units ?? null,
+    rentable_square_feet: optional.rentable_square_feet ?? null,
+    year_built: optional.year_built ?? null,
+    year_renovated: optional.year_renovated ?? null,
+    county: optional.county ?? '',
     msa: row.msa,
   });
 }
@@ -92,35 +116,49 @@ function investmentCategory(investmentType: Deal['investment_type']): Deal['inve
 }
 
 export function buildInitialDeals(): Deal[] {
-  return demoSeed.deals.map((seed) => ({
-    id: seed.id,
-    name: seed.name,
-    investment_type: seed.investment_type as Deal['investment_type'],
-    investment_category: investmentCategory(seed.investment_type as Deal['investment_type']),
-    pipeline_status: seed.pipeline_status as Deal['pipeline_status'],
-    syndication_status: seed.syndication_status as Deal['syndication_status'],
-    paused_from_status: (seed.paused_from_status as Deal['paused_from_status']) ?? null,
-    sponsor: seed.sponsor,
-    sponsor_detail: sponsorById[seed.sponsor],
-    broker: seed.broker ?? null,
-    broker_detail: seed.broker ? brokerById[seed.broker] : null,
-    assigned_analyst: ANALYST.id,
-    assigned_analyst_detail: ANALYST,
-    fund: seed.fund ?? null,
-    fund_detail: seed.fund ? fundById[seed.fund] : null,
-    source_channel: seed.source_channel as Deal['source_channel'],
-    source_date: seed.source_date,
-    requested_amount: seed.requested_amount,
-    current_stage_entered_at: `${seed.source_date}T15:00:00Z`,
-    days_in_current_stage: Math.max(
-      0,
-      Math.floor((Date.now() - new Date(`${seed.source_date}T15:00:00Z`).getTime()) / 86_400_000),
-    ),
-    details: {},
-    properties: dealProps(seed.properties as [string, boolean][]),
-    created_at: `${seed.source_date}T15:00:00Z`,
-    updated_at: `${seed.source_date}T15:00:00Z`,
-  }));
+  return demoSeed.deals.map((seed) => {
+    const optional = seed as typeof seed & {
+      purpose?: string;
+      profile?: string;
+      estimated_value?: string;
+      renovation_budget?: string;
+      description?: string;
+    };
+    return {
+      id: seed.id,
+      name: seed.name,
+      investment_type: seed.investment_type as Deal['investment_type'],
+      investment_category: investmentCategory(seed.investment_type as Deal['investment_type']),
+      pipeline_status: seed.pipeline_status as Deal['pipeline_status'],
+      syndication_status: seed.syndication_status as Deal['syndication_status'],
+      paused_from_status: (seed.paused_from_status as Deal['paused_from_status']) ?? null,
+      sponsor: seed.sponsor,
+      sponsor_detail: sponsorById[seed.sponsor],
+      broker: seed.broker ?? null,
+      broker_detail: seed.broker ? brokerById[seed.broker] : null,
+      assigned_analyst: ANALYST.id,
+      assigned_analyst_detail: ANALYST,
+      fund: seed.fund ?? null,
+      fund_detail: seed.fund ? fundById[seed.fund] : null,
+      source_channel: seed.source_channel as Deal['source_channel'],
+      source_date: seed.source_date,
+      requested_amount: seed.requested_amount,
+      purpose: optional.purpose ?? '',
+      profile: optional.profile ?? '',
+      estimated_value: optional.estimated_value ?? null,
+      renovation_budget: optional.renovation_budget ?? null,
+      description: optional.description ?? '',
+      current_stage_entered_at: `${seed.source_date}T15:00:00Z`,
+      days_in_current_stage: Math.max(
+        0,
+        Math.floor((Date.now() - new Date(`${seed.source_date}T15:00:00Z`).getTime()) / 86_400_000),
+      ),
+      details: {},
+      properties: dealProps(seed.properties as [string, boolean][]),
+      created_at: `${seed.source_date}T15:00:00Z`,
+      updated_at: `${seed.source_date}T15:00:00Z`,
+    };
+  });
 }
 
 export const DOCUMENTS: DealDocument[] = demoSeed.documents.map((row) => {

@@ -1,27 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Plus, Star, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Pencil, Plus, Star, X } from 'lucide-react';
 import { Panel, Field as PanelField } from '@/components/deals/Panel';
+import { PropertyFactsDialog } from '@/components/deals/PropertyFactsDialog';
+import { SponsorFactsDialog } from '@/components/deals/SponsorFactsDialog';
 import { FormField } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { SelectNative } from '@/components/ui/select-native';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Spinner, ErrorState } from '@/components/deals/States';
+import {
+  buildDealUpdatePayload,
+  type EditDealForm,
+} from '@/components/deals/form/editPayload';
+import { isOptionalCurrency } from '@/components/deals/form/schema';
 import { INVESTMENT_TYPE_OPTIONS, SOURCE_CHANNEL_OPTIONS } from '@/components/deals/form/options';
-import { useDeal, useFunds, useProperties, useUpdateDeal, type UpdateDealPayload } from '@/lib/api/deals';
+import { useDeal, useFunds, useProperties, useUpdateDeal } from '@/lib/api/deals';
 import { apiErrorMessage, fieldErrors } from '@/lib/apiError';
 import { PROPERTY_TYPE_LABELS } from '@/lib/dealChoices';
 import type { Property } from '@/types/deal';
-
-interface EditForm {
-  name: string;
-  investment_type: string;
-  requested_amount: string;
-  source_channel: string;
-  source_date: string;
-  fund_id: string;
-}
 
 export default function DealEditPage() {
   const { id = '' } = useParams<{ id: string }>();
@@ -31,21 +30,30 @@ export default function DealEditPage() {
   const propertiesQuery = useProperties();
   const updateDeal = useUpdateDeal(id);
 
-  const { register, handleSubmit, reset, formState } = useForm<EditForm>();
+  const { register, handleSubmit, reset, formState } = useForm<EditDealForm>();
   const errors = formState.errors;
   const [propertyIds, setPropertyIds] = useState<string[]>([]);
   const [initialPropertyIds, setInitialPropertyIds] = useState<string[]>([]);
   const [propertyError, setPropertyError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [sponsorFactsOpen, setSponsorFactsOpen] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const initializedDealId = useRef<string | null>(null);
 
   const deal = dealQuery.data;
 
   useEffect(() => {
-    if (!deal) return;
+    if (!deal || initializedDealId.current === deal.id) return;
+    initializedDealId.current = deal.id;
     reset({
       name: deal.name,
       investment_type: deal.investment_type,
       requested_amount: deal.requested_amount,
+      purpose: deal.purpose,
+      profile: deal.profile,
+      estimated_value: deal.estimated_value ?? '',
+      renovation_budget: deal.renovation_budget ?? '',
+      description: deal.description,
       source_channel: deal.source_channel,
       source_date: deal.source_date,
       fund_id: deal.fund ?? '',
@@ -86,26 +94,18 @@ export default function DealEditPage() {
   const makePrimary = (pid: string) =>
     setPropertyIds((prev) => [pid, ...prev.filter((x) => x !== pid)]);
 
-  const onSubmit = (values: EditForm) => {
+  const onSubmit = (values: EditDealForm) => {
     setBanner(null);
     const propertiesChanged = !sameOrderedIds(propertyIds, initialPropertyIds);
     if (propertiesChanged && initialPropertyIds.length > 0 && propertyIds.length === 0) {
       setPropertyError('Keep at least one property on the deal.');
       return;
     }
-    const payload: UpdateDealPayload = {
-      name: values.name,
-      investment_type: values.investment_type as UpdateDealPayload['investment_type'],
-      requested_amount: values.requested_amount,
-      source_channel: values.source_channel as UpdateDealPayload['source_channel'],
-      source_date: values.source_date,
-    };
-    if (!deal.fund && values.fund_id) {
-      payload.fund = values.fund_id;
-    }
-    if (propertiesChanged) {
-      payload.property_ids = propertyIds;
-    }
+    const payload = buildDealUpdatePayload(values, formState.dirtyFields, {
+      fundLocked,
+      propertiesChanged,
+      propertyIds,
+    });
     updateDeal.mutate(payload, {
       onSuccess: () => navigate(`/deals/${id}`),
       onError: (error) => {
@@ -116,12 +116,13 @@ export default function DealEditPage() {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       <header className="animate-fade-up space-y-3 border-b border-[var(--border)] pb-6">
         <BackLink id={id} />
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--slate)]">Edit deal</p>
-          <h1 className="font-display mt-2 text-3xl font-medium tracking-tight text-[var(--ink)]">
+          <h1 className="font-display mt-2 break-words text-3xl font-medium text-[var(--ink)]">
             {deal.name}
           </h1>
           <p className="mt-2 max-w-xl text-[var(--slate)]">
@@ -162,10 +163,52 @@ export default function DealEditPage() {
                   aria-invalid={Boolean(errors.requested_amount)}
                   {...register('requested_amount', {
                     required: 'Enter the requested amount',
-                    validate: (value) => Number(value) > 0 || 'Enter an amount greater than zero',
+                    validate: (value) =>
+                      (isOptionalCurrency(value) && Number(value) > 0)
+                      || 'Enter a positive amount with no more than 2 decimal places',
                   })}
                 />
               </div>
+            </FormField>
+            <FormField label="Estimated property value" hint="Optional" error={errors.estimated_value?.message}>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--slate)]">
+                  $
+                </span>
+                <Input
+                  inputMode="decimal"
+                  className="pl-6 tabular-nums"
+                  aria-invalid={Boolean(errors.estimated_value)}
+                  {...register('estimated_value', {
+                    validate: (value) =>
+                      isOptionalCurrency(value)
+                      || 'Enter zero or a positive amount with no more than 2 decimal places',
+                  })}
+                />
+              </div>
+            </FormField>
+            <FormField label="Renovation budget" hint="Optional" error={errors.renovation_budget?.message}>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--slate)]">
+                  $
+                </span>
+                <Input
+                  inputMode="decimal"
+                  className="pl-6 tabular-nums"
+                  aria-invalid={Boolean(errors.renovation_budget)}
+                  {...register('renovation_budget', {
+                    validate: (value) =>
+                      isOptionalCurrency(value)
+                      || 'Enter zero or a positive amount with no more than 2 decimal places',
+                  })}
+                />
+              </div>
+            </FormField>
+            <FormField label="Purpose" hint="Optional">
+              <Input {...register('purpose')} />
+            </FormField>
+            <FormField label="Profile" hint="Optional">
+              <Input {...register('profile')} />
             </FormField>
             <FormField label="Source channel" required error={errors.source_channel?.message}>
               <SelectNative
@@ -185,6 +228,9 @@ export default function DealEditPage() {
                 disabled={fundLocked}
                 className={fundLocked ? 'opacity-70' : undefined}
               />
+            </FormField>
+            <FormField label="Description" hint="Optional" className="sm:col-span-2">
+              <Textarea rows={4} {...register('description')} />
             </FormField>
           </div>
         </Panel>
@@ -212,6 +258,15 @@ export default function DealEditPage() {
                       {property.city}, {property.state} · {PROPERTY_TYPE_LABELS[property.property_type]}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingProperty(property)}
+                    aria-label={`Edit underwriting facts for ${property.address}`}
+                    title="Edit property facts"
+                    className="rounded-sm p-1 text-[var(--slate)] transition-colors hover:bg-[var(--ink)]/5 hover:text-[var(--ink)]"
+                  >
+                    <Pencil className="h-4 w-4" strokeWidth={1.75} />
+                  </button>
                   {index !== 0 ? (
                     <button
                       type="button"
@@ -258,7 +313,15 @@ export default function DealEditPage() {
           {propertyError ? <p className="mt-2 text-xs text-red-600">{propertyError}</p> : null}
         </Panel>
 
-        <Panel title="Relationships">
+        <Panel
+          title="Relationships"
+          action={deal.sponsor_detail ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => setSponsorFactsOpen(true)}>
+              <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Edit sponsor facts
+            </Button>
+          ) : undefined}
+        >
           <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3">
             <PanelField label="Sponsor">{deal.sponsor_detail?.entity_name ?? '—'}</PanelField>
             <PanelField label="Broker">{deal.broker_detail?.company_name ?? 'None'}</PanelField>
@@ -278,7 +341,25 @@ export default function DealEditPage() {
           {updateDeal.isPending ? 'Saving…' : 'Save changes'}
         </Button>
       </div>
-    </form>
+      </form>
+
+      {deal.sponsor_detail ? (
+        <SponsorFactsDialog
+          sponsor={deal.sponsor_detail}
+          open={sponsorFactsOpen}
+          onOpenChange={setSponsorFactsOpen}
+        />
+      ) : null}
+      {editingProperty ? (
+        <PropertyFactsDialog
+          property={editingProperty}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditingProperty(null);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 

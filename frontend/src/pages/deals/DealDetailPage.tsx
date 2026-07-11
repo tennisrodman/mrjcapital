@@ -9,6 +9,7 @@ import {
   Clock,
   Download,
   FileText,
+  Globe2,
   Landmark,
   Layers,
   Mail,
@@ -177,7 +178,7 @@ function DealHeader({
               </span>
             ) : null}
           </div>
-          <h1 className="font-display mt-3 text-3xl font-medium tracking-tight text-[var(--ink)]">
+          <h1 className="font-display mt-3 break-words text-3xl font-medium text-[var(--ink)]">
             {deal.name}
           </h1>
           <div className="mt-2">
@@ -233,7 +234,25 @@ function OverviewPanel({ deal }: { deal: Deal }) {
         <Field label="Stage age">{deal.days_in_current_stage} days</Field>
         <Field label="Stage entered">{formatDateTime(deal.current_stage_entered_at)}</Field>
         <Field label="Created">{formatDate(deal.created_at)}</Field>
+        <Field label="Purpose">{deal.purpose || '—'}</Field>
+        <Field label="Profile">{deal.profile || '—'}</Field>
+        <Field label="Estimated value">
+          {typeof deal.estimated_value === 'string' ? formatCurrency(deal.estimated_value) : '—'}
+        </Field>
+        <Field label="Renovation budget">
+          {typeof deal.renovation_budget === 'string' ? formatCurrency(deal.renovation_budget) : '—'}
+        </Field>
       </dl>
+      {deal.description ? (
+        <div className="mt-5 border-t border-[var(--border)] pt-4">
+          <p className="text-[0.7rem] font-medium uppercase tracking-[0.1em] text-[var(--slate)]">
+            Description
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--ink-muted)]">
+            {deal.description}
+          </p>
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -246,30 +265,36 @@ function PropertiesPanel({ deal }: { deal: Deal }) {
         <p className="text-sm text-[var(--slate)]">No properties linked to this deal.</p>
       ) : (
         <ul className="divide-y divide-[var(--border)]">
-          {properties.map(({ id, property, is_primary }) => (
-            <li key={id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--paper)] text-[var(--brass)]">
-                <MapPin className="h-4 w-4" strokeWidth={1.75} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate font-medium text-[var(--ink)]">{property.address}</p>
-                  {is_primary ? (
-                    <Badge className="border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]">
-                      <Star className="h-3 w-3 fill-current" strokeWidth={0} />
-                      Primary
-                    </Badge>
+          {properties.map(({ id, property, is_primary }) => {
+            const facts = propertyFacts(property);
+            return (
+              <li key={id} className="flex flex-wrap items-start gap-3 py-3 first:pt-0 last:pb-0">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--paper)] text-[var(--brass)]">
+                  <MapPin className="h-4 w-4" strokeWidth={1.75} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate font-medium text-[var(--ink)]">{property.address}</p>
+                    {is_primary ? (
+                      <Badge className="border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]">
+                        <Star className="h-3 w-3 fill-current" strokeWidth={0} />
+                        Primary
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <p className="mt-0.5 text-sm text-[var(--slate)]">
+                    {[property.city, property.state, property.zip].filter(Boolean).join(', ')}
+                  </p>
+                  {facts.length > 0 ? (
+                    <p className="mt-1 text-xs text-[var(--slate)]">{facts.join(' · ')}</p>
                   ) : null}
                 </div>
-                <p className="mt-0.5 text-sm text-[var(--slate)]">
-                  {[property.city, property.state, property.zip].filter(Boolean).join(', ')}
-                </p>
-              </div>
-              <span className="shrink-0 text-xs text-[var(--slate)]">
-                {PROPERTY_TYPE_LABELS[property.property_type]}
-              </span>
-            </li>
-          ))}
+                <span className="max-w-full shrink-0 break-words text-xs text-[var(--slate)]">
+                  {PROPERTY_TYPE_LABELS[property.property_type]}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Panel>
@@ -412,11 +437,46 @@ function SponsorPanel({ deal }: { deal: Deal }) {
             {sponsor.primary_contact_phone ? (
               <ContactRow icon={Phone} value={sponsor.primary_contact_phone} />
             ) : null}
+            {sponsor.website ? (
+              <ContactRow icon={Globe2} value={sponsor.website} href={sponsor.website} />
+            ) : null}
           </div>
+
+          <dl className="grid grid-cols-2 gap-3 border-t border-[var(--border)] pt-3">
+            <Field label="Experience">
+              {typeof sponsor.years_experience === 'number' ? `${sponsor.years_experience} years` : '—'}
+            </Field>
+            <Field label="Completed projects">
+              {typeof sponsor.completed_projects === 'number'
+                ? sponsor.completed_projects.toLocaleString()
+                : '—'}
+            </Field>
+            <Field label="Bankruptcy history">
+              {typeof sponsor.bankruptcy_history === 'boolean'
+                ? sponsor.bankruptcy_history
+                  ? 'Yes'
+                  : 'No'
+                : 'Unknown'}
+            </Field>
+          </dl>
         </div>
       )}
     </Panel>
   );
+}
+
+function propertyFacts(property: Deal['properties'][number]['property']): string[] {
+  return [
+    property.subtype,
+    typeof property.units === 'number' ? `${property.units.toLocaleString()} units` : '',
+    typeof property.rentable_square_feet === 'number'
+      ? `${property.rentable_square_feet.toLocaleString()} rentable sf`
+      : '',
+    typeof property.year_built === 'number' ? `Built ${property.year_built}` : '',
+    typeof property.year_renovated === 'number' ? `Renovated ${property.year_renovated}` : '',
+    property.county ? `${property.county} County` : '',
+    property.msa,
+  ].filter((fact): fact is string => Boolean(fact));
 }
 
 function BrokerPanel({ deal }: { deal: Deal }) {

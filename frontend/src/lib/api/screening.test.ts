@@ -1,3 +1,6 @@
+import { act, renderHook } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createElement, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({ request: vi.fn() }));
@@ -9,6 +12,9 @@ import {
   finalizeScreeningAssessment,
   listScreeningAssessments,
   updateScreeningAssessment,
+  useCreateScreeningAssessment,
+  useFinalizeScreeningAssessment,
+  useUpdateScreeningAssessment,
 } from './screening';
 import type {
   CreateScreeningAssessmentPayload,
@@ -134,5 +140,27 @@ describe('screening assessment API contract', () => {
         notes: 'Confirm the rent roll during diligence.',
       }),
     });
+  });
+
+  it('refreshes transition readiness after every screening mutation', async () => {
+    api.request.mockResolvedValue(assessment(2));
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const created = renderHook(() => useCreateScreeningAssessment('deal-1'), { wrapper });
+    const updated = renderHook(() => useUpdateScreeningAssessment('assessment-2', 'deal-1'), { wrapper });
+    const finalized = renderHook(() => useFinalizeScreeningAssessment('assessment-2', 'deal-1'), { wrapper });
+
+    await act(async () => {
+      await created.result.current.mutateAsync(createPayload);
+      await updated.result.current.mutateAsync(updatePayload);
+      await finalized.result.current.mutateAsync({ decision: 'advance' });
+    });
+
+    expect(invalidate).toHaveBeenCalledTimes(3);
+    expect(invalidate).toHaveBeenNthCalledWith(1, { queryKey: ['deal-allowed-transitions', 'deal-1'] });
+    expect(invalidate).toHaveBeenNthCalledWith(2, { queryKey: ['deal-allowed-transitions', 'deal-1'] });
+    expect(invalidate).toHaveBeenNthCalledWith(3, { queryKey: ['deal-allowed-transitions', 'deal-1'] });
   });
 });

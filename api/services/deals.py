@@ -10,6 +10,7 @@ from api.models import (
     Deal,
     DealStageEvent,
     PipelineStatus,
+    ScreeningAssessment,
     SyndicationStatus,
 )
 
@@ -63,16 +64,70 @@ DEAL_FIELD_AUDIT_FIELDS = frozenset({
     'source_channel',
     'source_date',
     'requested_amount',
+    'purpose',
+    'profile',
+    'estimated_value',
+    'renovation_budget',
+    'description',
     'sponsor',
     'broker',
     'fund',
 })
+
+READINESS_READY = 'ready'
+SCREENING_APPROVAL_REQUIRED = 'screening_approval_required'
+SCREENING_ASSESSMENT_MISSING = 'screening_assessment_missing'
+SCREENING_ASSESSMENT_NOT_FINALIZED = 'screening_assessment_not_finalized'
+SCREENING_DECISION_NOT_ADVANCE = 'screening_decision_not_advance'
+
+
+class PipelineReadinessError(ValidationError):
+    """A blocked transition carrying the public readiness response contract."""
+
+    def __init__(self, readiness):
+        self.readiness = readiness
+        super().__init__({
+            'to_status': 'This pipeline transition is blocked by readiness requirements.',
+        })
 
 
 def allowed_pipeline_statuses(deal):
     if deal.pipeline_status == PipelineStatus.ON_HOLD and deal.paused_from_status:
         return [deal.paused_from_status, PipelineStatus.DEAD]
     return sorted(PIPELINE_TRANSITIONS.get(deal.pipeline_status, set()))
+
+
+def pipeline_transition_readiness(deal, to_status, performed_by=None):
+    """Describe whether a legal pipeline target is ready to enter."""
+    blockers = []
+    if deal.pipeline_status == PipelineStatus.SCREENING and to_status == PipelineStatus.QUOTING:
+        assessment = (
+            ScreeningAssessment.objects.filter(deal=deal)
+            .order_by('-version')
+            .first()
+        )
+        if assessment is None:
+            blockers.append(SCREENING_ASSESSMENT_MISSING)
+        elif assessment.status != ScreeningAssessment.Status.FINALIZED:
+            blockers.append(SCREENING_ASSESSMENT_NOT_FINALIZED)
+        elif assessment.decision != ScreeningAssessment.Decision.ADVANCE:
+            blockers.append(SCREENING_DECISION_NOT_ADVANCE)
+
+    ready = not blockers
+    return {
+        'ready': ready,
+        'code': READINESS_READY if ready else SCREENING_APPROVAL_REQUIRED,
+        'blockers': blockers,
+        'can_override': bool(blockers and _can_override_readiness(performed_by)),
+    }
+
+
+def allowed_pipeline_transition_readiness(deal, performed_by=None):
+    """Return readiness for every target allowed by the pipeline state machine."""
+    return {
+        to_status: pipeline_transition_readiness(deal, to_status, performed_by)
+        for to_status in allowed_pipeline_statuses(deal)
+    }
 
 
 def allowed_syndication_statuses(deal):
@@ -116,9 +171,14 @@ def initialize_deal_stage_event(deal, performed_by=None):
 
 
 def capture_deal_field_values(deal, candidate_fields):
-    """Capture only allowlisted, non-sensitive values before a Deal edit."""
+    """Capture full canonical values for reliable change detection.
+
+    Audit persistence still applies field-specific excerpting below. Keeping
+    the full value only in memory prevents long descriptions that differ after
+    the excerpt boundary from silently avoiding an audit entry.
+    """
     return {
-        field_name: _safe_deal_field_value(deal, field_name)
+        field_name: _canonical_deal_field_value(deal, field_name)
         for field_name in candidate_fields
         if field_name in DEAL_FIELD_AUDIT_FIELDS
     }
@@ -129,7 +189,7 @@ def log_deal_field_updates(deal, previous_values, performed_by, ip_address=None)
     actor = _authenticated_actor(performed_by)
     logs = []
     for field_name, old_value in previous_values.items():
-        new_value = _safe_deal_field_value(deal, field_name)
+        new_value = _canonical_deal_field_value(deal, field_name)
         if old_value == new_value:
             continue
         logs.append(ActivityLog(
@@ -138,8 +198,8 @@ def log_deal_field_updates(deal, previous_values, performed_by, ip_address=None)
             performed_by=actor,
             ip_address=ip_address,
             description=f'{field_name} updated',
-            old_value=old_value,
-            new_value=new_value,
+            old_value=_audit_deal_field_value(field_name, old_value),
+            new_value=_audit_deal_field_value(field_name, new_value),
             metadata={
                 'field': field_name,
                 'subject_model': 'Deal',
@@ -151,7 +211,14 @@ def log_deal_field_updates(deal, previous_values, performed_by, ip_address=None)
     return logs
 
 
-def transition_pipeline_status(deal, to_status, performed_by, reason, ip_address=None):
+def transition_pipeline_status(
+    deal,
+    to_status,
+    performed_by,
+    reason,
+    ip_address=None,
+    override_readiness=False,
+):
     _require_reason(reason)
     _validate_choice(to_status, PipelineStatus.values, 'to_status')
 
@@ -184,6 +251,22 @@ def transition_pipeline_status(deal, to_status, performed_by, reason, ip_address
                 locked_deal.paused_from_status = from_status
                 metadata['paused_from_status'] = from_status
 
+        if override_readiness and not _can_override_readiness(performed_by):
+            raise ValidationError({
+                'override_readiness': 'Only staff may override pipeline readiness requirements.',
+            })
+
+        readiness = pipeline_transition_readiness(locked_deal, to_status, performed_by)
+        is_override = bool(not readiness['ready'] and override_readiness)
+        if not readiness['ready'] and not is_override:
+            raise PipelineReadinessError(readiness)
+
+        metadata.update({
+            'is_override': is_override,
+            'readiness_code': readiness['code'],
+            'readiness_blockers': readiness['blockers'],
+        })
+
         transition_at = timezone.now()
         locked_deal.pipeline_status = to_status
         locked_deal.current_stage_entered_at = transition_at
@@ -201,6 +284,7 @@ def transition_pipeline_status(deal, to_status, performed_by, reason, ip_address
             reason=reason,
             entered_at=transition_at,
             previous_entered_at=previous_stage_entered_at,
+            is_override=is_override,
         )
         _write_status_log(
             locked_deal,
@@ -280,6 +364,7 @@ def _record_pipeline_stage_transition(
     reason,
     entered_at,
     previous_entered_at,
+    is_override=False,
 ):
     """Close the prior pipeline tenure and open the next one under the deal lock."""
     open_event = (
@@ -313,10 +398,11 @@ def _record_pipeline_stage_transition(
         entered_at=entered_at,
         performed_by=_authenticated_actor(performed_by),
         reason=reason,
+        is_override=is_override,
     )
 
 
-def _safe_deal_field_value(deal, field_name):
+def _canonical_deal_field_value(deal, field_name):
     if field_name in {'sponsor', 'broker', 'fund'}:
         value = getattr(deal, f'{field_name}_id')
     else:
@@ -328,8 +414,21 @@ def _safe_deal_field_value(deal, field_name):
     return str(value)
 
 
+def _audit_deal_field_value(field_name, value):
+    if field_name == 'description' and len(value) > 500:
+        return f'{value[:497]}...'
+    return value
+
+
 def _authenticated_actor(performed_by):
     return performed_by if getattr(performed_by, 'is_authenticated', False) else None
+
+
+def _can_override_readiness(performed_by):
+    return bool(
+        getattr(performed_by, 'is_staff', False)
+        or getattr(performed_by, 'is_superuser', False)
+    )
 
 
 def _require_reason(reason):

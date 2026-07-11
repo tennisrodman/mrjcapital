@@ -66,6 +66,23 @@ class Deal(models.Model):
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.01'))],
     )
+    purpose = models.CharField(max_length=160, blank=True)
+    profile = models.CharField(max_length=160, blank=True)
+    estimated_value = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    renovation_budget = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    description = models.TextField(blank=True)
     details = models.JSONField(default=dict, blank=True)
     # This is intentionally cached on the Deal row so current-stage timing does
     # not require scanning the stage-event history for list and summary views.
@@ -79,6 +96,14 @@ class Deal(models.Model):
             models.CheckConstraint(
                 condition=models.Q(requested_amount__gt=0),
                 name='deal_requested_amount_positive',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(estimated_value__isnull=True) | models.Q(estimated_value__gte=0),
+                name='deal_estimated_value_nonnegative',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(renovation_budget__isnull=True) | models.Q(renovation_budget__gte=0),
+                name='deal_renovation_budget_nonnegative',
             ),
         ]
         indexes = [

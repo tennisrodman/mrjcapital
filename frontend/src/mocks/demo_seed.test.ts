@@ -11,6 +11,7 @@ import {
   SOURCE_CHANNEL_LABELS,
 } from '@/lib/dealChoices';
 import type { PipelineStatus } from '@/types/deal';
+import { buildInitialDeals, PROPERTIES, SPONSORS } from './fixtures';
 import { PIPELINE_TRANSITIONS } from './pipeline';
 
 const MIN_COUNTS = {
@@ -139,6 +140,42 @@ describe('demo seed data', () => {
       Object.keys(DOCUMENT_CATEGORY_LABELS),
       'document category',
     );
+  });
+
+  it('maps promoted Release 1 seed fields into complete UI fixture shapes', () => {
+    const sponsorSeed = demoSeed.sponsors.find((sponsor) => sponsor.id === 'sp-larkspur');
+    const propertySeed = demoSeed.properties.find((property) => property.id === 'pr-larkspur');
+    const dealSeed = demoSeed.deals.find((deal) => deal.id === 'deal-larkspur');
+    expect(sponsorSeed).toMatchObject({
+      website: 'https://larkspurcap.com',
+      years_experience: 18,
+      completed_projects: 27,
+      bankruptcy_history: false,
+    });
+    expect(propertySeed).toMatchObject({
+      subtype: 'garden_style',
+      units: 184,
+      rentable_square_feet: 156400,
+      year_built: 1988,
+      year_renovated: 2021,
+      county: 'Travis',
+    });
+    expect(dealSeed).toMatchObject({
+      purpose: 'Acquisition and light renovation',
+      profile: 'Value-add multifamily bridge',
+      estimated_value: '19000000.00',
+      renovation_budget: '1350000.00',
+    });
+
+    expect(SPONSORS.find((sponsor) => sponsor.id === 'sp-larkspur')).toMatchObject(sponsorSeed!);
+    expect(PROPERTIES.find((property) => property.id === 'pr-larkspur')).toMatchObject(propertySeed!);
+    expect(buildInitialDeals().find((deal) => deal.id === 'deal-larkspur')).toMatchObject({
+      purpose: 'Acquisition and light renovation',
+      profile: 'Value-add multifamily bridge',
+      estimated_value: '19000000.00',
+      renovation_budget: '1350000.00',
+      description: 'Bridge financing for the acquisition and renovation of a 184-unit garden-style community.',
+    });
   });
 
   it('keeps document counts dense on active/historical deals and light elsewhere', () => {

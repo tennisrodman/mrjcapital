@@ -44,6 +44,11 @@ export function StageHistoryPanel({
                   {event.exited_at === null ? (
                     <span className="ml-1.5 text-xs font-normal text-[var(--brass)]">Current</span>
                   ) : null}
+                  {event.is_override ? (
+                    <span className="ml-1.5 inline-flex rounded-sm border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-medium text-amber-800">
+                      Override
+                    </span>
+                  ) : null}
                 </p>
                 <p className="text-xs text-[var(--slate)]">Entered {formatDateTime(event.entered_at)}</p>
                 {event.reason ? <p className="mt-1 text-xs text-[var(--ink-muted)]">{event.reason}</p> : null}

@@ -1,0 +1,340 @@
+import uuid
+
+from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from api.models import (
+    ActivityActionType,
+    ActivityLog,
+    Broker,
+    Deal,
+    DealProperty,
+    Fund,
+    Property,
+    Sponsor,
+)
+from api.services import normalize_address
+
+
+User = get_user_model()
+
+
+class PromotedEntityFactPermissionTests(APITestCase):
+    def setUp(self):
+        self.analyst = User.objects.create_user('fact-analyst', password='pw')
+        self.other_analyst = User.objects.create_user('fact-other', password='pw')
+        self.staff = User.objects.create_user('fact-staff', password='pw', is_staff=True)
+        self.sponsor = Sponsor.objects.create(
+            entity_name='Exclusive Sponsor LLC',
+            entity_type='llc',
+            primary_contact_name='Avery Sponsor',
+            primary_contact_email='avery@example.com',
+            relationship_rating='developing',
+            website='https://old.example.com',
+            years_experience=8,
+            completed_projects=4,
+            bankruptcy_history=None,
+            ein='12-3456789',
+        )
+        self.property = Property.objects.create(
+            address='100 Main St',
+            city='Los Angeles',
+            state='CA',
+            zip='90001',
+            address_normalized=normalize_address('100 Main St', 'Los Angeles', 'CA', '90001'),
+            property_type='multifamily',
+            subtype='Garden style',
+            units=24,
+            rentable_square_feet=18000,
+            year_built=1980,
+            year_renovated=2015,
+            county='Los Angeles',
+        )
+        self.deal = self._deal('Exclusive Deal', self.analyst, self.sponsor, self.property)
+        self.client.force_authenticate(self.analyst)
+
+    def _deal(self, name, analyst, sponsor, property_obj):
+        deal = Deal.objects.create(
+            name=name,
+            investment_type='whole_loan_bridge',
+            assigned_analyst=analyst,
+            sponsor=sponsor,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+        DealProperty.objects.create(deal=deal, property=property_obj, is_primary=True)
+        return deal
+
+    def test_exclusive_analyst_can_update_promoted_facts_and_each_change_is_audited(self):
+        sponsor_response = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {
+                'website': 'https://new.example.com',
+                'years_experience': None,
+                'bankruptcy_history': False,
+            },
+            format='json',
+            REMOTE_ADDR='203.0.113.12',
+        )
+        property_response = self.client.patch(
+            f'/api/properties/{self.property.pk}/',
+            {'subtype': '', 'units': 0, 'county': 'Orange'},
+            format='json',
+            REMOTE_ADDR='203.0.113.12',
+        )
+
+        self.assertEqual(sponsor_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(property_response.status_code, status.HTTP_200_OK)
+        logs = ActivityLog.objects.filter(
+            deal=self.deal,
+            action_type=ActivityActionType.FIELD_UPDATED,
+        )
+        self.assertEqual(logs.count(), 6)
+        sponsor_log = logs.get(metadata__subject_model='Sponsor', metadata__field='website')
+        self.assertEqual(sponsor_log.old_value, 'https://old.example.com')
+        self.assertEqual(sponsor_log.new_value, 'https://new.example.com')
+        self.assertEqual(sponsor_log.metadata['subject_id'], str(self.sponsor.pk))
+        self.assertEqual(sponsor_log.performed_by, self.analyst)
+        self.assertEqual(sponsor_log.ip_address, '203.0.113.12')
+        property_log = logs.get(metadata__subject_model='Property', metadata__field='units')
+        self.assertEqual(property_log.old_value, '24')
+        self.assertEqual(property_log.new_value, '0')
+
+    def test_nonstaff_cannot_mix_identity_or_sensitive_fields_into_fact_patch(self):
+        sponsor_response = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {
+                'website': 'https://should-not-save.example.com',
+                'primary_contact_email': 'changed@example.com',
+                'ein': '98-7654321',
+            },
+            format='json',
+        )
+        property_response = self.client.patch(
+            f'/api/properties/{self.property.pk}/',
+            {'subtype': 'Should not save', 'address': '200 Changed St'},
+            format='json',
+        )
+
+        self.assertEqual(sponsor_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(property_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.sponsor.refresh_from_db()
+        self.property.refresh_from_db()
+        self.assertEqual(self.sponsor.website, 'https://old.example.com')
+        self.assertEqual(self.sponsor.primary_contact_email, 'avery@example.com')
+        self.assertEqual(self.sponsor.ein, '12-3456789')
+        self.assertEqual(self.property.subtype, 'Garden style')
+        self.assertEqual(self.property.address, '100 Main St')
+        self.assertFalse(ActivityLog.objects.filter(action_type=ActivityActionType.FIELD_UPDATED).exists())
+
+    def test_two_analysts_sharing_an_entity_cannot_update_it_without_staff(self):
+        other_deal = self._deal(
+            'Shared Deal',
+            self.other_analyst,
+            self.sponsor,
+            self.property,
+        )
+
+        sponsor_response = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {'completed_projects': 12},
+            format='json',
+        )
+        property_response = self.client.patch(
+            f'/api/properties/{self.property.pk}/',
+            {'rentable_square_feet': 25000},
+            format='json',
+        )
+
+        self.assertEqual(sponsor_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(property_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.sponsor.refresh_from_db()
+        self.property.refresh_from_db()
+        self.assertEqual(self.sponsor.completed_projects, 4)
+        self.assertEqual(self.property.rentable_square_feet, 18000)
+        self.assertFalse(ActivityLog.objects.filter(deal__in=[self.deal, other_deal]).exists())
+
+    def test_staff_retains_identity_updates_and_fact_audit_covers_every_linked_deal(self):
+        other_deal = self._deal(
+            'Staff Shared Deal',
+            self.other_analyst,
+            self.sponsor,
+            self.property,
+        )
+        self.client.force_authenticate(self.staff)
+
+        sponsor_response = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {'primary_contact_email': 'staff-changed@example.com', 'completed_projects': 9},
+            format='json',
+        )
+        property_response = self.client.patch(
+            f'/api/properties/{self.property.pk}/',
+            {'property_type': 'office', 'county': 'Ventura'},
+            format='json',
+        )
+
+        self.assertEqual(sponsor_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(property_response.status_code, status.HTTP_200_OK)
+        self.sponsor.refresh_from_db()
+        self.property.refresh_from_db()
+        self.assertEqual(self.sponsor.primary_contact_email, 'staff-changed@example.com')
+        self.assertEqual(self.property.property_type, 'office')
+        sponsor_logs = ActivityLog.objects.filter(
+            metadata__subject_model='Sponsor',
+            metadata__field='completed_projects',
+        )
+        property_logs = ActivityLog.objects.filter(
+            metadata__subject_model='Property',
+            metadata__field='county',
+        )
+        self.assertEqual(set(sponsor_logs.values_list('deal_id', flat=True)), {self.deal.pk, other_deal.pk})
+        self.assertEqual(set(property_logs.values_list('deal_id', flat=True)), {self.deal.pk, other_deal.pk})
+        self.assertFalse(ActivityLog.objects.filter(metadata__field='primary_contact_email').exists())
+        self.assertFalse(ActivityLog.objects.filter(metadata__field='property_type').exists())
+
+    def test_nonstaff_cannot_delete_sponsor_or_property_through_generic_endpoints(self):
+        sponsor_response = self.client.delete(f'/api/sponsors/{self.sponsor.pk}/')
+        property_response = self.client.delete(f'/api/properties/{self.property.pk}/')
+
+        self.assertEqual(sponsor_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(property_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(Sponsor.objects.filter(pk=self.sponsor.pk).exists())
+        self.assertTrue(Property.objects.filter(pk=self.property.pk).exists())
+
+    def test_pure_nonowner_detail_and_update_are_indistinguishable_from_missing(self):
+        other_sponsor = Sponsor.objects.create(
+            entity_name='Other Analyst Sponsor LLC',
+            entity_type='llc',
+            primary_contact_name='Other Sponsor',
+            primary_contact_email='other-sponsor@example.com',
+            relationship_rating='new',
+        )
+        other_property = Property.objects.create(
+            address='900 Other St',
+            city='San Diego',
+            state='CA',
+            zip='92101',
+            address_normalized=normalize_address('900 Other St', 'San Diego', 'CA', '92101'),
+            property_type='office',
+        )
+        self._deal('Other Analyst Only', self.other_analyst, other_sponsor, other_property)
+        missing_id = uuid.uuid4()
+
+        for path, payload in [
+            ('sponsors', {'website': 'https://hidden.example.com'}),
+            ('properties', {'county': 'Hidden'}),
+        ]:
+            existing_id = other_sponsor.pk if path == 'sponsors' else other_property.pk
+            with self.subTest(path=path, method='GET'):
+                hidden = self.client.get(f'/api/{path}/{existing_id}/')
+                missing = self.client.get(f'/api/{path}/{missing_id}/')
+                self.assertEqual(hidden.status_code, status.HTTP_404_NOT_FOUND)
+                self.assertEqual(hidden.data, missing.data)
+            with self.subTest(path=path, method='PATCH'):
+                hidden = self.client.patch(f'/api/{path}/{existing_id}/', payload, format='json')
+                missing = self.client.patch(f'/api/{path}/{missing_id}/', payload, format='json')
+                self.assertEqual(hidden.status_code, status.HTTP_404_NOT_FOUND)
+                self.assertEqual(hidden.data, missing.data)
+
+        other_sponsor.refresh_from_db()
+        other_property.refresh_from_db()
+        self.assertEqual(other_sponsor.website, '')
+        self.assertEqual(other_property.county, '')
+        self.assertFalse(ActivityLog.objects.filter(
+            metadata__subject_id__in=[str(other_sponsor.pk), str(other_property.pk)],
+        ).exists())
+
+    def test_staff_delete_allows_unattached_and_blocks_linked_entities(self):
+        unattached_sponsor = Sponsor.objects.create(
+            entity_name='Unattached Sponsor LLC',
+            entity_type='llc',
+            primary_contact_name='Unattached Sponsor',
+            primary_contact_email='unattached@example.com',
+            relationship_rating='new',
+        )
+        unattached_property = Property.objects.create(
+            address='700 Unattached Ave',
+            city='Pasadena',
+            state='CA',
+            zip='91101',
+            address_normalized=normalize_address('700 Unattached Ave', 'Pasadena', 'CA', '91101'),
+            property_type='retail',
+        )
+        self.client.force_authenticate(self.staff)
+
+        unattached_sponsor_response = self.client.delete(f'/api/sponsors/{unattached_sponsor.pk}/')
+        unattached_property_response = self.client.delete(f'/api/properties/{unattached_property.pk}/')
+        linked_sponsor_response = self.client.delete(f'/api/sponsors/{self.sponsor.pk}/')
+        linked_property_response = self.client.delete(f'/api/properties/{self.property.pk}/')
+
+        self.assertEqual(unattached_sponsor_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(unattached_property_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(linked_sponsor_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(linked_property_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('linked to one or more deals', linked_sponsor_response.data['detail'])
+        self.assertIn('linked to one or more deals', linked_property_response.data['detail'])
+        self.assertTrue(Sponsor.objects.filter(pk=self.sponsor.pk).exists())
+        self.assertTrue(Property.objects.filter(pk=self.property.pk).exists())
+        self.assertTrue(DealProperty.objects.filter(deal=self.deal, property=self.property).exists())
+
+    def test_live_sponsor_urlfield_rejects_intranet_and_accepts_localhost(self):
+        invalid = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {'website': 'http://intranet'},
+            format='json',
+        )
+        valid = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {'website': 'http://localhost:8000'},
+            format='json',
+        )
+
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('website', invalid.data)
+        self.assertEqual(valid.status_code, status.HTTP_200_OK)
+        self.assertEqual(valid.data['website'], 'http://localhost:8000')
+
+    def test_nonstaff_cannot_attach_hidden_related_entities_when_creating_a_deal(self):
+        hidden_sponsor = Sponsor.objects.create(
+            entity_name='Hidden Sponsor LLC',
+            entity_type='llc',
+            primary_contact_name='Hidden Sponsor',
+            primary_contact_email='hidden-sponsor@example.com',
+            relationship_rating='new',
+        )
+        hidden_broker = Broker.objects.create(
+            company_name='Hidden Broker',
+            contact_name='Hidden Broker Contact',
+            email='hidden-broker@example.com',
+        )
+        hidden_fund = Fund.objects.create(name='Hidden Fund', status='active')
+        self._deal('Other Analyst Deal', self.other_analyst, hidden_sponsor, self.property)
+        Deal.objects.filter(name='Other Analyst Deal').update(
+            broker=hidden_broker,
+            fund=hidden_fund,
+        )
+
+        payload = {
+            'name': 'Unauthorized Relationship Deal',
+            'investment_type': 'whole_loan_bridge',
+            'source_channel': 'direct',
+            'requested_amount': '1000000.00',
+            'properties': [],
+        }
+        for field_name, entity in {
+            'sponsor': hidden_sponsor,
+            'broker': hidden_broker,
+            'fund': hidden_fund,
+        }.items():
+            with self.subTest(field=field_name):
+                response = self.client.post(
+                    '/api/deals/',
+                    {**payload, field_name: str(entity.pk)},
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data[field_name], ['Selected record is not available.'])
+                self.assertFalse(Deal.objects.filter(name=payload['name']).exists())

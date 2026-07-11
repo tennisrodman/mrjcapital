@@ -80,6 +80,10 @@ class SponsorSerializer(serializers.ModelSerializer):
             'guarantor_net_worth',
             'guarantor_liquidity',
             'guarantor_credit_score',
+            'website',
+            'years_experience',
+            'completed_projects',
+            'bankruptcy_history',
             'details',
         ]
 
@@ -100,7 +104,6 @@ class SponsorSerializer(serializers.ModelSerializer):
     def validate_details(self, value):
         _reject_sensitive_details(value)
         return value
-
 
 class SensitiveFieldReadSerializer(serializers.Serializer):
     fields = serializers.ListField(
@@ -151,6 +154,12 @@ class PropertySerializer(serializers.ModelSerializer):
             'state',
             'zip',
             'property_type',
+            'subtype',
+            'units',
+            'rentable_square_feet',
+            'year_built',
+            'year_renovated',
+            'county',
             'msa',
             'details',
         ]
@@ -162,21 +171,30 @@ class PropertySerializer(serializers.ModelSerializer):
         zip_code = attrs.get('zip') or getattr(self.instance, 'zip', '')
         if 'state' in attrs:
             attrs['state'] = attrs['state'].upper()
-        if not attrs.get('address_normalized'):
+        year_built = attrs.get('year_built', getattr(self.instance, 'year_built', None))
+        year_renovated = attrs.get('year_renovated', getattr(self.instance, 'year_renovated', None))
+        if year_built and year_renovated and year_renovated < year_built:
+            raise serializers.ValidationError({
+                'year_renovated': 'Year renovated cannot be earlier than year built.',
+            })
+        address_fields_changed = any(field in attrs for field in ['address', 'city', 'state', 'zip'])
+        if self.instance is None or address_fields_changed:
             attrs['address_normalized'] = normalize_address(address, city, state, zip_code)
-        existing = Property.objects.filter(address_normalized=attrs['address_normalized'])
-        if self.instance:
-            existing = existing.exclude(pk=self.instance.pk)
-        if existing.exists():
-            match = existing.first()
-            detail = {
-                'address_normalized': 'A property with this normalized address already exists.',
-            }
-            request = self.context.get('request')
-            user = getattr(request, 'user', None) if request else None
-            if match and _can_attach_property(user, match):
-                detail['existing_property'] = str(match.pk)
-            raise serializers.ValidationError(detail)
+        normalized_address = attrs.get('address_normalized')
+        if normalized_address is not None:
+            existing = Property.objects.filter(address_normalized=normalized_address)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                match = existing.first()
+                detail = {
+                    'address_normalized': 'A property with this normalized address already exists.',
+                }
+                request = self.context.get('request')
+                user = getattr(request, 'user', None) if request else None
+                if match and _can_attach_property(user, match):
+                    detail['existing_property'] = str(match.pk)
+                raise serializers.ValidationError(detail)
         return attrs
 
 
@@ -304,6 +322,11 @@ class DealSerializer(serializers.ModelSerializer):
             'source_channel',
             'source_date',
             'requested_amount',
+            'purpose',
+            'profile',
+            'estimated_value',
+            'renovation_budget',
+            'description',
             'details',
             'properties',
             'property_ids',
@@ -414,6 +437,11 @@ class DealCreateSerializer(serializers.ModelSerializer):
             'source_channel',
             'source_date',
             'requested_amount',
+            'purpose',
+            'profile',
+            'estimated_value',
+            'renovation_budget',
+            'description',
             'details',
             'properties',
             'property_ids',
@@ -424,6 +452,13 @@ class DealCreateSerializer(serializers.ModelSerializer):
 
     def validate_details(self, value):
         _reject_sensitive_details(value)
+        return value
+
+    def validate_fund(self, value):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not _can_attach_related_entity(user, value):
+            raise serializers.ValidationError('Selected record is not available.')
         return value
 
     def validate(self, attrs):
@@ -482,7 +517,9 @@ class DealCreateSerializer(serializers.ModelSerializer):
         if value in (None, ''):
             return None
         if isinstance(value, str):
-            return ('existing', _resolve_existing_uuid(Sponsor, value, 'sponsor'))
+            sponsor = _resolve_existing_uuid(Sponsor, value, 'sponsor')
+            self._require_related_entity_access(sponsor, 'sponsor')
+            return ('existing', sponsor)
         if isinstance(value, dict):
             serializer = SponsorSerializer(data=value, context=self.context)
             try:
@@ -496,7 +533,9 @@ class DealCreateSerializer(serializers.ModelSerializer):
         if value in (None, ''):
             return None
         if isinstance(value, str):
-            return ('existing', _resolve_existing_uuid(Broker, value, 'broker'))
+            broker = _resolve_existing_uuid(Broker, value, 'broker')
+            self._require_related_entity_access(broker, 'broker')
+            return ('existing', broker)
         if isinstance(value, dict):
             data = {'status': 'active', 'contact_name': '', **value}
             if not data.get('contact_name'):
@@ -508,6 +547,14 @@ class DealCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'broker': exc.detail}) from exc
             return ('new', serializer.validated_data)
         raise serializers.ValidationError({'broker': 'Expected an existing broker id, an object, or null.'})
+
+    def _require_related_entity_access(self, entity, field_name):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not _can_attach_related_entity(user, entity):
+            raise serializers.ValidationError({
+                field_name: 'Selected record is not available.',
+            })
 
     def _validate_properties(self, values):
         property_inputs = []
@@ -582,6 +629,7 @@ class DealCreateSerializer(serializers.ModelSerializer):
 class PipelineTransitionSerializer(serializers.Serializer):
     to_status = serializers.CharField()
     reason = serializers.CharField(allow_blank=False)
+    override_readiness = serializers.BooleanField(required=False, default=False)
 
 
 class SyndicationTransitionSerializer(serializers.Serializer):
@@ -835,6 +883,23 @@ def _can_attach_property(user, property_obj):
     if not linked:
         return True
     return any(link.deal.assigned_analyst_id == user.id for link in linked)
+
+
+def _can_attach_related_entity(user, entity):
+    """Restrict existing Sponsor, Broker, and Fund relationships to visible records.
+
+    Unlike properties, these entities have no safe orphan-attachment workflow for
+    analysts. An unlinked record remains attachable so an analyst can use a
+    record they just created through the supporting-entity API; linked records
+    are available only to staff or to an analyst already assigned to one of
+    their deals.
+    """
+    if _is_staff_user(user):
+        return True
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    related_deals = entity.deals.all()
+    return not related_deals.exists() or related_deals.filter(assigned_analyst=user).exists()
 
 
 def _create_deal_property_links(deal, properties):

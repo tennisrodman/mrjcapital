@@ -91,6 +91,7 @@ export function useCreateScreeningAssessment(dealId: string) {
       queryClient.setQueryData<ScreeningAssessment[]>(assessmentQueryKey(dealId), (existing) =>
         replaceCachedAssessment(existing, assessment),
       );
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
     },
   });
 }
@@ -104,6 +105,7 @@ export function useUpdateScreeningAssessment(assessmentId: string, dealId: strin
       queryClient.setQueryData<ScreeningAssessment[]>(assessmentQueryKey(dealId), (existing) =>
         replaceCachedAssessment(existing, assessment),
       );
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
     },
   });
 }
@@ -117,6 +119,7 @@ export function useFinalizeScreeningAssessment(assessmentId: string, dealId: str
       queryClient.setQueryData<ScreeningAssessment[]>(assessmentQueryKey(dealId), (existing) =>
         replaceCachedAssessment(existing, assessment),
       );
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
     },
   });
 }

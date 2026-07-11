@@ -166,8 +166,7 @@ export function useProperties() {
 
 // Inline-creatable inputs. A field is either an existing id (string) or a new
 // object to create alongside the deal — the nested-write contract the Add-deal
-// flow posts to. (Backend support for the nested form is a follow-up; mocks
-// fulfill it today.)
+// flow posts to in both Live and Demo modes.
 export interface SponsorInput {
   entity_name: string;
   entity_type: Sponsor['entity_type'];
@@ -175,6 +174,10 @@ export interface SponsorInput {
   primary_contact_email: string;
   primary_contact_phone?: string;
   relationship_rating: Sponsor['relationship_rating'];
+  website?: string;
+  years_experience?: number;
+  completed_projects?: number;
+  bankruptcy_history?: boolean;
 }
 
 export interface BrokerInput {
@@ -190,6 +193,12 @@ export interface PropertyInput {
   state: string;
   zip: string;
   property_type: Property['property_type'];
+  subtype?: string;
+  units?: number;
+  rentable_square_feet?: number;
+  year_built?: number;
+  year_renovated?: number;
+  county?: string;
   msa?: string;
 }
 
@@ -197,6 +206,11 @@ export interface CreateDealPayload {
   name: string;
   investment_type: Deal['investment_type'];
   requested_amount: string;
+  purpose?: string;
+  profile?: string;
+  estimated_value?: string;
+  renovation_budget?: string;
+  description?: string;
   source_channel: Deal['source_channel'];
   source_date: string;
   sponsor?: string | SponsorInput | null;
@@ -209,12 +223,33 @@ export interface UpdateDealPayload {
   name?: string;
   investment_type?: Deal['investment_type'];
   requested_amount?: string;
+  purpose?: string;
+  profile?: string;
+  estimated_value?: string | null;
+  renovation_budget?: string | null;
+  description?: string;
   source_channel?: Deal['source_channel'];
   source_date?: string;
   sponsor?: string | null;
   broker?: string | null;
   fund?: string | null;
   property_ids?: string[];
+}
+
+export interface UpdateSponsorFactsPayload {
+  website: string;
+  years_experience: number | null;
+  completed_projects: number | null;
+  bankruptcy_history: boolean | null;
+}
+
+export interface UpdatePropertyFactsPayload {
+  subtype: string;
+  units: number | null;
+  rentable_square_feet: number | null;
+  year_built: number | null;
+  year_renovated: number | null;
+  county: string;
 }
 
 export function useCreateDeal() {
@@ -241,9 +276,49 @@ export function useUpdateDeal(id: string) {
   });
 }
 
+export function useUpdateSponsor(sponsorId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateSponsorFactsPayload) =>
+      apiRequest<Sponsor>(`api/sponsors/${sponsorId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['sponsors'] });
+      void queryClient.invalidateQueries({ queryKey: ['deal'] });
+      void queryClient.invalidateQueries({ queryKey: ['deals'] });
+    },
+  });
+}
+
+export function useUpdateProperty(propertyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdatePropertyFactsPayload) =>
+      apiRequest<Property>(`api/properties/${propertyId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['properties'] });
+      void queryClient.invalidateQueries({ queryKey: ['deal'] });
+      void queryClient.invalidateQueries({ queryKey: ['deals'] });
+    },
+  });
+}
+
 export interface AllowedTransitions {
   pipeline_status: PipelineStatus[];
   syndication_status: SyndicationStatus[];
+  readiness: Partial<Record<PipelineStatus, TransitionReadiness>>;
+}
+
+export interface TransitionReadiness {
+  ready: boolean;
+  code: string;
+  blockers: string[];
+  can_override: boolean;
 }
 
 export function useAllowedTransitions(id: string | undefined, enabled: boolean) {
@@ -257,7 +332,7 @@ export function useAllowedTransitions(id: string | undefined, enabled: boolean) 
 function useTransitionMutation(id: string, urlPath: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { to_status: string; reason: string }) =>
+    mutationFn: (vars: { to_status: string; reason: string; override_readiness?: boolean }) =>
       apiRequest<Deal>(`api/deals/${id}/${urlPath}/`, {
         method: 'POST',
         body: JSON.stringify(vars),

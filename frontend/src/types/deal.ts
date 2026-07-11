@@ -91,6 +91,10 @@ export interface Sponsor {
   primary_contact_email: string;
   primary_contact_phone: string;
   relationship_rating: RelationshipRating;
+  website: string;
+  years_experience: number | null;
+  completed_projects: number | null;
+  bankruptcy_history: boolean | null;
   details: Record<string, unknown>;
 }
 
@@ -119,6 +123,12 @@ export interface Property {
   state: string;
   zip: string;
   property_type: PropertyType;
+  subtype: string;
+  units: number | null;
+  rentable_square_feet: number | null;
+  year_built: number | null;
+  year_renovated: number | null;
+  county: string;
   msa: string;
   details: Record<string, unknown>;
 }
@@ -153,6 +163,11 @@ export interface Deal {
   source_channel: SourceChannel;
   source_date: string;
   requested_amount: string;
+  purpose: string;
+  profile: string;
+  estimated_value: string | null;
+  renovation_budget: string | null;
+  description: string;
   current_stage_entered_at: string;
   days_in_current_stage: number;
   details: Record<string, unknown>;

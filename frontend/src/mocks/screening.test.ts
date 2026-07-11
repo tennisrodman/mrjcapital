@@ -6,6 +6,8 @@ import { buildInitialDeals } from './fixtures';
 import { mockApiRequest } from './handlers';
 
 const dealId = buildInitialDeals()[0].id;
+const versioningDealId = buildInitialDeals()[1].id;
+const anotherDealId = buildInitialDeals()[2].id;
 
 const payload = {
   deal: dealId,
@@ -77,5 +79,43 @@ describe('screening mock API', () => {
     );
     expect(current.results).toHaveLength(1);
     expect(current.results[0]).toMatchObject({ id: next.id, version: 2, is_current: true });
+  });
+
+  it('keeps all versions immutable to deletion and mirrors status/current filtering', async () => {
+    const first = await mockApiRequest<ScreeningAssessment>('api/screening-assessments/', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, deal: versioningDealId }),
+    });
+
+    await expect(
+      mockApiRequest(`api/screening-assessments/${first.id}/`, { method: 'DELETE' }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      mockApiRequest(`api/screening-assessments/${first.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ deal: anotherDealId }),
+      }),
+    ).rejects.toMatchObject({ status: 400, data: { deal: ['An assessment cannot be moved to another deal.'] } });
+
+    await mockApiRequest(`api/screening-assessments/${first.id}/finalize/`, {
+      method: 'POST',
+      body: JSON.stringify({ decision: 'advance' }),
+    });
+    const second = await mockApiRequest<ScreeningAssessment>('api/screening-assessments/', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, deal: versioningDealId, decision: '' }),
+    });
+
+    const draft = await mockApiRequest<Paginated<ScreeningAssessment>>(
+      `api/screening-assessments/?deal=${versioningDealId}&status=draft`,
+    );
+    expect(draft.results.map((assessment) => assessment.id)).toEqual([second.id]);
+    const historical = await mockApiRequest<Paginated<ScreeningAssessment>>(
+      `api/screening-assessments/?deal=${versioningDealId}&current=false`,
+    );
+    expect(historical.results.map((assessment) => assessment.id)).toEqual([first.id]);
+    await expect(
+      mockApiRequest(`api/screening-assessments/?deal=${versioningDealId}&current=maybe`),
+    ).rejects.toMatchObject({ status: 400 });
   });
 });

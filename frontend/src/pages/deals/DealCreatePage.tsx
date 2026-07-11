@@ -7,6 +7,7 @@ import { Panel, Field as PanelField } from '@/components/deals/Panel';
 import { FormField } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { SelectNative } from '@/components/ui/select-native';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ModeToggle } from '@/components/deals/form/ModeToggle';
 import { PropertiesSection } from '@/components/deals/form/PropertiesSection';
@@ -37,6 +38,11 @@ const SERVER_FIELD_TO_FORM: Record<string, keyof CreateDealForm> = {
   name: 'name',
   investment_type: 'investment_type',
   requested_amount: 'requested_amount',
+  purpose: 'purpose',
+  profile: 'profile',
+  estimated_value: 'estimated_value',
+  renovation_budget: 'renovation_budget',
+  description: 'description',
   source_channel: 'source_channel',
   source_date: 'source_date',
 };
@@ -76,8 +82,22 @@ export default function DealCreatePage() {
         entity_type: (values.sponsor_new.entity_type ?? 'llc') as Sponsor['entity_type'],
         primary_contact_name: values.sponsor_new.primary_contact_name ?? '',
         primary_contact_email: values.sponsor_new.primary_contact_email ?? '',
-        primary_contact_phone: values.sponsor_new.primary_contact_phone ?? '',
         relationship_rating: (values.sponsor_new.relationship_rating ?? 'new') as Sponsor['relationship_rating'],
+        ...(values.sponsor_new.primary_contact_phone?.trim()
+          ? { primary_contact_phone: values.sponsor_new.primary_contact_phone.trim() }
+          : {}),
+        ...(values.sponsor_new.website?.trim()
+          ? { website: values.sponsor_new.website.trim() }
+          : {}),
+        ...(values.sponsor_new.years_experience
+          ? { years_experience: Number(values.sponsor_new.years_experience) }
+          : {}),
+        ...(values.sponsor_new.completed_projects
+          ? { completed_projects: Number(values.sponsor_new.completed_projects) }
+          : {}),
+        ...(values.sponsor_new.bankruptcy_history
+          ? { bankruptcy_history: values.sponsor_new.bankruptcy_history === 'yes' }
+          : {}),
       };
     }
 
@@ -88,7 +108,7 @@ export default function DealCreatePage() {
         company_name: values.broker_new.company_name ?? '',
         contact_name: values.broker_new.contact_name ?? '',
         email: values.broker_new.email ?? '',
-        phone: values.broker_new.phone ?? '',
+        ...(values.broker_new.phone?.trim() ? { phone: values.broker_new.phone.trim() } : {}),
       };
     }
 
@@ -101,7 +121,15 @@ export default function DealCreatePage() {
             state: row.state ?? '',
             zip: row.zip ?? '',
             property_type: (row.property_type ?? 'other') as Property['property_type'],
-            msa: row.msa ?? '',
+            ...(row.subtype?.trim() ? { subtype: row.subtype.trim() } : {}),
+            ...(row.units ? { units: Number(row.units) } : {}),
+            ...(row.rentable_square_feet
+              ? { rentable_square_feet: Number(row.rentable_square_feet) }
+              : {}),
+            ...(row.year_built ? { year_built: Number(row.year_built) } : {}),
+            ...(row.year_renovated ? { year_renovated: Number(row.year_renovated) } : {}),
+            ...(row.county?.trim() ? { county: row.county.trim() } : {}),
+            ...(row.msa?.trim() ? { msa: row.msa.trim() } : {}),
           },
     );
 
@@ -109,6 +137,13 @@ export default function DealCreatePage() {
       name: values.name,
       investment_type: values.investment_type as CreateDealPayload['investment_type'],
       requested_amount: values.requested_amount,
+      ...(values.purpose?.trim() ? { purpose: values.purpose.trim() } : {}),
+      ...(values.profile?.trim() ? { profile: values.profile.trim() } : {}),
+      ...(values.estimated_value?.trim() ? { estimated_value: values.estimated_value.trim() } : {}),
+      ...(values.renovation_budget?.trim()
+        ? { renovation_budget: values.renovation_budget.trim() }
+        : {}),
+      ...(values.description?.trim() ? { description: values.description.trim() } : {}),
       source_channel: values.source_channel as CreateDealPayload['source_channel'],
       source_date: values.source_date,
       fund: values.fund_id || null,
@@ -134,9 +169,13 @@ export default function DealCreatePage() {
     });
   };
 
+  const onInvalid = () => {
+    setBanner('Please fix the highlighted fields before creating the deal.');
+  };
+
   return (
     <FormProvider {...form}>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
         <header className="animate-fade-up space-y-3 border-b border-[var(--border)] pb-6">
           <Link
             to="/deals"
@@ -158,7 +197,7 @@ export default function DealCreatePage() {
         </header>
 
         {banner ? (
-          <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
             <p>{banner}</p>
           </div>
@@ -198,6 +237,42 @@ export default function DealCreatePage() {
                   />
                 </div>
               </FormField>
+              <FormField label="Estimated property value" hint="Optional" error={errors.estimated_value?.message}>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--slate)]">
+                    $
+                  </span>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    className="pl-6 tabular-nums"
+                    aria-invalid={Boolean(errors.estimated_value)}
+                    {...register('estimated_value')}
+                  />
+                </div>
+              </FormField>
+              <FormField label="Renovation budget" hint="Optional" error={errors.renovation_budget?.message}>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--slate)]">
+                    $
+                  </span>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    className="pl-6 tabular-nums"
+                    aria-invalid={Boolean(errors.renovation_budget)}
+                    {...register('renovation_budget')}
+                  />
+                </div>
+              </FormField>
+              <FormField label="Purpose" hint="Optional">
+                <Input placeholder="e.g. Acquisition and renovation" {...register('purpose')} />
+              </FormField>
+              <FormField label="Profile" hint="Optional">
+                <Input placeholder="e.g. Value-add multifamily" {...register('profile')} />
+              </FormField>
               <FormField label="Source channel" required error={errors.source_channel?.message}>
                 <SelectNative
                   placeholder="How was it sourced?"
@@ -211,6 +286,9 @@ export default function DealCreatePage() {
               </FormField>
               <FormField label="Fund" hint="Optional — assign later if undecided" className="sm:col-span-2">
                 <SelectNative placeholder="Unassigned" options={fundOptions} {...register('fund_id')} />
+              </FormField>
+              <FormField label="Description" hint="Optional" className="sm:col-span-2">
+                <Textarea rows={4} {...register('description')} />
               </FormField>
             </div>
           </Panel>
@@ -269,6 +347,45 @@ export default function DealCreatePage() {
                 <FormField label="Relationship" error={errors.sponsor_new?.relationship_rating?.message}>
                   <SelectNative options={RELATIONSHIP_RATING_OPTIONS} {...register('sponsor_new.relationship_rating')} />
                 </FormField>
+                <FormField label="Website" hint="Optional" error={errors.sponsor_new?.website?.message}>
+                  <Input
+                    type="url"
+                    placeholder="https://"
+                    aria-invalid={Boolean(errors.sponsor_new?.website)}
+                    {...register('sponsor_new.website')}
+                  />
+                </FormField>
+                <FormField label="Years of experience" hint="Optional" error={errors.sponsor_new?.years_experience?.message}>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="200"
+                    step="1"
+                    inputMode="numeric"
+                    aria-invalid={Boolean(errors.sponsor_new?.years_experience)}
+                    {...register('sponsor_new.years_experience')}
+                  />
+                </FormField>
+                <FormField label="Completed projects" hint="Optional" error={errors.sponsor_new?.completed_projects?.message}>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputMode="numeric"
+                    aria-invalid={Boolean(errors.sponsor_new?.completed_projects)}
+                    {...register('sponsor_new.completed_projects')}
+                  />
+                </FormField>
+                <FormField label="Bankruptcy history" hint="Optional">
+                  <SelectNative
+                    placeholder="Unknown"
+                    options={[
+                      { value: 'no', label: 'No' },
+                      { value: 'yes', label: 'Yes' },
+                    ]}
+                    {...register('sponsor_new.bankruptcy_history')}
+                  />
+                </FormField>
               </div>
             )}
           </Panel>
@@ -305,8 +422,11 @@ export default function DealCreatePage() {
                 <FormField label="Company" required error={errors.broker_new?.company_name?.message}>
                   <Input aria-invalid={Boolean(errors.broker_new?.company_name)} {...register('broker_new.company_name')} />
                 </FormField>
-                <FormField label="Contact name" error={errors.broker_new?.contact_name?.message}>
-                  <Input {...register('broker_new.contact_name')} />
+                <FormField label="Contact name" required error={errors.broker_new?.contact_name?.message}>
+                  <Input
+                    aria-invalid={Boolean(errors.broker_new?.contact_name)}
+                    {...register('broker_new.contact_name')}
+                  />
                 </FormField>
                 <FormField label="Email" required error={errors.broker_new?.email?.message}>
                   <Input type="email" aria-invalid={Boolean(errors.broker_new?.email)} {...register('broker_new.email')} />
