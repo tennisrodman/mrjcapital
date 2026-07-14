@@ -148,6 +148,23 @@ class BrokerViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_param)
         return queryset
 
+    def perform_update(self, serializer):
+        _require_exclusive_supporting_entity_access(
+            serializer.instance,
+            performed_by=self.request.user,
+            subject_label='broker',
+        )
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not _is_staff_user(self.request.user):
+            raise PermissionDenied('Only staff may delete brokers.')
+        if instance.deals.exists():
+            raise DRFValidationError({
+                'detail': 'This broker is linked to one or more deals and cannot be deleted.',
+            })
+        return super().perform_destroy(instance)
+
 
 class FundViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -162,6 +179,23 @@ class FundViewSet(viewsets.ModelViewSet):
         if status_param:
             queryset = queryset.filter(status=status_param)
         return queryset
+
+    def perform_update(self, serializer):
+        _require_exclusive_supporting_entity_access(
+            serializer.instance,
+            performed_by=self.request.user,
+            subject_label='fund',
+        )
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not _is_staff_user(self.request.user):
+            raise PermissionDenied('Only staff may delete funds.')
+        if instance.deals.exists():
+            raise DRFValidationError({
+                'detail': 'This fund is linked to one or more deals and cannot be deleted.',
+            })
+        return super().perform_destroy(instance)
 
 
 class PropertyViewSet(viewsets.ModelViewSet):
@@ -793,6 +827,16 @@ def _int_filter_value(value, field_name):
 
 def _is_staff_user(user):
     return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))
+
+
+def _require_exclusive_supporting_entity_access(instance, *, performed_by, subject_label):
+    """Block non-staff updates when another analyst's deal also uses the record."""
+    if _is_staff_user(performed_by):
+        return
+    if instance.deals.exclude(assigned_analyst=performed_by).exists():
+        raise PermissionDenied(
+            f'A shared {subject_label} can only be changed by staff.'
+        )
 
 
 def _can_access_deal(user, deal):

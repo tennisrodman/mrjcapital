@@ -338,3 +338,186 @@ class PromotedEntityFactPermissionTests(APITestCase):
                 self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
                 self.assertEqual(response.data[field_name], ['Selected record is not available.'])
                 self.assertFalse(Deal.objects.filter(name=payload['name']).exists())
+
+
+class BrokerFundAuthorizationTests(APITestCase):
+    """Align Broker/Fund mutation controls with Sponsor/Property/Contact."""
+
+    def setUp(self):
+        self.analyst = User.objects.create_user('bf-analyst', password='pw')
+        self.other_analyst = User.objects.create_user('bf-other', password='pw')
+        self.staff = User.objects.create_user('bf-staff', password='pw', is_staff=True)
+        self.broker = Broker.objects.create(
+            company_name='Exclusive Broker',
+            contact_name='Blair Broker',
+            email='blair@example.com',
+            phone='555-0100',
+            status='active',
+        )
+        self.fund = Fund.objects.create(name='Exclusive Fund', status='forming')
+        self.deal = Deal.objects.create(
+            name='Exclusive Broker Fund Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.analyst,
+            broker=self.broker,
+            fund=self.fund,
+            source_channel='broker',
+            requested_amount='1500000.00',
+        )
+        self.client.force_authenticate(self.analyst)
+
+    def test_exclusive_analyst_can_update_broker_and_fund(self):
+        broker_response = self.client.patch(
+            f'/api/brokers/{self.broker.pk}/',
+            {'phone': '555-0199', 'contact_name': 'Blair Updated'},
+            format='json',
+        )
+        fund_response = self.client.patch(
+            f'/api/funds/{self.fund.pk}/',
+            {'name': 'Exclusive Fund Renamed', 'status': 'open'},
+            format='json',
+        )
+
+        self.assertEqual(broker_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(fund_response.status_code, status.HTTP_200_OK)
+        self.broker.refresh_from_db()
+        self.fund.refresh_from_db()
+        self.assertEqual(self.broker.phone, '555-0199')
+        self.assertEqual(self.broker.contact_name, 'Blair Updated')
+        self.assertEqual(self.fund.name, 'Exclusive Fund Renamed')
+        self.assertEqual(self.fund.status, 'open')
+
+    def test_shared_broker_and_fund_cannot_be_updated_by_nonstaff(self):
+        Deal.objects.create(
+            name='Shared Broker Fund Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.other_analyst,
+            broker=self.broker,
+            fund=self.fund,
+            source_channel='broker',
+            requested_amount='2000000.00',
+        )
+
+        broker_response = self.client.patch(
+            f'/api/brokers/{self.broker.pk}/',
+            {'phone': '555-9999'},
+            format='json',
+        )
+        fund_response = self.client.patch(
+            f'/api/funds/{self.fund.pk}/',
+            {'name': 'Should Not Rename'},
+            format='json',
+        )
+
+        self.assertEqual(broker_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(fund_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.broker.refresh_from_db()
+        self.fund.refresh_from_db()
+        self.assertEqual(self.broker.phone, '555-0100')
+        self.assertEqual(self.fund.name, 'Exclusive Fund')
+
+    def test_staff_can_update_shared_broker_and_fund(self):
+        Deal.objects.create(
+            name='Staff Shared Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.other_analyst,
+            broker=self.broker,
+            fund=self.fund,
+            source_channel='broker',
+            requested_amount='2000000.00',
+        )
+        self.client.force_authenticate(self.staff)
+
+        broker_response = self.client.patch(
+            f'/api/brokers/{self.broker.pk}/',
+            {'status': 'inactive'},
+            format='json',
+        )
+        fund_response = self.client.patch(
+            f'/api/funds/{self.fund.pk}/',
+            {'status': 'closed'},
+            format='json',
+        )
+
+        self.assertEqual(broker_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(fund_response.status_code, status.HTTP_200_OK)
+        self.broker.refresh_from_db()
+        self.fund.refresh_from_db()
+        self.assertEqual(self.broker.status, 'inactive')
+        self.assertEqual(self.fund.status, 'closed')
+
+    def test_nonstaff_cannot_delete_broker_or_fund(self):
+        broker_response = self.client.delete(f'/api/brokers/{self.broker.pk}/')
+        fund_response = self.client.delete(f'/api/funds/{self.fund.pk}/')
+
+        self.assertEqual(broker_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(fund_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(Broker.objects.filter(pk=self.broker.pk).exists())
+        self.assertTrue(Fund.objects.filter(pk=self.fund.pk).exists())
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.broker_id, self.broker.pk)
+        self.assertEqual(self.deal.fund_id, self.fund.pk)
+
+    def test_staff_delete_allows_unattached_and_blocks_linked_broker_and_fund(self):
+        unattached_broker = Broker.objects.create(
+            company_name='Unattached Broker',
+            contact_name='Una Broker',
+            email='una@example.com',
+        )
+        unattached_fund = Fund.objects.create(name='Unattached Fund', status='forming')
+        self.client.force_authenticate(self.staff)
+
+        unattached_broker_response = self.client.delete(f'/api/brokers/{unattached_broker.pk}/')
+        unattached_fund_response = self.client.delete(f'/api/funds/{unattached_fund.pk}/')
+        linked_broker_response = self.client.delete(f'/api/brokers/{self.broker.pk}/')
+        linked_fund_response = self.client.delete(f'/api/funds/{self.fund.pk}/')
+
+        self.assertEqual(unattached_broker_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(unattached_fund_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(linked_broker_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(linked_fund_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('linked to one or more deals', linked_broker_response.data['detail'])
+        self.assertIn('linked to one or more deals', linked_fund_response.data['detail'])
+        self.assertTrue(Broker.objects.filter(pk=self.broker.pk).exists())
+        self.assertTrue(Fund.objects.filter(pk=self.fund.pk).exists())
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.broker_id, self.broker.pk)
+        self.assertEqual(self.deal.fund_id, self.fund.pk)
+
+    def test_pure_nonowner_broker_fund_detail_and_update_match_missing(self):
+        other_broker = Broker.objects.create(
+            company_name='Other Analyst Broker',
+            contact_name='Other Broker',
+            email='other-broker@example.com',
+        )
+        other_fund = Fund.objects.create(name='Other Analyst Fund', status='forming')
+        Deal.objects.create(
+            name='Other Analyst Only Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.other_analyst,
+            broker=other_broker,
+            fund=other_fund,
+            source_channel='broker',
+            requested_amount='900000.00',
+        )
+        missing_id = uuid.uuid4()
+
+        for path, payload, entity_pk in [
+            ('brokers', {'phone': '555-0000'}, other_broker.pk),
+            ('funds', {'name': 'Hidden Rename'}, other_fund.pk),
+        ]:
+            with self.subTest(path=path, method='GET'):
+                hidden = self.client.get(f'/api/{path}/{entity_pk}/')
+                missing = self.client.get(f'/api/{path}/{missing_id}/')
+                self.assertEqual(hidden.status_code, status.HTTP_404_NOT_FOUND)
+                self.assertEqual(hidden.data, missing.data)
+            with self.subTest(path=path, method='PATCH'):
+                hidden = self.client.patch(f'/api/{path}/{entity_pk}/', payload, format='json')
+                missing = self.client.patch(f'/api/{path}/{missing_id}/', payload, format='json')
+                self.assertEqual(hidden.status_code, status.HTTP_404_NOT_FOUND)
+                self.assertEqual(hidden.data, missing.data)
+
+        other_broker.refresh_from_db()
+        other_fund.refresh_from_db()
+        self.assertEqual(other_broker.phone, '')
+        self.assertEqual(other_fund.name, 'Other Analyst Fund')
