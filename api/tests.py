@@ -902,12 +902,18 @@ class DealSpineApiTests(APITestCase):
     def test_syndication_cannot_start_after_pipeline_status_closes(self):
         deal = self.create_deal()
         self.approve_for_quoting(deal)
+        self.client.force_authenticate(self.staff_user)
         for to_status in ['screening', 'quoting', 'negotiating', 'signed', 'closing', 'closed']:
             self.client.post(
                 f'/api/deals/{deal.pk}/transition/',
-                {'to_status': to_status, 'reason': f'Advance to {to_status}'},
+                {
+                    'to_status': to_status,
+                    'reason': f'Advance to {to_status}',
+                    'override_readiness': True,
+                },
                 format='json',
             )
+        self.client.force_authenticate(self.user)
 
         resp = self.client.post(
             f'/api/deals/{deal.pk}/transition-syndication/',
@@ -933,12 +939,18 @@ class DealSpineApiTests(APITestCase):
                 {'to_status': to_status, 'reason': f'Advance syndication to {to_status}'},
                 format='json',
             )
+        self.client.force_authenticate(self.staff_user)
         for to_status in ['negotiating', 'signed', 'closing', 'closed', 'servicing']:
             self.client.post(
                 f'/api/deals/{deal.pk}/transition/',
-                {'to_status': to_status, 'reason': f'Advance to {to_status}'},
+                {
+                    'to_status': to_status,
+                    'reason': f'Advance to {to_status}',
+                    'override_readiness': True,
+                },
                 format='json',
             )
+        self.client.force_authenticate(self.user)
 
         resp = self.client.post(
             f'/api/deals/{deal.pk}/transition-syndication/',

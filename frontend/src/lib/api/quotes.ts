@@ -1,0 +1,210 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { apiRequest } from '@/config/api';
+import type { Paginated } from '@/types/deal';
+import type {
+  CreateQuotePayload,
+  Quote,
+  QuoteAttachmentsPayload,
+  SendQuotePayload,
+  UpdateQuotePayload,
+} from '@/types/quote';
+
+type QuoteListResponse = Paginated<Quote> | Quote[];
+
+const quoteQueryKey = (dealId: string) => ['quotes', dealId] as const;
+
+function listResults(response: QuoteListResponse): Quote[] {
+  return Array.isArray(response) ? response : response.results;
+}
+
+function sortMostRecent(quotes: Quote[]): Quote[] {
+  return [...quotes].sort((a, b) => {
+    if (a.version !== b.version) return b.version - a.version;
+    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+  });
+}
+
+function replaceCachedQuote(existing: Quote[] | undefined, incoming: Quote): Quote[] {
+  const withoutIncoming = (existing ?? []).filter((quote) => quote.id !== incoming.id);
+  // Counter creates a new current draft and demotes the prior version's is_current.
+  const withFlags = withoutIncoming.map((quote) =>
+    quote.deal === incoming.deal && incoming.is_current
+      ? { ...quote, is_current: false }
+      : quote,
+  );
+  return sortMostRecent([incoming, ...withFlags]);
+}
+
+export async function listQuotes(dealId: string): Promise<Quote[]> {
+  const response = await apiRequest<QuoteListResponse>(
+    `api/quotes/?deal=${encodeURIComponent(dealId)}`,
+  );
+  return sortMostRecent(listResults(response));
+}
+
+export function createQuote(payload: CreateQuotePayload): Promise<Quote> {
+  return apiRequest<Quote>('api/quotes/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateQuote(quoteId: string, payload: UpdateQuotePayload): Promise<Quote> {
+  return apiRequest<Quote>(`api/quotes/${quoteId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function sendQuote(quoteId: string, payload: SendQuotePayload = {}): Promise<Quote> {
+  return apiRequest<Quote>(`api/quotes/${quoteId}/send/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function counterQuote(quoteId: string): Promise<Quote> {
+  return apiRequest<Quote>(`api/quotes/${quoteId}/counter/`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function executeQuote(quoteId: string): Promise<Quote> {
+  return apiRequest<Quote>(`api/quotes/${quoteId}/execute/`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function withdrawQuote(quoteId: string): Promise<Quote> {
+  return apiRequest<Quote>(`api/quotes/${quoteId}/withdraw/`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function expireQuote(quoteId: string): Promise<Quote> {
+  return apiRequest<Quote>(`api/quotes/${quoteId}/expire/`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function setQuoteAttachments(
+  quoteId: string,
+  payload: QuoteAttachmentsPayload,
+): Promise<Quote> {
+  return apiRequest<Quote>(`api/quotes/${quoteId}/attachments/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Latest version / is_current quote for the deal. */
+export function currentQuote(quotes: Quote[] | undefined): Quote | undefined {
+  if (!quotes?.length) return undefined;
+  const flagged = quotes.find((quote) => quote.is_current);
+  return flagged ?? sortMostRecent(quotes)[0];
+}
+
+export function useQuotes(dealId: string | undefined) {
+  return useQuery({
+    queryKey: quoteQueryKey(dealId ?? ''),
+    queryFn: () => listQuotes(dealId ?? ''),
+    enabled: Boolean(dealId),
+  });
+}
+
+export function useCreateQuote(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createQuote,
+    onSuccess: (quote) => {
+      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
+        replaceCachedQuote(existing, quote),
+      );
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
+    },
+  });
+}
+
+export function useUpdateQuote(quoteId: string, dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateQuotePayload) => updateQuote(quoteId, payload),
+    onSuccess: (quote) => {
+      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
+        replaceCachedQuote(existing, quote),
+      );
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
+    },
+  });
+}
+
+function useQuoteAction(
+  dealId: string,
+  mutationFn: (quoteId: string) => Promise<Quote>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: (quote) => {
+      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
+        replaceCachedQuote(existing, quote),
+      );
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
+    },
+  });
+}
+
+export function useSendQuote(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ quoteId, payload }: { quoteId: string; payload?: SendQuotePayload }) =>
+      sendQuote(quoteId, payload),
+    onSuccess: (quote) => {
+      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
+        replaceCachedQuote(existing, quote),
+      );
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
+    },
+  });
+}
+
+export function useCounterQuote(dealId: string) {
+  return useQuoteAction(dealId, counterQuote);
+}
+
+export function useExecuteQuote(dealId: string) {
+  return useQuoteAction(dealId, executeQuote);
+}
+
+export function useWithdrawQuote(dealId: string) {
+  return useQuoteAction(dealId, withdrawQuote);
+}
+
+export function useExpireQuote(dealId: string) {
+  return useQuoteAction(dealId, expireQuote);
+}
+
+export function useSetQuoteAttachments(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      quoteId,
+      payload,
+    }: {
+      quoteId: string;
+      payload: QuoteAttachmentsPayload;
+    }) => setQuoteAttachments(quoteId, payload),
+    onSuccess: (quote) => {
+      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
+        replaceCachedQuote(existing, quote),
+      );
+      void queryClient.invalidateQueries({ queryKey: ['deal-documents', dealId] });
+      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
+    },
+  });
+}

@@ -155,3 +155,106 @@ describe('screening-to-quoting mock readiness', () => {
     });
   });
 });
+
+describe('quoting-to-signed mock readiness', () => {
+  async function moveToQuoting(name: string): Promise<Deal> {
+    const deal = await createScreeningDeal(name);
+    await finalizeDecision(deal.id, 'advance');
+    return mockApiRequest<Deal>(`api/deals/${deal.id}/transition/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'quoting', reason: 'Screening approved.' }),
+    });
+  }
+
+  it('blocks Negotiating until the current quote is sent, then Signed until executed', async () => {
+    const deal = await moveToQuoting('Demo Quote Readiness');
+
+    const quote = await mockApiRequest<{ id: string; status: string; version: number }>(
+      'api/quotes/',
+      {
+        method: 'POST',
+        body: JSON.stringify({ deal: deal.id, seed_from_screening: true }),
+      },
+    );
+    expect(quote.status).toBe('draft');
+
+    const draftBlocked = await mockApiRequest<ReadinessResponse>(
+      `api/deals/${deal.id}/allowed-transitions/`,
+    );
+    expect(draftBlocked.readiness.negotiating).toMatchObject({
+      ready: false,
+      code: 'quote_readiness_required',
+      blockers: ['quote_required_for_negotiating'],
+      can_override: true,
+    });
+
+    await mockApiRequest(`api/quotes/${quote.id}/send/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+
+    const sentReady = await mockApiRequest<ReadinessResponse>(
+      `api/deals/${deal.id}/allowed-transitions/`,
+    );
+    expect(sentReady.readiness.negotiating).toEqual({
+      ready: true,
+      code: 'ready',
+      blockers: [],
+      can_override: false,
+    });
+
+    const negotiating = await mockApiRequest<Deal>(`api/deals/${deal.id}/transition/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'negotiating', reason: 'Quote sent to borrower.' }),
+    });
+    expect(negotiating.pipeline_status).toBe('negotiating');
+
+    const beforeExecute = await mockApiRequest<ReadinessResponse>(
+      `api/deals/${deal.id}/allowed-transitions/`,
+    );
+    expect(beforeExecute.readiness.signed).toMatchObject({
+      ready: false,
+      code: 'quote_readiness_required',
+      blockers: ['quote_execution_required'],
+      can_override: true,
+    });
+
+    const intent = await mockApiRequest<{ document: { id: string } }>(
+      'api/documents/upload-intent/',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          deal: deal.id,
+          document_name: 'Executed Term Sheet',
+          category: 'legal',
+          subcategory: 'term_sheet',
+          file_type: 'pdf',
+          file_size_bytes: 32,
+          content_type: 'application/pdf',
+        }),
+      },
+    );
+    await mockApiRequest(`api/documents/${intent.document.id}/complete/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    await mockApiRequest(`api/quotes/${quote.id}/attachments/`, {
+      method: 'POST',
+      body: JSON.stringify({ document_ids: [intent.document.id] }),
+    });
+    await mockApiRequest(`api/quotes/${quote.id}/execute/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+
+    const afterExecute = await mockApiRequest<ReadinessResponse>(
+      `api/deals/${deal.id}/allowed-transitions/`,
+    );
+    expect(afterExecute.readiness.signed).toEqual({
+      ready: true,
+      code: 'ready',
+      blockers: [],
+      can_override: false,
+    });
+  });
+});

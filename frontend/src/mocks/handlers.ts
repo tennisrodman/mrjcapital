@@ -37,6 +37,7 @@ import {
   SPONSORS,
 } from './fixtures';
 import { PIPELINE_TRANSITIONS } from './pipeline';
+import { handleQuotesRequest, getCurrentQuote } from './quotes';
 
 const deals = buildInitialDeals();
 const sponsors = [...SPONSORS];
@@ -1447,42 +1448,67 @@ function finalizeScreeningAssessment(
 }
 
 function pipelineTransitionReadiness(deal: Deal, to: PipelineStatus) {
-  if (deal.pipeline_status !== 'screening' || to !== 'quoting') {
-    return { ready: true, code: 'ready', blockers: [], can_override: false };
-  }
-  const latest = screeningAssessments
-    .filter((assessment) => assessment.deal === deal.id)
-    .sort((a, b) => b.version - a.version)[0];
-  if (!latest) {
+  if (deal.pipeline_status === 'screening' && to === 'quoting') {
+    const latest = screeningAssessments
+      .filter((assessment) => assessment.deal === deal.id)
+      .sort((a, b) => b.version - a.version)[0];
+    if (!latest) {
+      return {
+        ready: false,
+        code: 'screening_approval_required',
+        blockers: ['screening_assessment_missing'],
+        can_override: MOCK_USER.is_staff,
+      };
+    }
+    if (latest.status !== 'finalized') {
+      return {
+        ready: false,
+        code: 'screening_approval_required',
+        blockers: ['screening_assessment_not_finalized'],
+        can_override: MOCK_USER.is_staff,
+      };
+    }
+    if (latest.decision !== 'advance') {
+      return {
+        ready: false,
+        code: 'screening_approval_required',
+        blockers: ['screening_decision_not_advance'],
+        can_override: MOCK_USER.is_staff,
+      };
+    }
     return {
-      ready: false,
-      code: 'screening_approval_required',
-      blockers: ['screening_assessment_missing'],
-      can_override: MOCK_USER.is_staff,
+      ready: true,
+      code: 'ready',
+      blockers: [],
+      can_override: false,
     };
   }
-  if (latest.status !== 'finalized') {
-    return {
-      ready: false,
-      code: 'screening_approval_required',
-      blockers: ['screening_assessment_not_finalized'],
-      can_override: MOCK_USER.is_staff,
-    };
+
+  if (deal.pipeline_status === 'quoting' && to === 'negotiating') {
+    const current = getCurrentQuote(deal.id);
+    if (!current || !['sent', 'countered', 'executed'].includes(current.status)) {
+      return {
+        ready: false,
+        code: 'quote_readiness_required',
+        blockers: ['quote_required_for_negotiating'],
+        can_override: MOCK_USER.is_staff,
+      };
+    }
   }
-  if (latest.decision !== 'advance') {
-    return {
-      ready: false,
-      code: 'screening_approval_required',
-      blockers: ['screening_decision_not_advance'],
-      can_override: MOCK_USER.is_staff,
-    };
+
+  if (deal.pipeline_status === 'negotiating' && to === 'signed') {
+    const current = getCurrentQuote(deal.id);
+    if (!current || current.status !== 'executed') {
+      return {
+        ready: false,
+        code: 'quote_readiness_required',
+        blockers: ['quote_execution_required'],
+        can_override: MOCK_USER.is_staff,
+      };
+    }
   }
-  return {
-    ready: true,
-    code: 'ready',
-    blockers: [],
-    can_override: false,
-  };
+
+  return { ready: true, code: 'ready', blockers: [], can_override: false };
 }
 
 function allowedSyndicationTransitions(deal: Deal): SyndicationStatus[] {
@@ -1626,6 +1652,35 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
       badRequest('status', 'Screening assessment versions cannot be deleted; create a new version instead.');
     }
     return assessment;
+  }
+
+  if (resource === 'quotes') {
+    return handleQuotesRequest({
+      method,
+      second,
+      third,
+      query,
+      body,
+      findDeal,
+      findDocument,
+      paginate,
+      getScreeningSeed: (dealId) => {
+        const assessment = screeningAssessments
+          .filter(
+            (row) =>
+              row.deal === dealId &&
+              row.status === 'finalized' &&
+              row.decision === 'advance',
+          )
+          .sort((a, b) => b.version - a.version)[0];
+        if (!assessment) return null;
+        return {
+          loan_amount: assessment.loan_amount,
+          interest_rate: assessment.proposed_rate,
+          term_months: assessment.proposed_term_months,
+        };
+      },
+    });
   }
 
   if (resource === 'contacts') {

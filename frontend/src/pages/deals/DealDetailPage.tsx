@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Clock,
   Download,
+  FileSignature,
   FileText,
   Globe2,
   Landmark,
@@ -209,6 +210,12 @@ function DealHeader({
           <Link to={`/deals/${deal.id}/screening`}>
             <ScanSearch className="h-3.5 w-3.5" strokeWidth={1.75} />
             Screening
+          </Link>
+        </Button>
+        <Button type="button" variant="outline" asChild>
+          <Link to={`/deals/${deal.id}/quotes`}>
+            <FileSignature className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Quotes
           </Link>
         </Button>
         <Button type="button" variant="outline" asChild>

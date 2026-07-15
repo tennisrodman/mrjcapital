@@ -10,6 +10,7 @@ from api.models import (
     Deal,
     DealStageEvent,
     PipelineStatus,
+    Quote,
     ScreeningAssessment,
     SyndicationStatus,
 )
@@ -79,6 +80,19 @@ SCREENING_APPROVAL_REQUIRED = 'screening_approval_required'
 SCREENING_ASSESSMENT_MISSING = 'screening_assessment_missing'
 SCREENING_ASSESSMENT_NOT_FINALIZED = 'screening_assessment_not_finalized'
 SCREENING_DECISION_NOT_ADVANCE = 'screening_decision_not_advance'
+QUOTE_READINESS_REQUIRED = 'quote_readiness_required'
+QUOTE_REQUIRED_FOR_NEGOTIATING = 'quote_required_for_negotiating'
+QUOTE_EXECUTION_REQUIRED = 'quote_execution_required'
+
+_QUOTE_ACTIVE_FOR_NEGOTIATING = frozenset({
+    Quote.Status.SENT,
+    Quote.Status.COUNTERED,
+    Quote.Status.EXECUTED,
+})
+_QUOTE_BLOCKERS = frozenset({
+    QUOTE_REQUIRED_FOR_NEGOTIATING,
+    QUOTE_EXECUTION_REQUIRED,
+})
 
 
 class PipelineReadinessError(ValidationError):
@@ -113,10 +127,27 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
         elif assessment.decision != ScreeningAssessment.Decision.ADVANCE:
             blockers.append(SCREENING_DECISION_NOT_ADVANCE)
 
+    if deal.pipeline_status == PipelineStatus.QUOTING and to_status == PipelineStatus.NEGOTIATING:
+        quote = Quote.objects.filter(deal=deal).order_by('-version').first()
+        if quote is None or quote.status not in _QUOTE_ACTIVE_FOR_NEGOTIATING:
+            blockers.append(QUOTE_REQUIRED_FOR_NEGOTIATING)
+
+    if deal.pipeline_status == PipelineStatus.NEGOTIATING and to_status == PipelineStatus.SIGNED:
+        quote = Quote.objects.filter(deal=deal).order_by('-version').first()
+        if quote is None or quote.status != Quote.Status.EXECUTED:
+            blockers.append(QUOTE_EXECUTION_REQUIRED)
+
     ready = not blockers
+    if ready:
+        code = READINESS_READY
+    elif any(blocker in _QUOTE_BLOCKERS for blocker in blockers):
+        code = QUOTE_READINESS_REQUIRED
+    else:
+        code = SCREENING_APPROVAL_REQUIRED
+
     return {
         'ready': ready,
-        'code': READINESS_READY if ready else SCREENING_APPROVAL_REQUIRED,
+        'code': code,
         'blockers': blockers,
         'can_override': bool(blockers and _can_override_readiness(performed_by)),
     }

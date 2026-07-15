@@ -13,6 +13,7 @@ from api.models import (
     Document,
     Fund,
     Property,
+    Quote,
     ScreeningAssessment,
     Sponsor,
 )
@@ -162,6 +163,35 @@ class ScreeningAssessmentAdmin(admin.ModelAdmin):
         'dscr',
         'debt_yield',
         'quick_score',
+        'created_at',
+        'updated_at',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Quote)
+class QuoteAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'version', 'status', 'is_counter', 'loan_amount', 'interest_rate', 'updated_at']
+    list_filter = ['status', 'is_counter', 'rate_type']
+    search_fields = ['deal__name', 'notes', 'equity_summary']
+    readonly_fields = [
+        'version',
+        'status',
+        'is_counter',
+        'created_by',
+        'sent_at',
+        'signed_at',
+        'withdrawn_at',
+        'origination_fee_amount',
+        'initial_funding_amount',
         'created_at',
         'updated_at',
     ]

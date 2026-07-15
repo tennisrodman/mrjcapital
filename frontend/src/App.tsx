@@ -8,6 +8,7 @@ import DealDetailPage from './pages/deals/DealDetailPage';
 import DealCreatePage from './pages/deals/DealCreatePage';
 import DealEditPage from './pages/deals/DealEditPage';
 import DealScreeningPage from './pages/deals/DealScreeningPage';
+import DealQuotePage from './pages/deals/DealQuotePage';
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
             <Route path="deals/:id" element={<DealDetailPage />} />
             <Route path="deals/:id/edit" element={<DealEditPage />} />
             <Route path="deals/:id/screening" element={<DealScreeningPage />} />
+            <Route path="deals/:id/quotes" element={<DealQuotePage />} />
           </Route>
         </Routes>
       </Router>

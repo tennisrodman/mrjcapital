@@ -20,6 +20,7 @@ from .fund import Fund
 from .note import DealNote
 from .parties import Broker, Sponsor
 from .property import DealProperty, Property
+from .quote import Quote
 from .screening import ScreeningAssessment
 from .stage import DealStageEvent
 
@@ -44,6 +45,7 @@ __all__ = [
     'PipelineStatus',
     'Property',
     'PropertyType',
+    'Quote',
     'RelationshipRating',
     'ScreeningAssessment',
     'SourceChannel',

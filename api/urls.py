@@ -5,6 +5,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from . import viewsets
 from . import views
 from .contact_viewsets import ContactViewSet, DealContactViewSet
+from .quote_viewsets import QuoteViewSet
 from .screening_viewsets import ScreeningAssessmentViewSet
 
 router = DefaultRouter()
@@ -20,6 +21,7 @@ router.register('activity-logs', viewsets.ActivityLogViewSet, basename='activity
 router.register('contacts', ContactViewSet, basename='contact')
 router.register('deal-contacts', DealContactViewSet, basename='deal-contact')
 router.register('screening-assessments', ScreeningAssessmentViewSet, basename='screening-assessment')
+router.register('quotes', QuoteViewSet, basename='quote')
 
 urlpatterns = [
     path('auth/login/', views.login_view, name='login'),
