@@ -27,6 +27,7 @@ from api.services.deals import (
     log_deal_field_updates,
 )
 from api.services.audit import SENSITIVE_SPONSOR_FIELDS
+from api.services.deal_properties import replace_deal_properties
 
 
 ALLOWED_DOCUMENT_VISIBILITY_ROLES = {'internal', 'investor', 'borrower', 'counsel'}
@@ -436,7 +437,12 @@ class DealSerializer(serializers.ModelSerializer):
             property_ids = validated_data.pop('property_ids', [])
             deal = super().create(validated_data)
             initialize_deal_stage_event(deal, performed_by=self._request_user())
-            self._replace_properties(deal, property_ids)
+            replace_deal_properties(
+                deal,
+                property_ids,
+                performed_by=self._request_user(),
+                ip_address=self.context.get('audit_ip_address'),
+            )
             return deal
 
     def update(self, instance, validated_data):
@@ -446,7 +452,12 @@ class DealSerializer(serializers.ModelSerializer):
             property_ids = validated_data.pop('property_ids', [])
             deal = super().update(instance, validated_data)
             if has_property_ids:
-                self._replace_properties(deal, property_ids)
+                replace_deal_properties(
+                    deal,
+                    property_ids,
+                    performed_by=self._request_user(),
+                    ip_address=self.context.get('audit_ip_address'),
+                )
             log_deal_field_updates(
                 deal,
                 previous_values,
@@ -458,14 +469,6 @@ class DealSerializer(serializers.ModelSerializer):
     def _request_user(self):
         request = self.context.get('request')
         return getattr(request, 'user', None) if request else None
-
-    def _replace_properties(self, deal, properties):
-        with transaction.atomic():
-            DealProperty.objects.filter(deal=deal).delete()
-            if not properties:
-                return
-            _create_deal_property_links(deal, properties)
-
 
 class DealCreateSerializer(serializers.ModelSerializer):
     investment_category = serializers.CharField(read_only=True)
@@ -575,7 +578,12 @@ class DealCreateSerializer(serializers.ModelSerializer):
                 for index, property_input in enumerate(property_inputs)
             ]
             if properties:
-                _create_deal_property_links(deal, properties)
+                replace_deal_properties(
+                    deal,
+                    properties,
+                    performed_by=getattr(request, 'user', None) if request else None,
+                    ip_address=self.context.get('audit_ip_address'),
+                )
             return deal
 
     def to_representation(self, instance):
@@ -979,13 +987,6 @@ def _can_attach_related_entity(user, entity):
         return False
     related_deals = entity.deals.all()
     return not related_deals.exists() or related_deals.filter(assigned_analyst=user).exists()
-
-
-def _create_deal_property_links(deal, properties):
-    DealProperty.objects.bulk_create([
-        DealProperty(deal=deal, property=property_obj, is_primary=index == 0)
-        for index, property_obj in enumerate(properties)
-    ])
 
 
 def _reject_sensitive_details(value):

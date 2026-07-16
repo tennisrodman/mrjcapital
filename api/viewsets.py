@@ -53,6 +53,10 @@ from api.serializers import (
     _can_attach_property,
 )
 from api.services.money import format_money_aggregate
+from api.services.deal_properties import (
+    capture_deal_property_snapshot,
+    log_deal_property_change,
+)
 from api.services import (
     allowed_pipeline_transition_readiness,
     allowed_pipeline_statuses,
@@ -333,6 +337,7 @@ class DealViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        serializer.context['audit_ip_address'] = _client_ip(self.request)
         serializer.save(assigned_analyst=self.request.user)
 
     def perform_update(self, serializer):
@@ -462,28 +467,70 @@ class DealPropertyViewSet(viewsets.ModelViewSet):
         deal = serializer.validated_data['deal']
         if not _can_access_deal(self.request.user, deal):
             raise PermissionDenied('You cannot attach properties to this deal.')
-        is_primary = serializer.validated_data.get('is_primary', False)
-        if not is_primary and not DealProperty.objects.filter(deal=deal).exists():
-            serializer.save(is_primary=True)
-            return
-        serializer.save()
+        with transaction.atomic():
+            locked_deal = Deal.objects.select_for_update().get(pk=deal.pk)
+            before = capture_deal_property_snapshot(locked_deal)
+            is_primary = serializer.validated_data.get('is_primary', False)
+            if not is_primary and not DealProperty.objects.filter(deal=locked_deal).exists():
+                serializer.save(deal=locked_deal, is_primary=True)
+            else:
+                serializer.save(deal=locked_deal)
+            log_deal_property_change(
+                locked_deal,
+                before,
+                performed_by=self.request.user,
+                ip_address=_client_ip(self.request),
+            )
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            locked_instance = (
+                DealProperty.objects
+                .select_for_update()
+                .select_related('deal', 'property')
+                .get(pk=serializer.instance.pk)
+            )
+            locked_deal = Deal.objects.select_for_update().get(pk=locked_instance.deal_id)
+            before = capture_deal_property_snapshot(locked_deal)
+            serializer.instance = locked_instance
+            serializer.save()
+            log_deal_property_change(
+                locked_deal,
+                before,
+                performed_by=self.request.user,
+                ip_address=_client_ip(self.request),
+            )
 
     def perform_destroy(self, instance):
-        if instance.is_primary:
-            replacement = (
+        with transaction.atomic():
+            locked_instance = (
                 DealProperty.objects
-                .filter(deal=instance.deal)
-                .exclude(pk=instance.pk)
-                .order_by('property__address_normalized')
-                .first()
+                .select_for_update()
+                .select_related('deal', 'property')
+                .get(pk=instance.pk)
             )
-            with transaction.atomic():
-                instance.delete()
+            locked_deal = Deal.objects.select_for_update().get(pk=locked_instance.deal_id)
+            before = capture_deal_property_snapshot(locked_deal)
+            if locked_instance.is_primary:
+                replacement = (
+                    DealProperty.objects
+                    .filter(deal=locked_deal)
+                    .exclude(pk=locked_instance.pk)
+                    .order_by('property__address_normalized')
+                    .first()
+                )
+                locked_instance.delete()
                 if replacement:
                     replacement.is_primary = True
                     replacement.save(update_fields=['is_primary'])
-            return
-        instance.delete()
+            else:
+                locked_instance.delete()
+            log_deal_property_change(
+                locked_deal,
+                before,
+                performed_by=self.request.user,
+                ip_address=_client_ip(self.request),
+            )
 
 
 class DocumentViewSet(viewsets.ModelViewSet):

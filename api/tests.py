@@ -314,6 +314,13 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(deal.assigned_analyst, self.user)
         self.assertEqual(deal.deal_properties.get().property, self.property)
         self.assertEqual(resp.data['investment_category'], 'debt')
+        property_event = next(
+            event
+            for event in ActivityLog.objects.filter(deal=deal, action_type=ActivityActionType.FIELD_UPDATED)
+            if event.metadata.get('field') == 'property_ids'
+        )
+        self.assertIn('1 attached', property_event.description)
+        self.assertEqual(property_event.metadata['primary_property_id'], str(self.property.pk))
 
     def test_create_sparse_deal_without_sponsor_or_properties(self):
         resp = self.client.post(
@@ -498,7 +505,10 @@ class DealSpineApiTests(APITestCase):
         self.assertFalse(Deal.objects.filter(name='Duplicate Nested Property Hidden').exists())
 
     def test_nested_create_rolls_back_if_property_linking_fails(self):
-        with patch('api.serializers.DealProperty.objects.bulk_create', side_effect=IntegrityError('bulk failed')):
+        with patch(
+            'api.services.deal_properties.DealProperty.objects.bulk_create',
+            side_effect=IntegrityError('bulk failed'),
+        ):
             with self.assertRaises(IntegrityError):
                 self.client.post(
                     '/api/deals/',
@@ -670,6 +680,39 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(deal.name, '123 Main St Bridge')
         self.assertEqual(deal.deal_properties.count(), 1)
         self.assertEqual(deal.deal_properties.get().property, self.property)
+
+    def test_deal_property_replacement_records_membership_and_primary_change(self):
+        deal = self.create_deal()
+        deal.deal_properties.create(property=self.property, is_primary=True)
+        replacement = Property.objects.create(
+            address='901 Replacement Rd',
+            city='Burbank',
+            state='CA',
+            zip='91502',
+            address_normalized=normalize_address('901 Replacement Rd', 'Burbank', 'CA', '91502'),
+            property_type='office',
+        )
+
+        response = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {'property_ids': [str(replacement.pk)]},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        event = next(
+            event
+            for event in ActivityLog.objects.filter(
+                deal=deal,
+                action_type=ActivityActionType.FIELD_UPDATED,
+            ).order_by('-performed_at')
+            if event.metadata.get('field') == 'property_ids'
+        )
+        self.assertEqual(event.metadata['attached_property_ids'], [str(replacement.pk)])
+        self.assertEqual(event.metadata['detached_property_ids'], [str(self.property.pk)])
+        self.assertEqual(event.metadata['previous_primary_property_id'], str(self.property.pk))
+        self.assertEqual(event.metadata['primary_property_id'], str(replacement.pk))
+        self.assertIn('primary changed to 901 Replacement Rd', event.description)
 
     def test_deal_patch_cannot_directly_change_status_fields(self):
         deal = self.create_deal()
