@@ -384,6 +384,16 @@ class ClosingServiceApiTests(APITestCase):
         self.assertEqual(linked.status_code, status.HTTP_200_OK)
         self.assertEqual(len(linked.data['documents']), 1)
 
+        closing_logs = ActivityLog.objects.filter(
+            deal=self.deal,
+            action_type__startswith='closing_',
+        )
+        self.assertTrue(closing_logs.exists())
+        self.assertFalse(closing_logs.filter(description='').exists())
+        descriptions = set(closing_logs.values_list('description', flat=True))
+        self.assertIn('Due diligence item added: Custom counsel memo', descriptions)
+        self.assertIn('1 closing document linked to due diligence item', descriptions)
+
         delete_doc = self.client.delete(f'/api/documents/{doc.pk}/')
         self.assertEqual(delete_doc.status_code, status.HTTP_400_BAD_REQUEST)
 

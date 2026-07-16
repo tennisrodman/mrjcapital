@@ -13,7 +13,6 @@ from django.utils import timezone
 
 from api.models import (
     ActivityActionType,
-    ActivityLog,
     ClosingChecklistGeneration,
     ClosingPackage,
     ConditionPrecedent,
@@ -26,6 +25,7 @@ from api.models import (
     PipelineStatus,
 )
 from api.models.deal import Deal
+from api.services.audit import create_activity_log
 
 
 User = get_user_model()
@@ -87,11 +87,61 @@ def closing_assignees(deal):
     return list(User.objects.filter(id__in=ids, is_active=True).order_by('username'))
 
 
+def _closing_event_description(action_type, metadata):
+    metadata = metadata or {}
+    event = metadata.get('event', '')
+    if event == 'created':
+        return 'Closing package created'
+    if event == 'updated':
+        fields = ', '.join(str(field).replace('_', ' ') for field in metadata.get('fields', []))
+        return f'Closing package updated{f": {fields}" if fields else ""}'
+    if action_type == ActivityActionType.CLOSING_GENERATED:
+        version = metadata.get('version')
+        return f'Closing checklist v{version} generated' if version else 'Closing checklist generated'
+    if action_type in {
+        ActivityActionType.CLOSING_REGENERATED,
+        ActivityActionType.CLOSING_SUPERSEDED,
+    }:
+        verb = 'superseded' if action_type == ActivityActionType.CLOSING_SUPERSEDED else 'regenerated'
+        return (
+            f'Closing checklist v{metadata.get("from_version")} {verb} '
+            f'by v{metadata.get("to_version")}'
+        )
+
+    item_labels = {
+        'dd_created': 'Due diligence item added',
+        'cp_created': 'Condition precedent added',
+        'dd_updated': 'Due diligence item updated',
+        'cp_updated': 'Condition precedent updated',
+        'dd_deleted': 'Due diligence item deleted',
+        'cp_deleted': 'Condition precedent deleted',
+    }
+    if event in item_labels:
+        detail = metadata.get('title') or metadata.get('status')
+        return f'{item_labels[event]}{f": {detail}" if detail else ""}'
+
+    if event in {'dd_documents_set', 'cp_documents_set'}:
+        subject = 'due diligence item' if event.startswith('dd_') else 'condition precedent'
+        attached = len(metadata.get('attached_document_ids', []))
+        detached = len(metadata.get('detached_document_ids', []))
+        if attached and detached:
+            return f'Closing documents updated for {subject}: {attached} linked, {detached} detached'
+        if attached:
+            return f'{attached} closing document{"s" if attached != 1 else ""} linked to {subject}'
+        return f'{detached} closing document{"s" if detached != 1 else ""} detached from {subject}'
+
+    try:
+        return ActivityActionType(action_type).label
+    except ValueError:
+        return str(action_type).replace('_', ' ').capitalize()
+
+
 def _log(deal, action_type, performed_by, *, metadata=None, old_value='', new_value=''):
-    ActivityLog.objects.create(
+    create_activity_log(
         deal=deal,
         action_type=action_type,
-        performed_by=performed_by if performed_by and getattr(performed_by, 'is_authenticated', False) else None,
+        performed_by=performed_by,
+        description=_closing_event_description(action_type, metadata),
         old_value=old_value or '',
         new_value=new_value or '',
         metadata=metadata or {},
@@ -642,6 +692,8 @@ def set_dd_documents(item, document_ids, *, performed_by, user):
         after_ids = {str(doc_id) for doc_id in final_ids}
         attached = sorted(after_ids - before_ids)
         detached = sorted(before_ids - after_ids)
+        if not attached and not detached:
+            return item
         action = (
             ActivityActionType.CLOSING_DOCUMENT_DETACHED
             if detached and not attached
@@ -681,6 +733,8 @@ def set_cp_documents(item, document_ids, *, performed_by, user):
         after_ids = {str(doc_id) for doc_id in final_ids}
         attached = sorted(after_ids - before_ids)
         detached = sorted(before_ids - after_ids)
+        if not attached and not detached:
+            return item
         action = (
             ActivityActionType.CLOSING_DOCUMENT_DETACHED
             if detached and not attached

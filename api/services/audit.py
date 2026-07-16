@@ -11,6 +11,39 @@ SENSITIVE_SPONSOR_FIELDS = {
 }
 
 
+def create_activity_log(
+    *,
+    deal,
+    action_type,
+    performed_by=None,
+    description,
+    ip_address=None,
+    old_value='',
+    new_value='',
+    reason='',
+    metadata=None,
+):
+    """Write an activity event with a guaranteed human-readable timeline entry."""
+    cleaned_description = str(description or '').strip()
+    if not cleaned_description:
+        raise ValueError('Activity log description is required.')
+    return ActivityLog.objects.create(
+        deal=deal,
+        action_type=action_type,
+        performed_by=(
+            performed_by
+            if performed_by is not None and getattr(performed_by, 'is_authenticated', False)
+            else None
+        ),
+        ip_address=ip_address,
+        description=cleaned_description,
+        old_value=old_value or '',
+        new_value=new_value or '',
+        reason=reason or '',
+        metadata=metadata or {},
+    )
+
+
 def log_sensitive_field_read(sponsor, fields, performed_by, reason, deal=None, ip_address=None):
     if not reason or not str(reason).strip():
         raise ValidationError({'reason': 'A reason is required to read sensitive fields.'})
@@ -22,7 +55,7 @@ def log_sensitive_field_read(sponsor, fields, performed_by, reason, deal=None, i
         raise ValidationError({'fields': f'Unsupported sensitive field(s): {", ".join(invalid_fields)}'})
 
     values = {field: getattr(sponsor, field) for field in fields}
-    ActivityLog.objects.create(
+    create_activity_log(
         deal=deal,
         action_type=ActivityActionType.SENSITIVE_FIELD_READ,
         performed_by=performed_by if getattr(performed_by, 'is_authenticated', False) else None,
