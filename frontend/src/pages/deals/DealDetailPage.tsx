@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { DocumentUploadDialog } from '@/components/deals/DocumentUploadDialog';
 import { DealContactsPanel } from '@/components/deals/DealContactsPanel';
+import { NoteAttachments } from '@/components/deals/NoteAttachments';
 import { AuthContext } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -727,6 +728,8 @@ function NotesPanel({
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const createNote = useCreateNote(dealId);
   const deleteNote = useDeleteNote(dealId);
+  const download = useDownloadDocument();
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const toggleDoc = (id: string) => {
     setSelectedDocs((current) =>
@@ -809,6 +812,7 @@ function NotesPanel({
           Couldn't delete note: {apiErrorMessage(deleteNote.error)}
         </p>
       ) : null}
+      {downloadError ? <p className="mt-3 text-sm text-red-600">{downloadError}</p> : null}
 
       {isLoading ? (
         <p className="mt-4 text-sm text-[var(--slate)]">Loading notes…</p>
@@ -830,19 +834,33 @@ function NotesPanel({
               className="rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2"
             >
               <p className="whitespace-pre-wrap text-sm text-[var(--ink)]">{note.body}</p>
+              <NoteAttachments
+                attachmentIds={note.attachments}
+                documents={documents}
+                isDownloading={download.isPending}
+                onDownload={(document) => {
+                  setDownloadError(null);
+                  download.mutate(document, {
+                    onError: (error) =>
+                      setDownloadError(
+                        `Couldn't download ${document.document_name}: ${apiErrorMessage(error)}`,
+                      ),
+                  });
+                }}
+              />
               <div className="mt-1 flex items-center justify-between text-[0.7rem] text-[var(--slate)]/80">
                 <span>
                   {note.author_username ?? 'Unknown'} · {formatDateTime(note.created_at)}
                   {note.updated_at !== note.created_at ? ' · edited' : ''}
-                  {note.attachments.length > 0
-                    ? ` · ${note.attachments.length} attachment${note.attachments.length === 1 ? '' : 's'}`
-                    : ''}
                 </span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => deleteNote.mutate(note.id)}
+                  onClick={() => {
+                    if (!window.confirm('Delete this note? This cannot be undone.')) return;
+                    deleteNote.mutate(note.id);
+                  }}
                   disabled={deleteNote.isPending}
                 >
                   Delete

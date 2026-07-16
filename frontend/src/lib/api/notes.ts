@@ -1,16 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiRequest } from '@/config/api';
-import type { DealNote, Paginated } from '@/types/deal';
+import { fetchAllPages } from '@/lib/api/deals';
+import type { DealNote } from '@/types/deal';
+
+export function fetchDealNotes(dealId: string): Promise<DealNote[]> {
+  return fetchAllPages<DealNote>(`api/deal-notes/?deal=${dealId}`);
+}
 
 // Notes are a staff-only endpoint; gate the query on staff to avoid 403s.
 export function useDealNotes(dealId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: ['deal-notes', dealId],
-    queryFn: async () => {
-      const page = await apiRequest<Paginated<DealNote>>(`api/deal-notes/?deal=${dealId}`);
-      return page.results;
-    },
+    queryFn: () => fetchDealNotes(dealId!),
     enabled: Boolean(dealId) && enabled,
   });
 }
