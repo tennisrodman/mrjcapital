@@ -1143,6 +1143,8 @@ function createNote(body: Record<string, unknown>): DealNote {
     body: text,
     author: MOCK_USER_ID,
     author_username: MOCK_USER.username,
+    can_edit: true,
+    can_delete: true,
     attachments: attachmentIds,
     visibility_roles: ['internal'],
     created_at: iso,
@@ -1163,6 +1165,11 @@ function createNote(body: Record<string, unknown>): DealNote {
     metadata: { subject_model: 'deal_note', subject_id: id, attachment_ids: attachmentIds },
   } as ActivityLogEntry);
   return note;
+}
+
+function withNoteCapabilities(note: DealNote): DealNote {
+  const canManage = MOCK_USER.is_staff || note.author === MOCK_USER_ID;
+  return { ...note, can_edit: canManage, can_delete: canManage };
 }
 
 function transitionPipeline(
@@ -2125,31 +2132,81 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
   }
 
   if (resource === 'deal-notes') {
-    if (!second && method === 'POST') return createNote(body);
+    if (!second && method === 'POST') return withNoteCapabilities(createNote(body));
     if (second && method === 'DELETE') {
       const idx = notes.findIndex((n) => n.id === second);
       if (idx === -1) throw new ApiError('Not found', 404, { detail: 'Not found.' });
+      const note = notes[idx];
+      if (!withNoteCapabilities(note).can_delete) {
+        throw new ApiError('Only the note author or staff may delete this note.', 403, {
+          detail: 'Only the note author or staff may delete this note.',
+        });
+      }
+      activity.unshift({
+        id: newId('act'),
+        deal: note.deal,
+        action_type: 'note_deleted',
+        performed_by: MOCK_USER_ID,
+        performed_at: nowIso(),
+        ip_address: null,
+        description: `Note deleted: ${note.body.slice(0, 80)}`,
+        old_value: '',
+        new_value: '',
+        reason: '',
+        metadata: {
+          subject_model: 'deal_note',
+          subject_id: note.id,
+          attachment_ids: note.attachments,
+        },
+      });
       notes.splice(idx, 1);
       return {};
     }
     if (second && (method === 'PATCH' || method === 'PUT')) {
       const note = notes.find((n) => n.id === second);
       if (!note) throw new ApiError('Not found', 404, { detail: 'Not found.' });
+      if (!withNoteCapabilities(note).can_edit) {
+        throw new ApiError('Only the note author or staff may edit this note.', 403, {
+          detail: 'Only the note author or staff may edit this note.',
+        });
+      }
       if ('deal' in body && body.deal !== note.deal) {
         badRequest('deal', 'deal cannot be changed after creation.');
       }
+      let changed = false;
       if (typeof body.body === 'string') {
         if (!body.body.trim()) badRequest('body', 'Note body cannot be empty.');
+        changed = note.body !== body.body;
         note.body = body.body;
       }
       // Attachments are intentionally not mirrored on edit here: there is no edit-attachments
       // UI surface yet, so Demo/Live parity is maintained for all reachable paths.
-      note.updated_at = nowIso();
-      return note;
+      if (changed) {
+        note.updated_at = nowIso();
+        activity.unshift({
+          id: newId('act'),
+          deal: note.deal,
+          action_type: 'note_updated',
+          performed_by: MOCK_USER_ID,
+          performed_at: note.updated_at,
+          ip_address: null,
+          description: `Note updated: ${note.body.slice(0, 80)}`,
+          old_value: '',
+          new_value: '',
+          reason: '',
+          metadata: {
+            subject_model: 'deal_note',
+            subject_id: note.id,
+            attachment_ids: note.attachments,
+            changed_fields: ['body'],
+          },
+        });
+      }
+      return withNoteCapabilities(note);
     }
     const dealId = query.get('deal');
     const filtered = dealId ? notes.filter((n) => n.deal === dealId) : notes;
-    return paginate(filtered, query);
+    return paginate(filtered.map(withNoteCapabilities), query);
   }
 
   if (resource === 'activity-logs') {

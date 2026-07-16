@@ -73,6 +73,7 @@ from api.services import (
     update_property_facts,
     update_sponsor_facts,
 )
+from api.services.notes import can_manage_note, delete_note, update_note
 from api.services.storage import (
     PresignedDownload,
     PresignedUpload,
@@ -817,15 +818,14 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
 
 class DealNoteViewSet(viewsets.ModelViewSet):
-    # Notes are a staff-only collaboration surface, matching ActivityLogViewSet.
-    # (When notes later open to assigned analysts, swap in a _can_access_deal
-    # queryset scope and an author-or-staff edit/delete guard.)
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     serializer_class = DealNoteSerializer
     queryset = DealNote.objects.select_related('deal', 'author').prefetch_related('attachments')
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        if not _is_staff_user(self.request.user):
+            queryset = queryset.filter(deal__assigned_analyst=self.request.user)
         deal_id = self.request.query_params.get('deal')
         if deal_id:
             queryset = queryset.filter(deal=_uuid_filter_value(deal_id, 'deal'))
@@ -833,6 +833,8 @@ class DealNoteViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         data = serializer.validated_data
+        if not _can_access_deal(self.request.user, data['deal']):
+            raise NotFound()
         note = create_note(
             deal=data['deal'],
             author=self.request.user,
@@ -841,6 +843,28 @@ class DealNoteViewSet(viewsets.ModelViewSet):
             ip_address=_client_ip(self.request),
         )
         serializer.instance = note
+
+    def perform_update(self, serializer):
+        if not can_manage_note(serializer.instance, self.request.user):
+            raise PermissionDenied('Only the note author or staff may edit this note.')
+        data = serializer.validated_data
+        serializer.instance = update_note(
+            serializer.instance,
+            performed_by=self.request.user,
+            body=data.get('body'),
+            attachments=data.get('attachments'),
+            attachments_provided='attachments' in data,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        if not can_manage_note(instance, self.request.user):
+            raise PermissionDenied('Only the note author or staff may delete this note.')
+        delete_note(
+            instance,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
 
 
 class ActivityLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):

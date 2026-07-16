@@ -109,6 +109,8 @@ export type ActivityActionType =
   | 'document_upload'
   | 'document_upload_abandoned'
   | 'note_added'
+  | 'note_updated'
+  | 'note_deleted'
   | 'sensitive_field_read';
 
 export interface Sponsor {
@@ -308,6 +310,8 @@ export interface DealNote {
   body: string;
   author: number | null;
   author_username: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
   attachments: string[];
   visibility_roles: string[];
   created_at: string;

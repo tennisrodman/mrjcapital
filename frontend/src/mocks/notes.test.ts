@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { mockApiRequest } from './handlers';
-import type { Deal, DealDocument, DealNote, Paginated } from '@/types/deal';
+import type { ActivityLogEntry, Deal, DealDocument, DealNote, Paginated } from '@/types/deal';
 
 async function firstDealId(): Promise<string> {
   const page = await mockApiRequest<Paginated<Deal>>('api/deals/?page=1');
@@ -22,6 +22,7 @@ describe('deal notes mock API', () => {
     });
     expect(created.body).toBe('Follow up with sponsor');
     expect(created.visibility_roles).toEqual(['internal']);
+    expect(created).toMatchObject({ can_edit: true, can_delete: true });
 
     const listed = await mockApiRequest<Paginated<DealNote>>(`api/deal-notes/?deal=${dealId}`);
     expect(listed.results.some((n) => n.id === created.id)).toBe(true);
@@ -29,6 +30,15 @@ describe('deal notes mock API', () => {
     await mockApiRequest(`api/deal-notes/${created.id}/`, { method: 'DELETE' });
     const after = await mockApiRequest<Paginated<DealNote>>(`api/deal-notes/?deal=${dealId}`);
     expect(after.results.some((n) => n.id === created.id)).toBe(false);
+    const activity = await mockApiRequest<Paginated<ActivityLogEntry>>(
+      `api/activity-logs/?deal=${dealId}`,
+    );
+    expect(activity.results).toContainEqual(
+      expect.objectContaining({
+        action_type: 'note_deleted',
+        metadata: expect.objectContaining({ subject_id: created.id }),
+      }),
+    );
   });
 
   it('edits an existing note body and updates its timestamp', async () => {
@@ -45,6 +55,18 @@ describe('deal notes mock API', () => {
 
     expect(updated.body).toBe('Updated note');
     expect(updated.updated_at >= created.updated_at).toBe(true);
+    const activity = await mockApiRequest<Paginated<ActivityLogEntry>>(
+      `api/activity-logs/?deal=${dealId}`,
+    );
+    expect(activity.results).toContainEqual(
+      expect.objectContaining({
+        action_type: 'note_updated',
+        metadata: expect.objectContaining({
+          subject_id: created.id,
+          changed_fields: ['body'],
+        }),
+      }),
+    );
   });
 
   it('rejects an empty note body', async () => {

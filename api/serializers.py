@@ -907,6 +907,8 @@ class DealNoteSerializer(serializers.ModelSerializer):
     # always emits the key as a string-or-null, so the response shape is stable
     # across authored/orphaned notes and matches the Demo mock and the TS type.
     author_username = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
     attachments = serializers.PrimaryKeyRelatedField(
         many=True,
         required=False,
@@ -922,6 +924,8 @@ class DealNoteSerializer(serializers.ModelSerializer):
             'body',
             'author',
             'author_username',
+            'can_edit',
+            'can_delete',
             'attachments',
             'visibility_roles',
             'created_at',
@@ -929,6 +933,8 @@ class DealNoteSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'author',
+            'can_edit',
+            'can_delete',
             'visibility_roles',
             'created_at',
             'updated_at',
@@ -936,6 +942,15 @@ class DealNoteSerializer(serializers.ModelSerializer):
 
     def get_author_username(self, obj):
         return obj.author.username if obj.author_id else None
+
+    def get_can_edit(self, obj):
+        from api.services.notes import can_manage_note
+
+        request = self.context.get('request')
+        return can_manage_note(obj, getattr(request, 'user', None))
+
+    def get_can_delete(self, obj):
+        return self.get_can_edit(obj)
 
     def validate_body(self, value):
         if not value or not value.strip():

@@ -157,6 +157,8 @@ class ActivityActionType(models.TextChoices):
     DOCUMENT_UPLOAD = 'document_upload', 'Document upload'
     DOCUMENT_UPLOAD_ABANDONED = 'document_upload_abandoned', 'Document upload abandoned'
     NOTE_ADDED = 'note_added', 'Note added'
+    NOTE_UPDATED = 'note_updated', 'Note updated'
+    NOTE_DELETED = 'note_deleted', 'Note deleted'
     SENSITIVE_FIELD_READ = 'sensitive_field_read', 'Sensitive field read'
     CLOSING_GENERATED = 'closing_generated', 'Closing checklist generated'
     CLOSING_REGENERATED = 'closing_regenerated', 'Closing checklist regenerated'

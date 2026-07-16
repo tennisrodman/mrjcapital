@@ -8,12 +8,11 @@ export function fetchDealNotes(dealId: string): Promise<DealNote[]> {
   return fetchAllPages<DealNote>(`api/deal-notes/?deal=${dealId}`);
 }
 
-// Notes are a staff-only endpoint; gate the query on staff to avoid 403s.
-export function useDealNotes(dealId: string | undefined, enabled: boolean) {
+export function useDealNotes(dealId: string | undefined) {
   return useQuery({
     queryKey: ['deal-notes', dealId],
     queryFn: () => fetchDealNotes(dealId!),
-    enabled: Boolean(dealId) && enabled,
+    enabled: Boolean(dealId),
   });
 }
 
@@ -45,6 +44,7 @@ export function useDeleteNote(dealId: string) {
       apiRequest<Record<string, never>>(`api/deal-notes/${noteId}/`, { method: 'DELETE' }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['deal-notes', dealId] });
+      void queryClient.invalidateQueries({ queryKey: ['deal-activity', dealId] });
     },
   });
 }

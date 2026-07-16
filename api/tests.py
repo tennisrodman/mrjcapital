@@ -2083,10 +2083,32 @@ class DealNoteServiceTests(APITestCase):
         self.assertEqual(DealNote.objects.count(), 0)
         self.assertEqual(ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0)
 
+    def test_update_note_rolls_back_when_audit_logging_fails(self):
+        from api.services.notes import update_note
+
+        note = DealNote.objects.create(deal=self.deal, author=self.user, body='before')
+        with patch('api.services.notes.log_note_updated', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                update_note(note, performed_by=self.user, body='after')
+
+        note.refresh_from_db()
+        self.assertEqual(note.body, 'before')
+
+    def test_delete_note_rolls_back_when_audit_logging_fails(self):
+        from api.services.notes import delete_note
+
+        note = DealNote.objects.create(deal=self.deal, author=self.user, body='keep')
+        with patch('api.services.notes.log_note_deleted', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                delete_note(note, performed_by=self.user)
+
+        self.assertTrue(DealNote.objects.filter(pk=note.pk).exists())
+
 
 class DealNoteApiTests(APITestCase):
     def setUp(self):
         self.analyst = User.objects.create_user('note_analyst', password='pw')
+        self.other_analyst = User.objects.create_user('other_note_analyst', password='pw')
         self.staff = User.objects.create_user('note_staff', password='pw', is_staff=True)
         self.deal = Deal.objects.create(
             name='Notes API Deal',
@@ -2101,6 +2123,13 @@ class DealNoteApiTests(APITestCase):
             source_channel='direct',
             requested_amount='500000.00',
             assigned_analyst=self.analyst,
+        )
+        self.foreign_deal = Deal.objects.create(
+            name='Foreign Notes Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='750000.00',
+            assigned_analyst=self.other_analyst,
         )
 
     def _ready_doc(self, deal):
@@ -2126,19 +2155,37 @@ class DealNoteApiTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data['author'], self.staff.pk)
         self.assertEqual(resp.data['visibility_roles'], ['internal'])
+        self.assertTrue(resp.data['can_edit'])
+        self.assertTrue(resp.data['can_delete'])
         log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
         self.assertEqual(log.metadata['subject_id'], resp.data['id'])
 
-    def test_non_staff_cannot_create_or_list_notes(self):
+    def test_assigned_analyst_can_create_and_list_internal_notes(self):
         self.client.force_authenticate(self.analyst)
         create = self.client.post(
             '/api/deal-notes/',
-            {'deal': str(self.deal.pk), 'body': 'blocked'},
+            {'deal': str(self.deal.pk), 'body': 'Analyst collaboration note'},
             format='json',
         )
-        self.assertEqual(create.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(create.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(create.data['can_edit'])
         listing = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
-        self.assertEqual(listing.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['body'] for row in response_results(listing)], ['Analyst collaboration note'])
+
+    def test_analyst_cannot_access_notes_for_an_unassigned_deal(self):
+        DealNote.objects.create(deal=self.foreign_deal, author=self.other_analyst, body='private')
+        self.client.force_authenticate(self.analyst)
+
+        create = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.foreign_deal.pk), 'body': 'should not create'},
+            format='json',
+        )
+        listing = self.client.get(f'/api/deal-notes/?deal={self.foreign_deal.pk}')
+
+        self.assertEqual(create.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response_results(listing), [])
 
     def test_notes_are_filtered_by_deal(self):
         DealNote.objects.create(deal=self.deal, author=self.staff, body='keep')
@@ -2205,6 +2252,9 @@ class DealNoteApiTests(APITestCase):
         self.assertEqual(
             ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0
         )
+        updated_log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_UPDATED)
+        self.assertEqual(updated_log.metadata['subject_id'], str(note.pk))
+        self.assertEqual(updated_log.metadata['changed_fields'], ['body'])
         move = self.client.patch(
             f'/api/deal-notes/{note.pk}/', {'deal': str(self.other_deal.pk)}, format='json'
         )
@@ -2222,6 +2272,31 @@ class DealNoteApiTests(APITestCase):
         self.assertTrue(
             ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).exists()
         )
+        deleted_log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_DELETED)
+        self.assertEqual(deleted_log.metadata['subject_id'], str(note.pk))
+
+    def test_assigned_analyst_can_only_manage_their_own_notes(self):
+        staff_note = DealNote.objects.create(deal=self.deal, author=self.staff, body='Staff note')
+        own_note = DealNote.objects.create(deal=self.deal, author=self.analyst, body='Own note')
+        self.client.force_authenticate(self.analyst)
+
+        listing = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        capabilities = {row['id']: row for row in response_results(listing)}
+        self.assertFalse(capabilities[str(staff_note.pk)]['can_edit'])
+        self.assertFalse(capabilities[str(staff_note.pk)]['can_delete'])
+        self.assertTrue(capabilities[str(own_note.pk)]['can_edit'])
+
+        blocked_edit = self.client.patch(
+            f'/api/deal-notes/{staff_note.pk}/', {'body': 'No'}, format='json'
+        )
+        blocked_delete = self.client.delete(f'/api/deal-notes/{staff_note.pk}/')
+        own_edit = self.client.patch(
+            f'/api/deal-notes/{own_note.pk}/', {'body': 'Own note updated'}, format='json'
+        )
+
+        self.assertEqual(blocked_edit.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(blocked_delete.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(own_edit.status_code, status.HTTP_200_OK)
 
 
 def response_results(response):

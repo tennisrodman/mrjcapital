@@ -70,7 +70,7 @@ export default function DealDetailPage() {
   const documentsQuery = useDealDocuments(id);
   const stageHistoryQuery = useDealStageHistory(id);
   const activityQuery = useDealActivity(id, isStaff);
-  const notesQuery = useDealNotes(id, isStaff);
+  const notesQuery = useDealNotes(id);
   const [openDialog, setOpenDialog] = useState<'pipeline' | 'syndication' | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
 
@@ -136,23 +136,21 @@ export default function DealDetailPage() {
           />
           <SponsorPanel deal={deal} />
           <BrokerPanel deal={deal} />
+          <NotesPanel
+            dealId={deal.id}
+            notes={notesQuery.data ?? []}
+            isLoading={notesQuery.isLoading}
+            isError={notesQuery.isError}
+            onRetry={() => void notesQuery.refetch()}
+            documents={documentsQuery.data ?? []}
+          />
           {isStaff ? (
-            <>
-              <NotesPanel
-                dealId={deal.id}
-                notes={notesQuery.data ?? []}
-                isLoading={notesQuery.isLoading}
-                isError={notesQuery.isError}
-                onRetry={() => void notesQuery.refetch()}
-                documents={documentsQuery.data ?? []}
-              />
               <ActivityPanel
                 entries={activityQuery.data ?? []}
                 isLoading={activityQuery.isLoading}
                 isError={activityQuery.isError}
                 onRetry={() => void activityQuery.refetch()}
               />
-            </>
           ) : null}
         </aside>
       </div>
@@ -881,6 +879,7 @@ function NotesPanel({
                   {note.author_username ?? 'Unknown'} · {formatDateTime(note.created_at)}
                   {note.updated_at !== note.created_at ? ' · edited' : ''}
                 </span>
+                {note.can_edit || note.can_delete ? (
                 <span className="flex items-center gap-1">
                   {editingNoteId === note.id ? (
                     <>
@@ -906,7 +905,7 @@ function NotesPanel({
                         {updateNote.isPending ? 'Saving…' : 'Save'}
                       </Button>
                     </>
-                  ) : (
+                  ) : note.can_edit ? (
                     <Button
                       type="button"
                       variant="ghost"
@@ -918,7 +917,8 @@ function NotesPanel({
                     >
                       Edit
                     </Button>
-                  )}
+                  ) : null}
+                  {note.can_delete ? (
                   <Button
                     type="button"
                     variant="ghost"
@@ -931,7 +931,9 @@ function NotesPanel({
                   >
                     Delete
                   </Button>
+                  ) : null}
                 </span>
+                ) : null}
               </div>
             </li>
           ))}
