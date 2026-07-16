@@ -29,7 +29,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system boundaries and [SYSTEM_REVIE
 
 ## Local setup
 
-Requirements: Python 3.12+, Node 22+, Postgres, Redis, tmux (for `dev.sh`).
+Requirements: Python 3.12+, Node 24.18.0+, Postgres, Redis, tmux (for `dev.sh`).
 
 ```bash
 cp .env.example .env    # edit values

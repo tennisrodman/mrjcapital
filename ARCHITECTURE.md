@@ -24,12 +24,14 @@ api/
 │   ├── screening.py         versioning, metrics, and finalization
 │   ├── quotes.py            quote lifecycle and execution evidence
 │   ├── closing.py           packages, generations, DD/CP mutation
-│   ├── documents.py         document action policy
+│   ├── documents.py         document action policy and upload lifecycle audit
+│   ├── notes.py             internal collaboration and note audit lifecycle
 │   ├── deal_properties.py   relationship replacement and audit snapshots
 │   ├── entity_facts.py      authorized/audited fact updates
 │   ├── audit.py             shared activity writer and sensitive reads
 │   └── storage.py           local/R2 object storage
 ├── policies.py              shared staff and deal-access decisions
+├── drf.py                   request parsing and domain-validation translation
 ├── serializers.py           core deal/supporting-entity API contracts
 ├── *_serializers.py         feature-specific API contracts
 ├── viewsets.py              core deal/supporting-entity/document endpoints
@@ -55,7 +57,7 @@ Raising and Fully subscribed can also move to Cancelled. Moving a deal to Dead a
 
 ## Documents and evidence
 
-Documents use an intent → blob upload → complete sequence. The server owns storage keys, versions, type normalization, size limits, storage status, and download targets. Local development writes under `media/deal-documents`; production can use Cloudflare R2.
+Documents use an intent → blob upload → complete sequence. Started, completed, and expired pending uploads are distinct audit events, so interruption never masquerades as a successful upload or disappears without evidence. The server owns storage keys, versions, type normalization, size limits, storage status, deterministic ordering, and download targets. Local development writes under `media/deal-documents`; production can use Cloudflare R2.
 
 The serialized document includes `can_edit`, `can_delete`, and block reasons. Executed evidence metadata is immutable. Closing-linked and executed-quote evidence cannot be deleted. Clients render these capabilities instead of reconstructing policy.
 
@@ -73,13 +75,13 @@ frontend/src/
 
 Routes are lazy-loaded. The Demo engine is dynamically imported only when Demo mode handles a request, so Live does not statically depend on it. The production entry chunk is limited to 450 KiB by `frontend/scripts/check-entry-bundle.mjs`.
 
-The shared paginator batches all DRF pages without a silent row ceiling. Feature queries must distinguish loading, error, empty, and success states and invalidate every affected cache after mutation.
+The shared paginator batches all DRF pages without a silent row ceiling. Feature queries must distinguish loading, error, empty, and success states and invalidate every affected cache after mutation. Complex workspace panels, such as deal notes, live under `components/deals`; route files compose them rather than owning their workflow state.
 
 ## Demo and Live
 
 The header/login toggle persists the chosen data mode. Demo uses `shared/demo_seed.json` and the in-memory adapters under `frontend/src/mocks`; Live calls Django. `shared/workflow_contracts.json` is the parity contract for lifecycle graphs and document-upload validation, tested from both runtimes.
 
-Demo is a product workflow simulator, not a second source of business truth. New reachable behavior must first be encoded in backend services and then mirrored behind shared contract tests.
+Demo is a product workflow simulator, not a second source of business truth. New reachable behavior must first be encoded in backend services and then mirrored behind shared contract tests. The shared contract currently covers lifecycle transitions, the in-flight pipeline population, and document-upload validation.
 
 ## Authentication
 
