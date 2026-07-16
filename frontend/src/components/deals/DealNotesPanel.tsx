@@ -19,6 +19,12 @@ interface DealNotesPanelProps {
   documents: DealDocument[];
 }
 
+function noteWasEdited(note: DealNote): boolean {
+  const createdAt = Date.parse(note.created_at);
+  const updatedAt = Date.parse(note.updated_at);
+  return Number.isFinite(createdAt) && Number.isFinite(updatedAt) && updatedAt > createdAt;
+}
+
 export function DealNotesPanel({
   dealId,
   notes,
@@ -174,7 +180,7 @@ export function DealNotesPanel({
               <div className="mt-1 flex items-center justify-between text-[0.7rem] text-[var(--slate)]/80">
                 <span>
                   {note.author_username ?? 'Unknown'} · {formatDateTime(note.created_at)}
-                  {note.updated_at !== note.created_at ? ' · edited' : ''}
+                  {noteWasEdited(note) ? ' · edited' : ''}
                 </span>
                 {note.can_edit || note.can_delete ? (
                   <span className="flex items-center gap-1">

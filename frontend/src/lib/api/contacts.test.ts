@@ -1,3 +1,6 @@
+import { act, renderHook } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createElement, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({ request: vi.fn() }));
@@ -10,6 +13,7 @@ import {
   createContact,
   createDealContact,
   listDealContacts,
+  useCreateAndLinkContact,
 } from './contacts';
 import type { Contact, CreateAndLinkContactPayload, DealContact } from '@/types/contact';
 
@@ -123,5 +127,21 @@ describe('contact API contract', () => {
     expect(caught).toBeInstanceOf(ContactCreatedButUnlinkedError);
     expect(caught).toMatchObject({ contact, linkError: linkFailure });
     expect(api.request).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes contacts and activity after a contact is linked to a deal', async () => {
+    api.request.mockResolvedValueOnce(contact).mockResolvedValueOnce(link);
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const created = renderHook(() => useCreateAndLinkContact('deal-1'), { wrapper });
+
+    await act(async () => {
+      await created.result.current.mutateAsync(payload);
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['deal-contacts', 'deal-1'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['deal-activity', 'deal-1'] });
   });
 });

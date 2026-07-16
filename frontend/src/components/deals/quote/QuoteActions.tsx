@@ -66,12 +66,17 @@ export function QuoteActions({
 
   const status = quote.status;
   const isTerminal = TERMINAL_STATUSES.has(status);
+  const isPastDue = Boolean(
+    (status === 'sent' || status === 'countered')
+    && quote.expires_at
+    && new Date(quote.expires_at).getTime() <= Date.now(),
+  );
   const canSave = status === 'draft';
   const canSend = status === 'draft';
-  const canCounter = status === 'sent' || status === 'countered';
-  const canExecute = status === 'sent' || status === 'countered';
+  const canCounter = (status === 'sent' || status === 'countered') && !isPastDue;
+  const canExecute = (status === 'sent' || status === 'countered') && !isPastDue;
   const canWithdraw = status === 'draft' || status === 'sent' || status === 'countered';
-  const canExpire = status === 'sent' || status === 'countered';
+  const canExpire = isPastDue;
   const hasAttachments = quote.attachments.length > 0;
   const executeBlocked = canExecute && !hasAttachments;
   const disabled = busy || saving;
@@ -146,6 +151,11 @@ export function QuoteActions({
       {executeBlocked ? (
         <p className="text-xs text-[var(--slate)]">
           Attach a ready legal term sheet or LOI before executing.
+        </p>
+      ) : null}
+      {isPastDue ? (
+        <p className="text-xs text-[var(--slate)]">
+          This quote is past due. Mark it expired, withdraw it, or use a new version.
         </p>
       ) : null}
       {isTerminal ? (

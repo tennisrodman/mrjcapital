@@ -126,7 +126,7 @@ export function useProperties() {
 
 // Inline-creatable inputs. A field is either an existing id (string) or a new
 // object to create alongside the deal — the nested-write contract the Add-deal
-// flow posts to in both Live and Demo modes.
+// flow posts to through the Live API.
 export interface SponsorInput {
   entity_name: string;
   entity_type: Sponsor['entity_type'];
@@ -287,6 +287,7 @@ export function useUpdateDeal(id: string) {
     onSuccess: (deal) => {
       queryClient.setQueryData(['deal', id], deal);
       void queryClient.invalidateQueries({ queryKey: ['deals'] });
+      void queryClient.invalidateQueries({ queryKey: ['deal-summary'] });
     },
   });
 }

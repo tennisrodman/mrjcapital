@@ -67,7 +67,7 @@ export interface ClosingDocumentSummary {
   storage_status: string;
   file_type: string;
   file_size_bytes: number | null;
-  /** Present in Demo for invisible-doc union parity with Live. */
+  /** Included when the API preserves a linked document the current user cannot browse. */
   visibility_roles?: string[];
 }
 

@@ -4,6 +4,8 @@
 
 import type {
   BrokerStatus,
+  DealProfile,
+  DealPurpose,
   DocumentCategory,
   FundStatus,
   InvestmentCategory,
@@ -12,6 +14,7 @@ import type {
   PropertyType,
   RelationshipRating,
   SourceChannel,
+  SponsorEntityType,
   SyndicationStatus,
 } from '@/types/deal';
 
@@ -58,6 +61,27 @@ export const SOURCE_CHANNEL_LABELS: Record<SourceChannel, string> = {
   referral: 'Referral',
   repeat_sponsor: 'Repeat sponsor',
   internal_prospecting: 'Internal prospecting',
+};
+
+export const DEAL_PURPOSE_LABELS: Record<DealPurpose, string> = {
+  acquisition: 'Acquisition',
+  refinance: 'Refinance',
+  construction: 'Construction',
+  recapitalization: 'Recapitalization',
+};
+
+export const DEAL_PROFILE_LABELS: Record<DealProfile, string> = {
+  value_add: 'Value-add',
+  construction: 'Construction',
+  stabilized: 'Stabilized',
+};
+
+export const SPONSOR_ENTITY_TYPE_LABELS: Record<SponsorEntityType, string> = {
+  llc: 'LLC',
+  lp: 'LP',
+  corp: 'Corporation',
+  trust: 'Trust',
+  individual: 'Individual',
 };
 
 export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
@@ -244,11 +268,20 @@ export function formatCurrencyCompact(value: string | number | null | undefined)
   return parsed === null ? '—' : CURRENCY_COMPACT.format(parsed);
 }
 
-export function formatDate(value: string | null | undefined): string {
+export function formatDate(
+  value: string | null | undefined,
+  timeZone?: string,
+): string {
   if (!value) return '—';
-  const date = new Date(value);
+  const isCalendarDate = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const date = new Date(isCalendarDate ? `${value}T00:00:00Z` : value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    timeZone: isCalendarDate ? 'UTC' : timeZone,
+  });
 }
 
 export function formatDateTime(value: string | null | undefined): string {

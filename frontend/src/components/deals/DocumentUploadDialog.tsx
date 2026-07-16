@@ -73,8 +73,8 @@ export function DocumentUploadDialog({ deal, open, onOpenChange }: DocumentUploa
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border border-[var(--border)] bg-[var(--surface)] p-6 shadow-lg">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-[var(--ink)]/45 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--paper-elevated)] p-6 shadow-2xl focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
           <div className="flex items-start justify-between gap-4">
             <div>
               <Dialog.Title className="font-display text-lg font-medium text-[var(--ink)]">

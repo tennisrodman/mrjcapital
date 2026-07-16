@@ -1,8 +1,9 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Download, Pencil, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 
+import { DocumentUploadDialog } from '@/components/deals/DocumentUploadDialog';
 import { Panel } from '@/components/deals/Panel';
 import { ErrorState, Spinner } from '@/components/deals/States';
 import { Button } from '@/components/ui/button';
@@ -107,6 +108,7 @@ function ClosingWorkspace({ dealId }: { dealId: string }) {
   const [customOwner, setCustomOwner] = useState('');
   const [customDueDate, setCustomDueDate] = useState('');
   const [customKind, setCustomKind] = useState<'dd' | 'cp'>('dd');
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const deal = dealQuery.data;
   const mutable = deal?.pipeline_status === 'closing';
@@ -393,6 +395,12 @@ function ClosingWorkspace({ dealId }: { dealId: string }) {
             Track due diligence, conditions precedent, final economics, and funding before Closed.
           </p>
         </div>
+        {mutable ? (
+          <Button type="button" variant="outline" onClick={() => setUploadOpen(true)}>
+            <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Upload evidence
+          </Button>
+        ) : null}
       </div>
 
       <div
@@ -605,6 +613,7 @@ function ClosingWorkspace({ dealId }: { dealId: string }) {
                 title="Due diligence"
                 items={ddItems}
                 mutable={itemsEditable}
+                canAttachDocuments={itemsEditable}
                 kind="dd"
                 readyDocuments={readyDocuments}
                 documentsLoading={documentsQuery.isLoading}
@@ -656,6 +665,7 @@ function ClosingWorkspace({ dealId }: { dealId: string }) {
                 title="Conditions precedent"
                 items={cpItems}
                 mutable={itemsEditable}
+                canAttachDocuments={itemsEditable}
                 kind="cp"
                 readyDocuments={readyDocuments}
                 documentsLoading={documentsQuery.isLoading}
@@ -793,6 +803,8 @@ function ClosingWorkspace({ dealId }: { dealId: string }) {
           </ul>
         )}
       </Panel>
+
+      <DocumentUploadDialog deal={deal} open={uploadOpen} onOpenChange={setUploadOpen} />
     </div>
   );
 }
@@ -859,6 +871,7 @@ function ItemList({
   title,
   items,
   mutable,
+  canAttachDocuments,
   kind,
   readyDocuments,
   documentsLoading,
@@ -877,6 +890,7 @@ function ItemList({
   title: string;
   items: Array<DDChecklistItem | ConditionPrecedent>;
   mutable: boolean;
+  canAttachDocuments: boolean;
   kind: 'dd' | 'cp';
   readyDocuments: DealDocument[];
   documentsLoading: boolean;
@@ -1001,7 +1015,7 @@ function ItemList({
                               >
                                 Waive
                               </Button>
-                              {item.status === 'pending' ? (
+                              {item.status === 'pending' && item.source_template_item === null ? (
                                 <Button
                                   type="button"
                                   size="sm"
@@ -1035,7 +1049,7 @@ function ItemList({
                               >
                                 Waive
                               </Button>
-                              {item.status === 'open' ? (
+                              {item.status === 'open' && item.source_template_item === null ? (
                                 <Button
                                   type="button"
                                   size="sm"
@@ -1096,7 +1110,7 @@ function ItemList({
                     ))}
                   </ul>
                 ) : null}
-                {mutable ? (
+                {canAttachDocuments ? (
                   <div className="mt-2">
                     <SelectNative
                       aria-label={`Attach document to ${item.title}`}

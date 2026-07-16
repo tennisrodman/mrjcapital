@@ -1,9 +1,12 @@
 import type { SelectOption } from '@/components/ui/select-native';
 import {
+  DEAL_PROFILE_LABELS,
+  DEAL_PURPOSE_LABELS,
   INVESTMENT_TYPE_LABELS,
   PROPERTY_TYPE_LABELS,
   RELATIONSHIP_RATING_LABELS,
   SOURCE_CHANNEL_LABELS,
+  SPONSOR_ENTITY_TYPE_LABELS,
 } from '@/lib/dealChoices';
 
 function toOptions(labels: Record<string, string>): SelectOption[] {
@@ -26,18 +29,9 @@ export const SOURCE_CHANNEL_OPTIONS = toOptions(SOURCE_CHANNEL_LABELS);
 export const PROPERTY_TYPE_OPTIONS = toOptions(PROPERTY_TYPE_LABELS);
 export const RELATIONSHIP_RATING_OPTIONS = toOptions(RELATIONSHIP_RATING_LABELS);
 
-export const DEAL_PURPOSE_OPTIONS: SelectOption[] = [
-  { value: 'acquisition', label: 'Acquisition' },
-  { value: 'refinance', label: 'Refinance' },
-  { value: 'construction', label: 'Construction' },
-  { value: 'recapitalization', label: 'Recapitalization' },
-];
+export const DEAL_PURPOSE_OPTIONS = toOptions(DEAL_PURPOSE_LABELS);
 
-export const DEAL_PROFILE_OPTIONS: SelectOption[] = [
-  { value: 'value_add', label: 'Value-add' },
-  { value: 'construction', label: 'Construction' },
-  { value: 'stabilized', label: 'Stabilized' },
-];
+export const DEAL_PROFILE_OPTIONS = toOptions(DEAL_PROFILE_LABELS);
 
 export const PROPERTY_ENVIRONMENTAL_STATUS_OPTIONS: SelectOption[] = [
   { value: 'none', label: 'None identified' },
@@ -63,13 +57,7 @@ export const BROKER_COMMISSION_TYPE_OPTIONS: SelectOption[] = [
   { value: 'referral_fee', label: 'Referral fee' },
 ];
 
-export const SPONSOR_ENTITY_TYPE_OPTIONS: SelectOption[] = [
-  { value: 'llc', label: 'LLC' },
-  { value: 'lp', label: 'LP' },
-  { value: 'corp', label: 'Corporation' },
-  { value: 'trust', label: 'Trust' },
-  { value: 'individual', label: 'Individual' },
-];
+export const SPONSOR_ENTITY_TYPE_OPTIONS = toOptions(SPONSOR_ENTITY_TYPE_LABELS);
 
 export const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS',

@@ -12,6 +12,14 @@ import type {
 
 const dealContactsQueryKey = (dealId: string) => ['deal-contacts', dealId] as const;
 
+function invalidateDealContactData(
+  queryClient: ReturnType<typeof useQueryClient>,
+  dealId: string,
+) {
+  void queryClient.invalidateQueries({ queryKey: dealContactsQueryKey(dealId) });
+  void queryClient.invalidateQueries({ queryKey: ['deal-activity', dealId] });
+}
+
 function ordered(links: DealContact[]): DealContact[] {
   return [...links].sort((a, b) => {
     const byRole = a.role.localeCompare(b.role);
@@ -29,7 +37,7 @@ function writeLinkToCache(
   queryClient.setQueryData<DealContact[]>(dealContactsQueryKey(dealId), (existing) =>
     ordered([...(existing ?? []).filter((link) => link.id !== incoming.id), incoming]),
   );
-  void queryClient.invalidateQueries({ queryKey: dealContactsQueryKey(dealId) });
+  invalidateDealContactData(queryClient, dealId);
 }
 
 export async function listDealContacts(dealId: string): Promise<DealContact[]> {
@@ -139,7 +147,7 @@ export function useUpdateContact(dealId: string) {
   return useMutation({
     mutationFn: ({ contactId, payload }: { contactId: string; payload: Partial<CreateContactPayload> }) =>
       updateContact(contactId, payload),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: dealContactsQueryKey(dealId) }),
+    onSuccess: () => invalidateDealContactData(queryClient, dealId),
   });
 }
 
@@ -158,6 +166,6 @@ export function useDeleteDealContact(dealId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteDealContact,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: dealContactsQueryKey(dealId) }),
+    onSuccess: () => invalidateDealContactData(queryClient, dealId),
   });
 }

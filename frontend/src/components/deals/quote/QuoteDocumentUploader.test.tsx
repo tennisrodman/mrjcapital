@@ -46,6 +46,19 @@ describe('QuoteDocumentUploader', () => {
     hooks.setAttachments.mutateAsync.mockResolvedValue({});
   });
 
+  it('renders as an opaque elevated dialog surface', () => {
+    render(
+      <QuoteDocumentUploader
+        dealId="deal-1"
+        quote={quote}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('dialog')).toHaveClass('bg-[var(--paper-elevated)]', 'shadow-2xl');
+  });
+
   it('attaches an eligible existing document', async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();

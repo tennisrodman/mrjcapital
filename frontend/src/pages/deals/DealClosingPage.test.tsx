@@ -78,6 +78,7 @@ const hooks = vi.hoisted(() => ({
   upsert: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false },
   patch: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false },
   download: { mutate: vi.fn(), isPending: false },
+  upload: { mutateAsync: vi.fn(), isPending: false },
 }));
 
 vi.mock('@tanstack/react-query', async () => {
@@ -97,6 +98,7 @@ vi.mock('@/lib/api/deals', () => ({
 
 vi.mock('@/lib/api/documents', () => ({
   useDownloadDocument: () => hooks.download,
+  useUploadDocument: () => hooks.upload,
 }));
 
 vi.mock('@/lib/api/closing', () => ({
@@ -156,6 +158,12 @@ describe('DealClosingPage', () => {
     hooks.ddItems.data = [];
     hooks.cpItems.data = [];
     hooks.documents.data = [];
+    hooks.upload.mutateAsync.mockResolvedValue({
+      id: 'doc-uploaded',
+      document_name: 'Closing evidence',
+      storage_status: 'ready',
+      category: 'legal',
+    });
     hooks.generate.mutateAsync.mockResolvedValue({
       id: 'g-new',
       version: 1,
@@ -204,6 +212,28 @@ describe('DealClosingPage', () => {
     renderPage();
     expect(screen.getByText(/history is read-only/i)).toBeVisible();
     expect(screen.queryByRole('button', { name: /Generate checklist|Regenerate/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Upload evidence/i })).toBeNull();
+  });
+
+  it('uploads a generic evidence document from the closing workspace', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: /Upload evidence/i }));
+    const file = new File(['closing evidence'], 'closing-evidence.pdf', {
+      type: 'application/pdf',
+    });
+    await user.upload(screen.getByLabelText(/^File$/i), file);
+    await user.selectOptions(screen.getByLabelText(/^Category$/i), 'legal');
+    await user.click(screen.getByRole('button', { name: /^Upload$/i }));
+
+    expect(hooks.upload.mutateAsync).toHaveBeenCalledWith({
+      file,
+      documentName: 'closing-evidence',
+      category: 'legal',
+      notes: '',
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('shows force supersede only for staff when a current generation exists', () => {
@@ -286,6 +316,45 @@ describe('DealClosingPage', () => {
     expect(screen.queryByRole('button', { name: 'Waive' })).toBeNull();
   });
 
+  it('offers removal only for custom pending checklist items', () => {
+    hooks.generations.data = [
+      {
+        id: 'g1',
+        version: 1,
+        is_current: true,
+        template_name: 'Debt acquisition',
+        generated_at: '2026-06-20T15:00:00.000Z',
+        supersede_reason: '',
+      },
+    ];
+    hooks.ddItems.data = [
+      {
+        id: 'dd-template',
+        generation: 'g1',
+        source_template_item: 'tmpl-item-1',
+        title: 'Generated title work',
+        description: '',
+        status: 'pending',
+        owner: null,
+        due_date: null,
+        documents: [],
+      },
+      {
+        id: 'dd-custom',
+        generation: 'g1',
+        source_template_item: null,
+        title: 'Custom title follow-up',
+        description: '',
+        status: 'pending',
+        owner: null,
+        due_date: null,
+        documents: [],
+      },
+    ];
+    renderPage();
+    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1);
+  });
+
   it('shows prior-generation items read-only when a superseded generation is selected', async () => {
     const user = userEvent.setup();
     hooks.generations.data = [
@@ -334,6 +403,7 @@ describe('DealClosingPage', () => {
     expect(screen.getByText('Prior title work')).toBeVisible();
     expect(screen.getByText(/viewing v1 \(read-only\)/i)).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Waive' })).toBeNull();
+    expect(screen.queryByLabelText(/Attach document to Prior title work/i)).toBeNull();
   });
 
   it('saves package notes and target close date together', async () => {

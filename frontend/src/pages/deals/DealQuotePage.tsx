@@ -32,6 +32,7 @@ import {
   useWithdrawQuote,
 } from '@/lib/api/quotes';
 import { apiErrorMessage } from '@/lib/apiError';
+import { expiryTimestamp, localCalendarDate } from '@/lib/quoteExpiry';
 import type { DealDocument } from '@/types/deal';
 import type {
   Quote,
@@ -104,7 +105,7 @@ function quoteToForm(quote: Quote | undefined): QuoteFormValues {
     min_dscr: quote.min_dscr ?? '',
     max_ltv: quote.max_ltv ?? '',
     min_debt_yield: quote.min_debt_yield ?? '',
-    expires_on: quote.expires_at?.slice(0, 10) ?? '',
+    expires_on: localCalendarDate(quote.expires_at),
     equity_commitment: quote.equity_commitment ?? '',
     ownership_pct: quote.ownership_pct ?? '',
     preferred_return_pct: quote.preferred_return_pct ?? '',
@@ -131,11 +132,6 @@ function extensionSummary(options: unknown[]): string {
     if (typeof summary === 'string') return summary;
   }
   return JSON.stringify(options);
-}
-
-function expiryTimestamp(value: string): string | null {
-  if (!value) return null;
-  return new Date(`${value}T23:59:59`).toISOString();
 }
 
 function formToPayload(values: QuoteFormValues): UpdateQuotePayload {

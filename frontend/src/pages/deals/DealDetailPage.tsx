@@ -2,23 +2,18 @@ import { useContext, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  ArrowRightLeft,
   Building2,
   CalendarDays,
   CheckCircle2,
-  ClipboardList,
   Clock,
   Download,
-  FileSignature,
   FileText,
   Globe2,
   Landmark,
-  Layers,
   Mail,
   MapPin,
   Pencil,
   Phone,
-  ScanSearch,
   Star,
   Trash2,
   Upload,
@@ -27,6 +22,7 @@ import {
 import { DocumentUploadDialog } from '@/components/deals/DocumentUploadDialog';
 import { DealContactsPanel } from '@/components/deals/DealContactsPanel';
 import { DealNotesPanel } from '@/components/deals/DealNotesPanel';
+import { DealWorkflowNavigation } from '@/components/deals/DealWorkflowNavigation';
 import { AuthContext } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,7 +35,13 @@ import { TransitionDialog } from '@/components/deals/TransitionDialog';
 import { StageHistoryPanel } from '@/components/deals/StageHistoryPanel';
 import { EmptyState, ErrorState, Spinner } from '@/components/deals/States';
 import { useClosingPackage } from '@/lib/api/closing';
-import { useDeal, useDealActivity, useDealDocuments, useDealStageHistory } from '@/lib/api/deals';
+import {
+  useAllowedTransitions,
+  useDeal,
+  useDealActivity,
+  useDealDocuments,
+  useDealStageHistory,
+} from '@/lib/api/deals';
 import {
   formatFileSize,
   useDeleteDocument,
@@ -50,11 +52,14 @@ import { useDealNotes } from '@/lib/api/notes';
 import { apiErrorMessage } from '@/lib/apiError';
 import {
   DOCUMENT_CATEGORY_LABELS,
+  DEAL_PROFILE_LABELS,
+  DEAL_PURPOSE_LABELS,
   INVESTMENT_CATEGORY_LABELS,
   PIPELINE_STATUS_LABELS,
   PROPERTY_TYPE_LABELS,
   RELATIONSHIP_RATING_LABELS,
   SOURCE_CHANNEL_LABELS,
+  SPONSOR_ENTITY_TYPE_LABELS,
   formatCurrency,
   formatDate,
   formatDateTime,
@@ -71,6 +76,7 @@ export default function DealDetailPage() {
   const stageHistoryQuery = useDealStageHistory(id);
   const activityQuery = useDealActivity(id, isStaff);
   const notesQuery = useDealNotes(id);
+  const allowedTransitionsQuery = useAllowedTransitions(id, true);
   const [openDialog, setOpenDialog] = useState<'pipeline' | 'syndication' | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
 
@@ -96,6 +102,8 @@ export default function DealDetailPage() {
       <BackLink />
       <DealHeader
         deal={deal}
+        allowedTransitions={allowedTransitionsQuery.data}
+        transitionsLoading={allowedTransitionsQuery.isLoading}
         onMoveStage={() => setOpenDialog('pipeline')}
         onSyndication={() => setOpenDialog('syndication')}
       />
@@ -173,10 +181,14 @@ function BackLink() {
 
 function DealHeader({
   deal,
+  allowedTransitions,
+  transitionsLoading,
   onMoveStage,
   onSyndication,
 }: {
   deal: Deal;
+  allowedTransitions: ReturnType<typeof useAllowedTransitions>['data'];
+  transitionsLoading: boolean;
   onMoveStage: () => void;
   onSyndication: () => void;
 }) {
@@ -215,42 +227,14 @@ function DealHeader({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={onMoveStage}>
-          <ArrowRightLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Move stage
-        </Button>
-        <Button type="button" variant="outline" onClick={onSyndication}>
-          <Layers className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Syndication
-        </Button>
-        <Button type="button" variant="outline" asChild>
-          <Link to={`/deals/${deal.id}/screening`}>
-            <ScanSearch className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Screening
-          </Link>
-        </Button>
-        <Button type="button" variant="outline" asChild>
-          <Link to={`/deals/${deal.id}/quotes`}>
-            <FileSignature className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Quotes
-          </Link>
-        </Button>
-        {showClosingLink ? (
-          <Button type="button" variant="outline" asChild>
-            <Link to={`/deals/${deal.id}/closing`}>
-              <ClipboardList className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Closing
-            </Link>
-          </Button>
-        ) : null}
-        <Button type="button" variant="outline" asChild>
-          <Link to={`/deals/${deal.id}/edit`}>
-            <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Edit deal
-          </Link>
-        </Button>
-      </div>
+      <DealWorkflowNavigation
+        deal={deal}
+        allowedTransitions={allowedTransitions}
+        transitionsLoading={transitionsLoading}
+        showClosingLink={showClosingLink}
+        onMoveStage={onMoveStage}
+        onSyndication={onSyndication}
+      />
     </header>
   );
 }
@@ -267,8 +251,8 @@ function OverviewPanel({ deal }: { deal: Deal }) {
         <Field label="Stage age">{deal.days_in_current_stage} days</Field>
         <Field label="Stage entered">{formatDateTime(deal.current_stage_entered_at)}</Field>
         <Field label="Created">{formatDate(deal.created_at)}</Field>
-        <Field label="Purpose">{deal.purpose || '—'}</Field>
-        <Field label="Profile">{deal.profile || '—'}</Field>
+        <Field label="Purpose">{deal.purpose ? DEAL_PURPOSE_LABELS[deal.purpose] : '—'}</Field>
+        <Field label="Profile">{deal.profile ? DEAL_PROFILE_LABELS[deal.profile] : '—'}</Field>
         <Field label="Estimated value">
           {typeof deal.estimated_value === 'string' ? formatCurrency(deal.estimated_value) : '—'}
         </Field>
@@ -539,7 +523,7 @@ function SponsorPanel({ deal }: { deal: Deal }) {
             <div className="min-w-0">
               <p className="font-medium text-[var(--ink)]">{sponsor.entity_name}</p>
               <p className="text-xs uppercase tracking-wide text-[var(--slate)]">
-                {sponsor.entity_type}
+                {SPONSOR_ENTITY_TYPE_LABELS[sponsor.entity_type]}
               </p>
             </div>
           </div>
