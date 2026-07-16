@@ -31,6 +31,22 @@ describe('deal notes mock API', () => {
     expect(after.results.some((n) => n.id === created.id)).toBe(false);
   });
 
+  it('edits an existing note body and updates its timestamp', async () => {
+    const dealId = await firstDealId();
+    const created = await mockApiRequest<DealNote>('api/deal-notes/', {
+      method: 'POST',
+      body: JSON.stringify({ deal: dealId, body: 'Initial note' }),
+    });
+
+    const updated = await mockApiRequest<DealNote>(`api/deal-notes/${created.id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ body: 'Updated note' }),
+    });
+
+    expect(updated.body).toBe('Updated note');
+    expect(updated.updated_at >= created.updated_at).toBe(true);
+  });
+
   it('rejects an empty note body', async () => {
     const dealId = await firstDealId();
     await expect(

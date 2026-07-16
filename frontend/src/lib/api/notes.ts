@@ -48,3 +48,18 @@ export function useDeleteNote(dealId: string) {
     },
   });
 }
+
+export function useUpdateNote(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ noteId, body }: { noteId: string; body: string }) =>
+      apiRequest<DealNote>(`api/deal-notes/${noteId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ body }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['deal-notes', dealId] });
+      void queryClient.invalidateQueries({ queryKey: ['deal-activity', dealId] });
+    },
+  });
+}

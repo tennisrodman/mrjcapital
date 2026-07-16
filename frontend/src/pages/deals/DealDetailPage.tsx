@@ -46,7 +46,7 @@ import {
   useDownloadDocument,
   useUpdateDocumentMetadata,
 } from '@/lib/api/documents';
-import { useDealNotes, useCreateNote, useDeleteNote } from '@/lib/api/notes';
+import { useDealNotes, useCreateNote, useDeleteNote, useUpdateNote } from '@/lib/api/notes';
 import { apiErrorMessage } from '@/lib/apiError';
 import {
   DOCUMENT_CATEGORY_LABELS,
@@ -738,8 +738,11 @@ function NotesPanel({
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const createNote = useCreateNote(dealId);
   const deleteNote = useDeleteNote(dealId);
+  const updateNote = useUpdateNote(dealId);
   const download = useDownloadDocument();
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingBody, setEditingBody] = useState('');
 
   const toggleDoc = (id: string) => {
     setSelectedDocs((current) =>
@@ -822,6 +825,11 @@ function NotesPanel({
           Couldn't delete note: {apiErrorMessage(deleteNote.error)}
         </p>
       ) : null}
+      {updateNote.isError ? (
+        <p className="mt-3 text-sm text-red-600">
+          Couldn't update note: {apiErrorMessage(updateNote.error)}
+        </p>
+      ) : null}
       {downloadError ? <p className="mt-3 text-sm text-red-600">{downloadError}</p> : null}
 
       {isLoading ? (
@@ -843,7 +851,17 @@ function NotesPanel({
               key={note.id}
               className="rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2"
             >
-              <p className="whitespace-pre-wrap text-sm text-[var(--ink)]">{note.body}</p>
+              {editingNoteId === note.id ? (
+                <textarea
+                  value={editingBody}
+                  onChange={(event) => setEditingBody(event.target.value)}
+                  rows={3}
+                  aria-label="Edit note"
+                  className="w-full resize-y rounded-sm border border-[var(--border)] bg-[var(--paper-elevated)] px-3 py-2 text-sm text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--brass)]"
+                />
+              ) : (
+                <p className="whitespace-pre-wrap text-sm text-[var(--ink)]">{note.body}</p>
+              )}
               <NoteAttachments
                 attachmentIds={note.attachments}
                 documents={documents}
@@ -863,18 +881,57 @@ function NotesPanel({
                   {note.author_username ?? 'Unknown'} · {formatDateTime(note.created_at)}
                   {note.updated_at !== note.created_at ? ' · edited' : ''}
                 </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (!window.confirm('Delete this note? This cannot be undone.')) return;
-                    deleteNote.mutate(note.id);
-                  }}
-                  disabled={deleteNote.isPending}
-                >
-                  Delete
-                </Button>
+                <span className="flex items-center gap-1">
+                  {editingNoteId === note.id ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditingNoteId(null)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!editingBody.trim() || updateNote.isPending}
+                        onClick={() =>
+                          updateNote.mutate(
+                            { noteId: note.id, body: editingBody.trim() },
+                            { onSuccess: () => setEditingNoteId(null) },
+                          )
+                        }
+                      >
+                        {updateNote.isPending ? 'Saving…' : 'Save'}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingNoteId(note.id);
+                        setEditingBody(note.body);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (!window.confirm('Delete this note? This cannot be undone.')) return;
+                      deleteNote.mutate(note.id);
+                    }}
+                    disabled={deleteNote.isPending}
+                  >
+                    Delete
+                  </Button>
+                </span>
               </div>
             </li>
           ))}
