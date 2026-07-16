@@ -161,8 +161,8 @@ describe('demo seed data', () => {
       county: 'Travis',
     });
     expect(dealSeed).toMatchObject({
-      purpose: 'Acquisition and light renovation',
-      profile: 'Value-add multifamily bridge',
+      purpose: 'acquisition',
+      profile: 'value_add',
       estimated_value: '19000000.00',
       renovation_budget: '1350000.00',
     });
@@ -170,8 +170,8 @@ describe('demo seed data', () => {
     expect(SPONSORS.find((sponsor) => sponsor.id === 'sp-larkspur')).toMatchObject(sponsorSeed!);
     expect(PROPERTIES.find((property) => property.id === 'pr-larkspur')).toMatchObject(propertySeed!);
     expect(buildInitialDeals().find((deal) => deal.id === 'deal-larkspur')).toMatchObject({
-      purpose: 'Acquisition and light renovation',
-      profile: 'Value-add multifamily bridge',
+      purpose: 'acquisition',
+      profile: 'value_add',
       estimated_value: '19000000.00',
       renovation_budget: '1350000.00',
       description: 'Bridge financing for the acquisition and renovation of a 184-unit garden-style community.',
@@ -224,5 +224,18 @@ describe('demo seed data', () => {
         expect(times[index], `${dealId} activity should be newest-first`).toBeLessThanOrEqual(times[index - 1]);
       }
     }
+  });
+
+  it('includes Closing templates and a generated example package', () => {
+    expect(demoSeed.dd_templates.length).toBeGreaterThanOrEqual(3);
+    expect(demoSeed.dd_templates.map((row) => row.key).sort()).toEqual([
+      'bridge_loan',
+      'debt_acquisition',
+      'equity_investment',
+    ]);
+    expect(demoSeed.closing_packages.some((row) => row.deal === 'deal-vista')).toBe(true);
+    expect(demoSeed.closing_generations.some((row) => row.is_current)).toBe(true);
+    expect(demoSeed.dd_checklist_items.length).toBeGreaterThan(0);
+    expect(demoSeed.conditions_precedent.length).toBeGreaterThan(0);
   });
 });

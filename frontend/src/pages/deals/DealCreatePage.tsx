@@ -13,9 +13,13 @@ import { ModeToggle } from '@/components/deals/form/ModeToggle';
 import { PropertiesSection } from '@/components/deals/form/PropertiesSection';
 import {
   INVESTMENT_TYPE_OPTIONS,
+  DEAL_PROFILE_OPTIONS,
+  DEAL_PURPOSE_OPTIONS,
+  BROKER_COMMISSION_TYPE_OPTIONS,
   RELATIONSHIP_RATING_OPTIONS,
   SOURCE_CHANNEL_OPTIONS,
   SPONSOR_ENTITY_TYPE_OPTIONS,
+  SPONSOR_CONNECTION_OPTIONS,
 } from '@/components/deals/form/options';
 import {
   createDealSchema,
@@ -32,7 +36,7 @@ import {
   type SponsorInput,
 } from '@/lib/api/deals';
 import { apiErrorMessage, fieldErrors } from '@/lib/apiError';
-import type { Sponsor, Property } from '@/types/deal';
+import type { Broker, Sponsor, Property } from '@/types/deal';
 
 const SERVER_FIELD_TO_FORM: Record<string, keyof CreateDealForm> = {
   name: 'name',
@@ -64,6 +68,7 @@ export default function DealCreatePage() {
 
   const sponsorMode = watch('sponsor_mode');
   const brokerMode = watch('broker_mode');
+  const dealProfile = watch('profile');
 
   const sponsorOptions = (sponsorsQuery.data ?? []).map((s) => ({ value: s.id, label: s.entity_name }));
   const brokerOptions = (brokersQuery.data ?? []).map((b) => ({
@@ -98,6 +103,21 @@ export default function DealCreatePage() {
         ...(values.sponsor_new.bankruptcy_history
           ? { bankruptcy_history: values.sponsor_new.bankruptcy_history === 'yes' }
           : {}),
+        ...(values.sponsor_new.business_address?.trim()
+          ? { business_address: values.sponsor_new.business_address.trim() }
+          : {}),
+        ...(values.sponsor_new.total_units_owned
+          ? { total_units_owned: Number(values.sponsor_new.total_units_owned) }
+          : {}),
+        ...(values.sponsor_new.total_sf_managed
+          ? { total_sf_managed: Number(values.sponsor_new.total_sf_managed) }
+          : {}),
+        ...(values.sponsor_new.assets_under_management?.trim()
+          ? { assets_under_management: values.sponsor_new.assets_under_management.trim() }
+          : {}),
+        ...(values.sponsor_new.connection_source
+          ? { connection_source: values.sponsor_new.connection_source as Sponsor['connection_source'] }
+          : {}),
       };
     }
 
@@ -109,6 +129,16 @@ export default function DealCreatePage() {
         contact_name: values.broker_new.contact_name ?? '',
         email: values.broker_new.email ?? '',
         ...(values.broker_new.phone?.trim() ? { phone: values.broker_new.phone.trim() } : {}),
+        ...(values.broker_new.default_commission_rate?.trim()
+          ? { default_commission_rate: values.broker_new.default_commission_rate.trim() }
+          : {}),
+        ...(values.broker_new.commission_type
+          ? { commission_type: values.broker_new.commission_type as Broker['commission_type'] }
+          : {}),
+        preferred_deal_types: (values.broker_new.preferred_deal_types ?? '')
+          .split(',').map((value) => value.trim()).filter(Boolean),
+        geographic_focus: (values.broker_new.geographic_focus ?? '')
+          .split(',').map((value) => value.trim()).filter(Boolean),
       };
     }
 
@@ -130,6 +160,17 @@ export default function DealCreatePage() {
             ...(row.year_renovated ? { year_renovated: Number(row.year_renovated) } : {}),
             ...(row.county?.trim() ? { county: row.county.trim() } : {}),
             ...(row.msa?.trim() ? { msa: row.msa.trim() } : {}),
+            ...(row.number_of_buildings ? { number_of_buildings: Number(row.number_of_buildings) } : {}),
+            ...(row.number_of_stories ? { number_of_stories: Number(row.number_of_stories) } : {}),
+            ...(row.parking_spaces ? { parking_spaces: Number(row.parking_spaces) } : {}),
+            ...(row.lot_size_acres?.trim() ? { lot_size_acres: row.lot_size_acres.trim() } : {}),
+            ...(row.flood_zone?.trim() ? { flood_zone: row.flood_zone.trim() } : {}),
+            ...(row.zoning_designation?.trim()
+              ? { zoning_designation: row.zoning_designation.trim() }
+              : {}),
+            ...(row.environmental_status
+              ? { environmental_status: row.environmental_status as Property['environmental_status'] }
+              : {}),
           },
     );
 
@@ -137,8 +178,12 @@ export default function DealCreatePage() {
       name: values.name,
       investment_type: values.investment_type as CreateDealPayload['investment_type'],
       requested_amount: values.requested_amount,
-      ...(values.purpose?.trim() ? { purpose: values.purpose.trim() } : {}),
-      ...(values.profile?.trim() ? { profile: values.profile.trim() } : {}),
+      ...(values.purpose?.trim()
+        ? { purpose: values.purpose.trim() as CreateDealPayload['purpose'] }
+        : {}),
+      ...(values.profile?.trim()
+        ? { profile: values.profile.trim() as CreateDealPayload['profile'] }
+        : {}),
       ...(values.estimated_value?.trim() ? { estimated_value: values.estimated_value.trim() } : {}),
       ...(values.renovation_budget?.trim()
         ? { renovation_budget: values.renovation_budget.trim() }
@@ -221,6 +266,9 @@ export default function DealCreatePage() {
                   aria-invalid={Boolean(errors.investment_type)}
                   {...register('investment_type')}
                 />
+                <p className="mt-1 text-xs text-[var(--slate)]">
+                  Debt products are active. Other structures remain visible as planned scope.
+                </p>
               </FormField>
               <FormField label="Requested amount" required error={errors.requested_amount?.message}>
                 <div className="relative">
@@ -252,6 +300,7 @@ export default function DealCreatePage() {
                   />
                 </div>
               </FormField>
+              {dealProfile === 'value_add' || dealProfile === 'construction' ? (
               <FormField label="Renovation budget" hint="Optional" error={errors.renovation_budget?.message}>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--slate)]">
@@ -267,11 +316,12 @@ export default function DealCreatePage() {
                   />
                 </div>
               </FormField>
+              ) : null}
               <FormField label="Purpose" hint="Optional">
-                <Input placeholder="e.g. Acquisition and renovation" {...register('purpose')} />
+                <SelectNative placeholder="Select purpose" options={DEAL_PURPOSE_OPTIONS} {...register('purpose')} />
               </FormField>
               <FormField label="Profile" hint="Optional">
-                <Input placeholder="e.g. Value-add multifamily" {...register('profile')} />
+                <SelectNative placeholder="Select profile" options={DEAL_PROFILE_OPTIONS} {...register('profile')} />
               </FormField>
               <FormField label="Source channel" required error={errors.source_channel?.message}>
                 <SelectNative
@@ -386,6 +436,25 @@ export default function DealCreatePage() {
                     {...register('sponsor_new.bankruptcy_history')}
                   />
                 </FormField>
+                <FormField label="Business address" hint="Optional" className="sm:col-span-2">
+                  <Textarea rows={2} {...register('sponsor_new.business_address')} />
+                </FormField>
+                <FormField label="Units currently owned" hint="Optional" error={errors.sponsor_new?.total_units_owned?.message}>
+                  <Input type="number" min="0" step="1" {...register('sponsor_new.total_units_owned')} />
+                </FormField>
+                <FormField label="Square feet managed" hint="Optional" error={errors.sponsor_new?.total_sf_managed?.message}>
+                  <Input type="number" min="0" step="1" {...register('sponsor_new.total_sf_managed')} />
+                </FormField>
+                <FormField label="Assets under management" hint="Optional" error={errors.sponsor_new?.assets_under_management?.message}>
+                  <Input inputMode="decimal" {...register('sponsor_new.assets_under_management')} />
+                </FormField>
+                <FormField label="How we connected" hint="Optional">
+                  <SelectNative
+                    placeholder="Unknown"
+                    options={SPONSOR_CONNECTION_OPTIONS}
+                    {...register('sponsor_new.connection_source')}
+                  />
+                </FormField>
               </div>
             )}
           </Panel>
@@ -433,6 +502,22 @@ export default function DealCreatePage() {
                 </FormField>
                 <FormField label="Phone" hint="Optional">
                   <Input {...register('broker_new.phone')} />
+                </FormField>
+                <FormField label="Default commission rate" hint="Optional" error={errors.broker_new?.default_commission_rate?.message}>
+                  <Input inputMode="decimal" {...register('broker_new.default_commission_rate')} />
+                </FormField>
+                <FormField label="Commission type" hint="Optional">
+                  <SelectNative
+                    placeholder="Unspecified"
+                    options={BROKER_COMMISSION_TYPE_OPTIONS}
+                    {...register('broker_new.commission_type')}
+                  />
+                </FormField>
+                <FormField label="Preferred deal types" hint="Comma-separated · optional">
+                  <Input {...register('broker_new.preferred_deal_types')} />
+                </FormField>
+                <FormField label="Geographic focus" hint="Comma-separated · optional">
+                  <Input {...register('broker_new.geographic_focus')} />
                 </FormField>
               </div>
             )}

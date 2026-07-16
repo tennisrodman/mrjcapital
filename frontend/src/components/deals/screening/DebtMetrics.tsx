@@ -20,7 +20,13 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
 }
 
 /** Live, local outputs. The server remains the source of truth when a draft is saved. */
-export function DebtMetrics({ metrics }: { metrics: DebtScreeningOutputs }) {
+export function DebtMetrics({
+  metrics,
+  isComplete = true,
+}: {
+  metrics: DebtScreeningOutputs;
+  isComplete?: boolean;
+}) {
   const hasCalculatedMetric = [
     metrics.ltv_as_is,
     metrics.ltv_stabilized,
@@ -28,7 +34,11 @@ export function DebtMetrics({ metrics }: { metrics: DebtScreeningOutputs }) {
     metrics.dscr,
     metrics.debt_yield,
   ].some((value) => value !== null);
-  const score = hasCalculatedMetric ? `${metrics.quick_score} / 100` : 'Needs more inputs';
+  const score = !isComplete
+    ? 'Incomplete'
+    : hasCalculatedMetric
+      ? `${metrics.quick_score} / 100`
+      : 'Needs more inputs';
 
   return (
     <section aria-labelledby="calculated-debt-metrics" className="space-y-3">

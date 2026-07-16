@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Pencil, Plus, Star, X } from 'lucide-react';
 import { Panel, Field as PanelField } from '@/components/deals/Panel';
 import { PropertyFactsDialog } from '@/components/deals/PropertyFactsDialog';
 import { SponsorFactsDialog } from '@/components/deals/SponsorFactsDialog';
+import { BrokerFactsDialog } from '@/components/deals/BrokerFactsDialog';
+import { NewPropertyDialog } from '@/components/deals/NewPropertyDialog';
 import { FormField } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { SelectNative } from '@/components/ui/select-native';
@@ -16,18 +18,44 @@ import {
   type EditDealForm,
 } from '@/components/deals/form/editPayload';
 import { isOptionalCurrency } from '@/components/deals/form/schema';
-import { INVESTMENT_TYPE_OPTIONS, SOURCE_CHANNEL_OPTIONS } from '@/components/deals/form/options';
-import { useDeal, useFunds, useProperties, useUpdateDeal } from '@/lib/api/deals';
+import {
+  DEAL_PROFILE_OPTIONS,
+  DEAL_PURPOSE_OPTIONS,
+  INVESTMENT_TYPE_OPTIONS,
+  SOURCE_CHANNEL_OPTIONS,
+} from '@/components/deals/form/options';
+import {
+  useBrokers,
+  useDeal,
+  useDealAssignees,
+  useFunds,
+  useProperties,
+  useSponsors,
+  useUpdateDeal,
+} from '@/lib/api/deals';
 import { apiErrorMessage, fieldErrors } from '@/lib/apiError';
 import { PROPERTY_TYPE_LABELS } from '@/lib/dealChoices';
 import type { Property } from '@/types/deal';
+import { AuthContext } from '@/context/AuthContext';
+
+const DEPOSIT_STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'received', label: 'Received' },
+  { value: 'applied_to_closing', label: 'Applied to closing' },
+  { value: 'refunded', label: 'Refunded' },
+];
 
 export default function DealEditPage() {
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const isStaff = Boolean(user?.is_staff);
   const dealQuery = useDeal(id);
+  const sponsorsQuery = useSponsors();
+  const brokersQuery = useBrokers();
   const fundsQuery = useFunds();
   const propertiesQuery = useProperties();
+  const assigneesQuery = useDealAssignees(isStaff);
   const updateDeal = useUpdateDeal(id);
 
   const { register, handleSubmit, reset, formState } = useForm<EditDealForm>();
@@ -37,6 +65,8 @@ export default function DealEditPage() {
   const [propertyError, setPropertyError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [sponsorFactsOpen, setSponsorFactsOpen] = useState(false);
+  const [brokerFactsOpen, setBrokerFactsOpen] = useState(false);
+  const [newPropertyOpen, setNewPropertyOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const initializedDealId = useRef<string | null>(null);
 
@@ -56,7 +86,17 @@ export default function DealEditPage() {
       description: deal.description,
       source_channel: deal.source_channel,
       source_date: deal.source_date,
+      sponsor_id: deal.sponsor ?? '',
+      broker_id: deal.broker ?? '',
       fund_id: deal.fund ?? '',
+      assigned_analyst_id: deal.assigned_analyst != null ? String(deal.assigned_analyst) : '',
+      deposit_status: deal.deposit_status ?? '',
+      deposit_received_date: deal.deposit_received_date ?? '',
+      deposit_account_label: deal.deposit_account_label ?? '',
+      deposit_refund_conditions: deal.deposit_refund_conditions ?? '',
+      exclusivity_granted: deal.exclusivity_granted == null ? '' : deal.exclusivity_granted ? 'yes' : 'no',
+      exclusivity_expiry_date: deal.exclusivity_expiry_date ?? '',
+      key_negotiation_changes: deal.key_negotiation_changes ?? '',
     });
     const nextPropertyIds = deal.properties.map((entry) => entry.property.id);
     setPropertyIds(nextPropertyIds);
@@ -79,7 +119,12 @@ export default function DealEditPage() {
   const selected = propertyIds.map((pid) => propertyById.get(pid)).filter(Boolean) as Property[];
   const available = allProperties.filter((p) => !propertyIds.includes(p.id));
   const fundOptions = (fundsQuery.data ?? []).map((f) => ({ value: f.id, label: f.name }));
-  const fundLocked = Boolean(deal.fund);
+  const sponsorOptions = (sponsorsQuery.data ?? []).map((sponsor) => ({ value: sponsor.id, label: sponsor.entity_name }));
+  const brokerOptions = (brokersQuery.data ?? []).map((broker) => ({ value: broker.id, label: `${broker.company_name} — ${broker.contact_name}` }));
+  const assigneeOptions = (assigneesQuery.data ?? []).map((assignee) => ({ value: String(assignee.id), label: assignee.username }));
+  const sponsorEditable = isStaff || !deal.sponsor;
+  const brokerEditable = isStaff || !deal.broker;
+  const fundEditable = isStaff || !deal.fund;
 
   const addProperty = (pid: string) => {
     if (pid) {
@@ -102,7 +147,10 @@ export default function DealEditPage() {
       return;
     }
     const payload = buildDealUpdatePayload(values, formState.dirtyFields, {
-      fundLocked,
+      sponsorEditable,
+      brokerEditable,
+      fundEditable,
+      analystEditable: isStaff,
       propertiesChanged,
       propertyIds,
     });
@@ -126,8 +174,8 @@ export default function DealEditPage() {
             {deal.name}
           </h1>
           <p className="mt-2 max-w-xl text-[var(--slate)]">
-            Update terms and collateral. Sponsor, broker, and fund are fixed once assigned; pipeline
-            stage moves through the transition controls on the deal page.
+            Update terms, collateral, relationships, assignment, and negotiation details. Staff
+            corrections are audited; pipeline stage moves through the controls on the deal page.
           </p>
         </div>
       </header>
@@ -205,10 +253,10 @@ export default function DealEditPage() {
               </div>
             </FormField>
             <FormField label="Purpose" hint="Optional">
-              <Input {...register('purpose')} />
+              <SelectNative placeholder="Select purpose" options={DEAL_PURPOSE_OPTIONS} {...register('purpose')} />
             </FormField>
             <FormField label="Profile" hint="Optional">
-              <Input {...register('profile')} />
+              <SelectNative placeholder="Select profile" options={DEAL_PROFILE_OPTIONS} {...register('profile')} />
             </FormField>
             <FormField label="Source channel" required error={errors.source_channel?.message}>
               <SelectNative
@@ -220,13 +268,13 @@ export default function DealEditPage() {
             <FormField label="Source date" required error={errors.source_date?.message}>
               <Input type="date" {...register('source_date', { required: 'Select a source date' })} />
             </FormField>
-            <FormField label="Fund" hint={fundLocked ? 'Fixed once assigned' : 'Optional'} className="sm:col-span-2">
+            <FormField label="Fund" hint={fundEditable ? 'Optional' : 'Staff can correct an existing assignment'} className="sm:col-span-2">
               <SelectNative
                 placeholder="Unassigned"
                 options={fundOptions}
                 {...register('fund_id')}
-                disabled={fundLocked}
-                className={fundLocked ? 'opacity-70' : undefined}
+                disabled={!fundEditable}
+                className={!fundEditable ? 'opacity-70' : undefined}
               />
             </FormField>
             <FormField label="Description" hint="Optional" className="sm:col-span-2">
@@ -309,27 +357,77 @@ export default function DealEditPage() {
             <span className="hidden h-9 items-center text-[var(--slate)] sm:inline-flex">
               <Plus className="h-4 w-4" strokeWidth={1.75} />
             </span>
+            <Button type="button" variant="outline" onClick={() => setNewPropertyOpen(true)}>
+              Register new
+            </Button>
           </div>
           {propertyError ? <p className="mt-2 text-xs text-red-600">{propertyError}</p> : null}
         </Panel>
 
         <Panel
           title="Relationships"
-          action={deal.sponsor_detail ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => setSponsorFactsOpen(true)}>
-              <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Edit sponsor facts
-            </Button>
+          action={deal.sponsor_detail || deal.broker_detail ? (
+            <div className="flex flex-wrap gap-2">
+              {deal.sponsor_detail ? (
+                <Button type="button" variant="outline" size="sm" onClick={() => setSponsorFactsOpen(true)}>
+                  <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Edit sponsor
+                </Button>
+              ) : null}
+              {deal.broker_detail ? (
+                <Button type="button" variant="outline" size="sm" onClick={() => setBrokerFactsOpen(true)}>
+                  <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Edit broker
+                </Button>
+              ) : null}
+            </div>
           ) : undefined}
         >
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3">
-            <PanelField label="Sponsor">{deal.sponsor_detail?.entity_name ?? '—'}</PanelField>
-            <PanelField label="Broker">{deal.broker_detail?.company_name ?? 'None'}</PanelField>
-            <PanelField label="Analyst">{deal.assigned_analyst_detail?.username ?? 'Unassigned'}</PanelField>
-          </dl>
-          <p className="mt-3 text-xs text-[var(--slate)]">
-            Sponsor, broker, and fund can’t be reassigned after origination.
-          </p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <FormField label="Sponsor" hint={sponsorEditable ? 'Select or correct' : 'Staff can change this'}>
+              <SelectNative placeholder="Unassigned" options={sponsorOptions} disabled={!sponsorEditable} {...register('sponsor_id')} />
+            </FormField>
+            <FormField label="Broker" hint={brokerEditable ? 'Select or correct' : 'Staff can change this'}>
+              <SelectNative placeholder="None" options={brokerOptions} disabled={!brokerEditable} {...register('broker_id')} />
+            </FormField>
+            {isStaff ? (
+              <FormField label="Assigned analyst">
+                <SelectNative placeholder="Unassigned" options={assigneeOptions} {...register('assigned_analyst_id')} />
+              </FormField>
+            ) : (
+              <PanelField label="Analyst">{deal.assigned_analyst_detail?.username ?? 'Unassigned'}</PanelField>
+            )}
+          </div>
+        </Panel>
+
+        <Panel title="Negotiation details">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="Deposit status" hint="Optional">
+              <SelectNative placeholder="Not tracked" options={DEPOSIT_STATUS_OPTIONS} {...register('deposit_status')} />
+            </FormField>
+            <FormField label="Deposit received date" hint="Optional">
+              <Input type="date" {...register('deposit_received_date')} />
+            </FormField>
+            <FormField label="Deposit account" hint="Account label only · optional">
+              <Input placeholder="e.g. Operating escrow" {...register('deposit_account_label')} />
+            </FormField>
+            <FormField label="Exclusivity" hint="Optional">
+              <SelectNative
+                placeholder="Not specified"
+                options={[{ value: 'yes', label: 'Granted' }, { value: 'no', label: 'Not granted' }]}
+                {...register('exclusivity_granted')}
+              />
+            </FormField>
+            <FormField label="Exclusivity expiry" hint="Optional">
+              <Input type="date" {...register('exclusivity_expiry_date')} />
+            </FormField>
+            <FormField label="Deposit refund conditions" hint="Optional" className="sm:col-span-2">
+              <Textarea rows={2} {...register('deposit_refund_conditions')} />
+            </FormField>
+            <FormField label="Material negotiation changes" hint="Optional" className="sm:col-span-2">
+              <Textarea rows={3} {...register('key_negotiation_changes')} />
+            </FormField>
+          </div>
         </Panel>
       </div>
 
@@ -346,13 +444,30 @@ export default function DealEditPage() {
       {deal.sponsor_detail ? (
         <SponsorFactsDialog
           sponsor={deal.sponsor_detail}
+          canEditIdentity={isStaff}
           open={sponsorFactsOpen}
           onOpenChange={setSponsorFactsOpen}
         />
       ) : null}
+      {deal.broker_detail ? (
+        <BrokerFactsDialog
+          broker={deal.broker_detail}
+          open={brokerFactsOpen}
+          onOpenChange={setBrokerFactsOpen}
+        />
+      ) : null}
+      <NewPropertyDialog
+        open={newPropertyOpen}
+        onOpenChange={setNewPropertyOpen}
+        onCreated={(property) => {
+          setPropertyIds((current) => [...current, property.id]);
+          setPropertyError(null);
+        }}
+      />
       {editingProperty ? (
         <PropertyFactsDialog
           property={editingProperty}
+          canEditIdentity={isStaff}
           open
           onOpenChange={(open) => {
             if (!open) setEditingProperty(null);

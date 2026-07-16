@@ -39,7 +39,7 @@ const DataModeToggle = ({ className, surface = 'dark' }: DataModeToggleProps) =>
             onClick={() => setDataMode(mode.value)}
             className={cn(
               'min-w-12 rounded-sm px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brass)]/50',
-              active && demo && 'bg-[var(--brass)] text-white shadow-sm',
+              active && demo && 'bg-[var(--brass)] text-[var(--ink)] shadow-sm',
               active && !demo && (isLight ? 'bg-[var(--ink)] text-[var(--paper)] shadow-sm' : 'bg-white/15 text-[var(--header-fg)]'),
               !active && isLight && 'text-[var(--slate)] hover:bg-[var(--paper)] hover:text-[var(--ink)]',
               !active && !isLight && 'text-[var(--header-muted)] hover:bg-white/8 hover:text-[var(--header-fg)]',

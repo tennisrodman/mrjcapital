@@ -11,6 +11,7 @@ import {
   assessmentMetrics,
   assessmentToFormValues,
   calculateDebtMetrics,
+  screeningIsComplete,
   screeningPayloadFromForm,
 } from '@/components/deals/screening/calculations';
 import { ErrorState, Spinner } from '@/components/deals/States';
@@ -38,10 +39,17 @@ const SERVER_FIELD_TO_FORM: Record<string, keyof ScreeningAssessmentFormValues> 
   stabilized_value: 'stabilized_value',
   project_cost: 'project_cost',
   noi: 'noi',
+  stabilized_noi: 'stabilized_noi',
   annual_debt_service: 'annual_debt_service',
   occupancy: 'occupancy',
   proposed_rate: 'proposed_rate',
   proposed_term_months: 'proposed_term_months',
+  current_average_rent: 'current_average_rent',
+  market_rent: 'market_rent',
+  condition_rating: 'condition_rating',
+  unit_mix: 'unit_mix',
+  exit_strategy: 'exit_strategy',
+  exit_cap_rate: 'exit_cap_rate',
   equity_summary: 'equity_summary',
   equity_target_irr: 'equity_target_irr',
   equity_target_multiple: 'equity_target_multiple',
@@ -72,10 +80,17 @@ function updatePayload(values: ScreeningAssessmentFormValues): UpdateScreeningAs
     stabilized_value: payload.stabilized_value,
     project_cost: payload.project_cost,
     noi: payload.noi,
+    stabilized_noi: payload.stabilized_noi,
     annual_debt_service: payload.annual_debt_service,
     occupancy: payload.occupancy,
     proposed_rate: payload.proposed_rate,
     proposed_term_months: payload.proposed_term_months,
+    current_average_rent: payload.current_average_rent,
+    market_rent: payload.market_rent,
+    condition_rating: payload.condition_rating,
+    unit_mix: payload.unit_mix,
+    exit_strategy: payload.exit_strategy,
+    exit_cap_rate: payload.exit_cap_rate,
     equity_summary: payload.equity_summary,
     equity_target_irr: payload.equity_target_irr,
     equity_target_multiple: payload.equity_target_multiple,
@@ -132,17 +147,19 @@ export function DealScreeningWorkspace({ dealId }: { dealId: string }) {
     );
   }
 
-  return <ScreeningWorkspaceContent dealId={dealId} dealName={dealQuery.data.name} requestedAmount={dealQuery.data.requested_amount} assessments={assessmentsQuery.data ?? []} />;
+  return <ScreeningWorkspaceContent dealId={dealId} dealName={dealQuery.data.name} pipelineStatus={dealQuery.data.pipeline_status} requestedAmount={dealQuery.data.requested_amount} assessments={assessmentsQuery.data ?? []} />;
 }
 
 function ScreeningWorkspaceContent({
   dealId,
   dealName,
+  pipelineStatus,
   requestedAmount,
   assessments,
 }: {
   dealId: string;
   dealName: string;
+  pipelineStatus: string;
   requestedAmount: string;
   assessments: ScreeningAssessment[];
 }) {
@@ -169,7 +186,10 @@ function ScreeningWorkspaceContent({
   const draftPayload = useMemo(() => screeningPayloadFromForm(values, dealId), [dealId, values]);
   const calculatedMetrics = useMemo(() => calculateDebtMetrics(draftPayload), [draftPayload]);
   const lockedFinal = current?.status === 'finalized' && !creatingRevision;
+  const stageEditable = pipelineStatus === 'sourced' || pipelineStatus === 'screening';
+  const readOnly = lockedFinal || !stageEditable;
   const metrics = lockedFinal && current ? assessmentMetrics(current) : calculatedMetrics;
+  const isComplete = lockedFinal && current ? current.is_complete : screeningIsComplete(draftPayload);
   const isSaving = createAssessment.isPending || updateAssessment.isPending;
   const creatingNew = !current || creatingRevision;
 
@@ -187,6 +207,7 @@ function ScreeningWorkspaceContent({
   };
 
   const onSubmit = (values: ScreeningAssessmentFormValues) => {
+    if (!stageEditable) return;
     setBanner(null);
     setNotice(null);
     if (creatingNew) {
@@ -211,7 +232,7 @@ function ScreeningWorkspaceContent({
   };
 
   const startRevision = () => {
-    if (!current) return;
+    if (!current || !stageEditable) return;
     setCreatingRevision(true);
     setBanner(null);
     setNotice('New draft started from the finalized assessment.');
@@ -219,10 +240,14 @@ function ScreeningWorkspaceContent({
   };
 
   const finalize = () => {
-    if (!current || current.status === 'finalized' || formState.isDirty) return;
+    if (!current || current.status === 'finalized' || formState.isDirty || !stageEditable) return;
     if (!current.decision) {
       setError('decision', { message: 'Choose advance, refer, or decline before finalizing.' });
       setBanner('A final screening decision is required.');
+      return;
+    }
+    if (current.decision === 'advance' && !current.is_complete) {
+      setBanner(`Complete the required screening inputs before advancing: ${current.missing_fields.join(', ')}.`);
       return;
     }
     setBanner(null);
@@ -275,7 +300,7 @@ function ScreeningWorkspaceContent({
           <Panel
             title="Debt underwriting inputs"
             action={
-              lockedFinal ? (
+              lockedFinal && stageEditable ? (
                 <Button type="button" variant="outline" size="sm" onClick={startRevision}>
                   <FilePlus2 className="h-3.5 w-3.5" strokeWidth={1.75} />
                   New draft
@@ -288,18 +313,23 @@ function ScreeningWorkspaceContent({
                 This assessment is finalized and read-only. Create a new draft to preserve the version history.
               </p>
             ) : null}
-            <DebtInputFields register={register} errors={errors} disabled={lockedFinal || isSaving} />
+            {!stageEditable ? (
+              <p className="mb-4 rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink-muted)]">
+                Screening is read-only after the deal leaves the screening stage.
+              </p>
+            ) : null}
+            <DebtInputFields register={register} errors={errors} disabled={readOnly || isSaving} />
           </Panel>
 
           <Panel title="Debt screen">
-            <DebtMetrics metrics={metrics} />
+            <DebtMetrics metrics={metrics} isComplete={isComplete} />
           </Panel>
 
           <Panel title="Decision and context">
-            <DecisionFields register={register} errors={errors} disabled={lockedFinal || isSaving} />
+            <DecisionFields register={register} errors={errors} disabled={readOnly || isSaving} />
           </Panel>
 
-          {!lockedFinal ? (
+          {!readOnly ? (
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={isSaving}>
                 <Save className="h-3.5 w-3.5" strokeWidth={1.75} />

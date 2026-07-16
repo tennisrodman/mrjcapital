@@ -181,6 +181,17 @@ class DealSpineApiTests(APITestCase):
             decision=ScreeningAssessment.Decision.ADVANCE,
             reviewer=self.user,
             finalized_at=timezone.now(),
+            loan_amount='2000000.00',
+            as_is_value='3000000.00',
+            project_cost='2500000.00',
+            noi='250000.00',
+            stabilized_noi='300000.00',
+            annual_debt_service='180000.00',
+            occupancy='90.00',
+            proposed_rate='8.0000',
+            proposed_term_months=24,
+            exit_strategy='Refinance after stabilization.',
+            exit_cap_rate='5.5000',
         )
 
     def _upload_intent(self, deal, name, category, file_type='pdf', visibility_roles=None,
@@ -1723,8 +1734,8 @@ class DealSpineApiTests(APITestCase):
 
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data['active_deals'], 1)
-        self.assertEqual(str(resp.data['pipeline_value']), '2500000')
-        self.assertEqual(str(resp.data['gross_pipeline_value']), '3000000')
+        self.assertEqual(resp.data['pipeline_value'], '2500000.00')
+        self.assertEqual(resp.data['gross_pipeline_value'], '3000000.00')
         self.assertEqual(
             {row['pipeline_status']: row['count'] for row in resp.data['by_pipeline_status']},
             {'dead': 1, 'sourced': 1},

@@ -11,6 +11,12 @@ SPONSOR_PROMOTED_FACT_FIELDS = frozenset({
     'years_experience',
     'completed_projects',
     'bankruptcy_history',
+    'business_address',
+    'total_units_owned',
+    'total_sf_managed',
+    'assets_under_management',
+    'track_record',
+    'connection_source',
 })
 PROPERTY_PROMOTED_FACT_FIELDS = frozenset({
     'subtype',
@@ -19,6 +25,14 @@ PROPERTY_PROMOTED_FACT_FIELDS = frozenset({
     'year_built',
     'year_renovated',
     'county',
+    'msa',
+    'number_of_buildings',
+    'number_of_stories',
+    'parking_spaces',
+    'lot_size_acres',
+    'flood_zone',
+    'zoning_designation',
+    'environmental_status',
 })
 
 

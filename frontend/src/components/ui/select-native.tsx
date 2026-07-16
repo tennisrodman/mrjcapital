@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 export interface SelectOption {
   value: string;
   label: string;
+  disabled?: boolean;
 }
 
 interface SelectNativeProps extends SelectHTMLAttributes<HTMLSelectElement> {
@@ -38,7 +39,7 @@ export const SelectNative = forwardRef<HTMLSelectElement, SelectNativeProps>(
         >
           {placeholder ? <option value="">{placeholder}</option> : null}
           {options.map((option) => (
-            <option key={option.value} value={option.value}>
+            <option key={option.value} value={option.value} disabled={option.disabled}>
               {option.label}
             </option>
           ))}

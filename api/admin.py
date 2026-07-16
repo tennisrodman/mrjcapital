@@ -4,7 +4,13 @@ from django.conf import settings
 from api.models import (
     ActivityLog,
     Broker,
+    ClosingChecklistGeneration,
+    ClosingPackage,
+    ConditionPrecedent,
     Contact,
+    DDChecklistItem,
+    DDTemplate,
+    DDTemplateItem,
     Deal,
     DealContact,
     DealNote,
@@ -230,3 +236,70 @@ class DealStageEventAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class DDTemplateItemInline(admin.TabularInline):
+    model = DDTemplateItem
+    extra = 0
+    can_delete = False
+    readonly_fields = [
+        'sort_order',
+        'kind',
+        'title',
+        'description',
+        'default_days_before_target_close',
+    ]
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DDTemplate)
+class DDTemplateAdmin(admin.ModelAdmin):
+    list_display = ['key', 'name', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['key', 'name']
+    readonly_fields = ['key', 'name', 'description']
+    inlines = [DDTemplateItemInline]
+    fields = ['key', 'name', 'description', 'is_active']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class ReadOnlyClosingAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ClosingPackage)
+class ClosingPackageAdmin(ReadOnlyClosingAdmin):
+    list_display = ['deal', 'target_close_date', 'updated_at']
+    search_fields = ['deal__name']
+
+
+@admin.register(ClosingChecklistGeneration)
+class ClosingChecklistGenerationAdmin(ReadOnlyClosingAdmin):
+    list_display = ['package', 'version', 'template_key', 'is_current', 'generated_at']
+    list_filter = ['is_current']
+
+
+@admin.register(DDChecklistItem)
+class DDChecklistItemAdmin(ReadOnlyClosingAdmin):
+    list_display = ['title', 'status', 'due_date', 'generation']
+    list_filter = ['status']
+
+
+@admin.register(ConditionPrecedent)
+class ConditionPrecedentAdmin(ReadOnlyClosingAdmin):
+    list_display = ['title', 'status', 'due_date', 'generation']
+    list_filter = ['status']

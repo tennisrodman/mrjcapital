@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -35,6 +36,19 @@ from api.services.quotes import (
 
 
 User = get_user_model()
+
+
+def make_sendable(quote):
+    return update_draft_quote(
+        quote,
+        loan_amount=quote.loan_amount or Decimal('1000000.00'),
+        rate_type=Quote.RateType.FIXED,
+        interest_rate=quote.interest_rate or Decimal('8.0000'),
+        term_months=quote.term_months or 24,
+        amortization_type=Quote.AmortizationType.INTEREST_ONLY,
+        recourse_type=Quote.RecourseType.LIMITED,
+        expires_at=timezone.now() + timedelta(days=30),
+    )
 
 
 class QuoteModelSmokeTests(APITestCase):
@@ -88,6 +102,7 @@ class QuoteServiceTests(APITestCase):
             content_type='application/pdf',
             file_size_bytes=32,
             storage_status=DocumentStorageStatus.READY,
+            visibility_roles=['internal'],
             uploaded_by=self.user,
         )
 
@@ -116,9 +131,17 @@ class QuoteServiceTests(APITestCase):
         with self.assertRaises(ValidationError):
             create_next_quote(deal=self.deal, created_by=self.user)
 
+    def test_incomplete_quote_cannot_be_sent(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.user, seed_from_screening=False)
+        with self.assertRaises(ValidationError) as caught:
+            send_quote(quote)
+        self.assertIn('loan_amount', caught.exception.message_dict)
+        quote.refresh_from_db()
+        self.assertEqual(quote.status, Quote.Status.DRAFT)
+
     def test_send_counter_execute_and_attachment_rules(self):
         quote = create_next_quote(deal=self.deal, created_by=self.user)
-        sent = send_quote(quote)
+        sent = send_quote(make_sendable(quote))
         self.assertEqual(sent.status, Quote.Status.SENT)
         self.assertIsNotNone(sent.sent_at)
 
@@ -140,7 +163,7 @@ class QuoteServiceTests(APITestCase):
 
     def test_counter_from_sent_and_from_countered_requires_current(self):
         quote = create_next_quote(deal=self.deal, created_by=self.user)
-        sent = send_quote(quote)
+        sent = send_quote(make_sendable(quote))
         v2 = counter_quote(quote=sent, created_by=self.user)
         self.assertEqual(v2.version, 2)
         self.assertTrue(v2.is_counter)
@@ -149,7 +172,7 @@ class QuoteServiceTests(APITestCase):
         with self.assertRaises(ValidationError):
             execute_quote(sent)
 
-        v2_sent = send_quote(v2)
+        v2_sent = send_quote(make_sendable(v2))
         self.assertEqual(v2_sent.status, Quote.Status.COUNTERED)
         v3 = counter_quote(quote=v2_sent, created_by=self.user)
         self.assertEqual(v3.version, 3)
@@ -195,7 +218,16 @@ class QuoteApiTests(APITestCase):
 
         patch = self.client.patch(
             f'/api/quotes/{quote_id}/',
-            {'interest_rate': '7.5000', 'origination_fee_pct': '1.0000'},
+            {
+                'loan_amount': '1000000.00',
+                'rate_type': 'fixed',
+                'interest_rate': '7.5000',
+                'term_months': 24,
+                'amortization_type': 'interest_only',
+                'recourse_type': 'limited',
+                'expires_at': (timezone.now() + timedelta(days=30)).isoformat(),
+                'origination_fee_pct': '1.0000',
+            },
             format='json',
         )
         self.assertEqual(patch.status_code, status.HTTP_200_OK)
@@ -214,6 +246,7 @@ class QuoteApiTests(APITestCase):
             content_type='application/pdf',
             file_size_bytes=10,
             storage_status=DocumentStorageStatus.READY,
+            visibility_roles=['internal'],
             uploaded_by=self.analyst,
         )
         attach = self.client.post(
@@ -263,7 +296,7 @@ class QuoteReadinessTests(APITestCase):
         self.assertIn(QUOTE_REQUIRED_FOR_NEGOTIATING, readiness['blockers'])
 
         quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
-        sent = send_quote(quote)
+        sent = send_quote(make_sendable(quote))
         readiness = pipeline_transition_readiness(
             self.deal,
             PipelineStatus.NEGOTIATING,
@@ -310,7 +343,7 @@ class QuoteReadinessTests(APITestCase):
 
     def test_wrong_subcategory_and_pending_attachment_blocked(self):
         quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
-        sent = send_quote(quote)
+        sent = send_quote(make_sendable(quote))
         wrong_sub = Document.objects.create(
             deal=self.deal,
             document_name='Wrong Sub',
@@ -338,15 +371,143 @@ class QuoteReadinessTests(APITestCase):
             storage_status=DocumentStorageStatus.PENDING,
             uploaded_by=self.analyst,
         )
-        set_quote_attachments(sent, [pending.pk])
         with self.assertRaises(ValidationError):
-            execute_quote(sent)
+            set_quote_attachments(sent, [pending.pk], user=self.analyst)
 
     def test_non_draft_save_requires_status_in_update_fields(self):
         quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
-        sent = send_quote(quote)
+        sent = send_quote(make_sendable(quote))
         sent.expires_at = timezone.now()
         with self.assertRaises(ValidationError):
             sent.save(update_fields=['expires_at'])
         sent.refresh_from_db()
         self.assertEqual(sent.status, Quote.Status.SENT)
+
+
+class QuoteIntegrityTests(APITestCase):
+    def setUp(self):
+        self.analyst = User.objects.create_user('q-integ', password='pw')
+        self.deal = Deal.objects.create(
+            name='Quote Integrity Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.analyst,
+            source_channel='direct',
+            requested_amount='1000000.00',
+            pipeline_status=PipelineStatus.QUOTING,
+        )
+        self.client.force_authenticate(self.analyst)
+
+    def _ready_term_sheet(self):
+        return Document.objects.create(
+            deal=self.deal,
+            document_name='Executed TS',
+            category=DocumentCategory.LEGAL,
+            subcategory='term_sheet',
+            file_url=f'deals/{self.deal.pk}/{uuid.uuid4()}/v1/ts.pdf',
+            file_type='pdf',
+            content_type='application/pdf',
+            file_size_bytes=20,
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.analyst,
+            visibility_roles=['internal'],
+        )
+
+    def test_executed_attachment_cannot_be_deleted(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        sent = send_quote(make_sendable(quote), performed_by=self.analyst)
+        doc = self._ready_term_sheet()
+        set_quote_attachments(sent, [doc.pk], user=self.analyst)
+        execute_quote(sent, performed_by=self.analyst)
+        doc.refresh_from_db()
+        self.assertTrue(doc.is_executed)
+        response = self.client.delete(f'/api/documents/{doc.pk}/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(Document.objects.filter(pk=doc.pk).exists())
+
+    def test_executed_attachment_subcategory_cannot_be_patched(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        sent = send_quote(make_sendable(quote), performed_by=self.analyst)
+        doc = self._ready_term_sheet()
+        set_quote_attachments(sent, [doc.pk], user=self.analyst)
+        execute_quote(sent, performed_by=self.analyst)
+        response = self.client.patch(
+            f'/api/documents/{doc.pk}/',
+            {'subcategory': 'loi'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('subcategory', response.data)
+        doc.refresh_from_db()
+        self.assertEqual(doc.subcategory, 'term_sheet')
+
+    def test_quote_mutations_blocked_outside_quoting_negotiating(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        self.deal.pipeline_status = PipelineStatus.ON_HOLD
+        self.deal.paused_from_status = PipelineStatus.QUOTING
+        self.deal.save(update_fields=['pipeline_status', 'paused_from_status'])
+        with self.assertRaises(ValidationError):
+            send_quote(quote, performed_by=self.analyst)
+        with self.assertRaises(ValidationError):
+            update_draft_quote(quote, performed_by=self.analyst, notes='nope')
+
+    def test_quote_actions_write_activity_logs(self):
+        from api.models import ActivityActionType, ActivityLog
+
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                deal=self.deal,
+                action_type=ActivityActionType.QUOTE_CREATED,
+            ).exists()
+        )
+        send_quote(make_sendable(quote), performed_by=self.analyst)
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                deal=self.deal,
+                action_type=ActivityActionType.QUOTE_SENT,
+                performed_by=self.analyst,
+            ).exists()
+        )
+
+    def test_holdback_cannot_exceed_loan_amount(self):
+        with self.assertRaises(ValidationError):
+            create_next_quote(
+                deal=self.deal,
+                created_by=self.analyst,
+                seed_from_screening=False,
+                loan_amount=Decimal('1000000.00'),
+                holdback_amount=Decimal('1500000.00'),
+                rate_type=Quote.RateType.FIXED,
+                interest_rate=Decimal('8.0000'),
+                amortization_type=Quote.AmortizationType.INTEREST_ONLY,
+                recourse_type=Quote.RecourseType.LIMITED,
+            )
+
+    def test_queryset_delete_blocked(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        with self.assertRaises(ValidationError):
+            Quote.objects.filter(pk=quote.pk).delete()
+
+    def test_signed_readiness_requires_execution_evidence(self):
+        from api.services.deals import QUOTE_EXECUTION_EVIDENCE_REQUIRED
+
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        sent = send_quote(make_sendable(quote), performed_by=self.analyst)
+        doc = self._ready_term_sheet()
+        set_quote_attachments(sent, [doc.pk], user=self.analyst)
+        execute_quote(sent, performed_by=self.analyst)
+        transition_pipeline_status(
+            self.deal,
+            PipelineStatus.NEGOTIATING,
+            self.analyst,
+            'Move to negotiating',
+        )
+        self.deal.refresh_from_db()
+        Quote.objects.get(pk=sent.pk).attachments.clear()
+        readiness = pipeline_transition_readiness(
+            self.deal,
+            PipelineStatus.SIGNED,
+            self.analyst,
+        )
+        self.assertFalse(readiness['ready'])
+        self.assertIn(QUOTE_EXECUTION_EVIDENCE_REQUIRED, readiness['blockers'])

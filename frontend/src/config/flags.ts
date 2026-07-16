@@ -10,6 +10,8 @@ import {
 export type DataMode = 'mock' | 'live';
 
 export const DATA_MODE_KEY = 'mrj_data_mode';
+/** Demo-only: when true, mock auth exposes staff powers (overrides, force supersede, relationship edits). */
+export const DEMO_STAFF_KEY = 'mrj_demo_is_staff';
 
 const envDefault: DataMode = import.meta.env.VITE_USE_MOCKS !== 'false' ? 'mock' : 'live';
 
@@ -21,6 +23,25 @@ function readMode(): DataMode {
 
 export const DATA_MODE = readMode();
 export const USE_MOCKS = DATA_MODE === 'mock';
+
+/** In-memory override so Demo mock tests can flip staff without a full reload. */
+let demoStaffMemory: boolean | null = null;
+
+function readStoredDemoStaff(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  return localStorage.getItem(DEMO_STAFF_KEY) === 'true';
+}
+
+/** Demo persona: default analyst (`false`). Staff powers require the Demo staff toggle. */
+export function getDemoIsStaff(): boolean {
+  if (demoStaffMemory !== null) return demoStaffMemory;
+  return readStoredDemoStaff();
+}
+
+function reloadPreservingListPath(): void {
+  const nextPath = listPathForEntityDetail(window.location.pathname);
+  location.assign(`${nextPath}${window.location.search}${window.location.hash}`);
+}
 
 export function setDataMode(mode: DataMode): void {
   if (typeof localStorage !== 'undefined') {
@@ -55,5 +76,27 @@ export function setDataMode(mode: DataMode): void {
     }
   }
 
-  location.assign('/');
+  reloadPreservingListPath();
+}
+
+/** Flip Demo staff persona and reload so AuthContext + mock handlers agree. */
+export function setDemoStaff(isStaff: boolean): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(DEMO_STAFF_KEY, isStaff ? 'true' : 'false');
+  }
+  demoStaffMemory = isStaff;
+  reloadPreservingListPath();
+}
+
+/** Test helper: change Demo staff without a navigation reload. */
+export function setDemoIsStaffForTests(isStaff: boolean): void {
+  demoStaffMemory = isStaff;
+}
+
+/** Entity detail URLs (e.g. /deals/:id/...) redirect to the list on Demo/Live switch. */
+export function listPathForEntityDetail(pathname: string): string {
+  if (/^\/deals\/(?!new(?:\/|$))[^/]+/.test(pathname)) {
+    return '/deals';
+  }
+  return pathname;
 }

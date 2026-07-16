@@ -7,6 +7,14 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+class QuoteUndeletableQuerySet(models.QuerySet):
+    def delete(self):
+        raise ValidationError('Quote versions cannot be deleted via queryset.')
+
+
+QuoteUndeletableManager = models.Manager.from_queryset(QuoteUndeletableQuerySet)
+
+
 class Quote(models.Model):
     """A versioned term sheet / LOI proposal for a deal.
 
@@ -219,6 +227,8 @@ class Quote(models.Model):
     attachments = models.ManyToManyField('Document', related_name='quotes', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = QuoteUndeletableManager()
 
     class Meta:
         ordering = ['deal', '-version']

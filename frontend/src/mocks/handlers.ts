@@ -4,7 +4,7 @@
 
 import { ApiError } from '@/lib/apiError';
 import { isOptionalHttpUrl } from '@/lib/formValidation';
-import { calculateDebtMetrics } from '@/components/deals/screening/calculations';
+import { calculateDebtMetrics, screeningIsComplete } from '@/components/deals/screening/calculations';
 import type {
   ActivityLogEntry,
   Broker,
@@ -37,7 +37,13 @@ import {
   SPONSORS,
 } from './fixtures';
 import { PIPELINE_TRANSITIONS } from './pipeline';
-import { handleQuotesRequest, getCurrentQuote } from './quotes';
+import { handleQuotesRequest, getCurrentQuote, documentIsExecutedQuoteEvidence } from './quotes';
+import {
+  documentIsClosingLinked,
+  closingReadinessBlockers,
+  handleClosingRequest,
+  resolveClosingDealId,
+} from './closing';
 
 const deals = buildInitialDeals();
 const sponsors = [...SPONSORS];
@@ -197,14 +203,18 @@ const SYNDICATION_TRANSITIONS: Record<SyndicationStatus, SyndicationStatus[]> = 
 
 const SYNDICATION_START_STAGES: PipelineStatus[] = ['quoting', 'negotiating', 'signed', 'closing'];
 const SYNDICATION_TERMINAL_STAGES: PipelineStatus[] = ['dead', 'exited'];
-const INVESTMENT_TYPES: InvestmentType[] = [
+const SUPPORTED_DEBT_INVESTMENT_TYPES: InvestmentType[] = [
   'whole_loan_bridge',
   'whole_loan_permanent',
-  'mezzanine',
-  'preferred_equity',
-  'co_gp_equity',
-  'lp_equity',
 ];
+const DEAL_PURPOSES: Deal['purpose'][] = [
+  '',
+  'acquisition',
+  'refinance',
+  'construction',
+  'recapitalization',
+];
+const DEAL_PROFILES: Deal['profile'][] = ['', 'value_add', 'construction', 'stabilized'];
 const SOURCE_CHANNELS: Deal['source_channel'][] = [
   'broker',
   'direct',
@@ -406,8 +416,10 @@ const MOCK_USER_ID = 1;
 
 function buildSummary(query: URLSearchParams) {
   const filtered = filterDeals(query);
-  const active = filtered.filter((d) => d.pipeline_status !== 'dead' && d.pipeline_status !== 'exited');
-  const sum = (list: Deal[]) => list.reduce((total, d) => total + (Number(d.requested_amount) || 0), 0);
+  const inactiveStages: PipelineStatus[] = ['dead', 'closed', 'servicing', 'exited'];
+  const active = filtered.filter((d) => !inactiveStages.includes(d.pipeline_status));
+  const sum = (list: Deal[]) =>
+    list.reduce((total, d) => total + (Number(d.requested_amount) || 0), 0).toFixed(2);
   const groups = new Map<PipelineStatus, Deal[]>();
   for (const deal of filtered) {
     groups.set(deal.pipeline_status, [...(groups.get(deal.pipeline_status) ?? []), deal]);
@@ -459,6 +471,12 @@ function resolveSponsor(input: unknown): Sponsor | null {
     years_experience: nullableWholeNumber(input, 'years_experience', { max: 200 }),
     completed_projects: nullableWholeNumber(input, 'completed_projects', { max: POSITIVE_INTEGER_MAX }),
     bankruptcy_history: nullableBoolean(input, 'bankruptcy_history'),
+    business_address: stringValue(input.business_address),
+    total_units_owned: nullableWholeNumber(input, 'total_units_owned', { max: POSITIVE_INTEGER_MAX }),
+    total_sf_managed: nullableWholeNumber(input, 'total_sf_managed', { max: POSITIVE_BIG_INTEGER_MAX }),
+    assets_under_management: nullableMoney(input, 'assets_under_management'),
+    track_record: [],
+    connection_source: '',
     details: {},
   };
   sponsors.push(created);
@@ -481,6 +499,10 @@ function resolveBroker(input: unknown): Broker | null {
     email: requireEmail(input, 'email', 'broker'),
     phone: stringValue(input.phone),
     status: 'active',
+    default_commission_rate: nullableMoney(input, 'default_commission_rate'),
+    commission_type: '',
+    preferred_deal_types: [],
+    geographic_focus: [],
     details: {},
   };
   brokers.push(created);
@@ -618,6 +640,13 @@ function resolveProperty(input: unknown): Property {
     year_renovated: yearRenovated,
     county: 'county' in input ? stringFieldMax(input, 'county', 120) : '',
     msa: 'msa' in input ? stringFieldMax(input, 'msa', 160) : '',
+    number_of_buildings: nullableWholeNumber(input, 'number_of_buildings', { max: POSITIVE_INTEGER_MAX }),
+    number_of_stories: nullableWholeNumber(input, 'number_of_stories', { max: POSITIVE_INTEGER_MAX }),
+    parking_spaces: nullableWholeNumber(input, 'parking_spaces', { max: POSITIVE_INTEGER_MAX }),
+    lot_size_acres: nullableMoney(input, 'lot_size_acres'),
+    flood_zone: stringValue(input.flood_zone),
+    zoning_designation: stringValue(input.zoning_designation),
+    environmental_status: '',
     details: {},
   };
   properties.push(created);
@@ -764,7 +793,7 @@ function createDeal(body: Record<string, unknown>): Deal {
 
 function createDealUnchecked(body: Record<string, unknown>): Deal {
   const name = requireStringMax(body, 'name', 255);
-  const investmentType = requiredChoice(body, 'investment_type', INVESTMENT_TYPES);
+  const investmentType = requiredChoice(body, 'investment_type', SUPPORTED_DEBT_INVESTMENT_TYPES);
   const sourceChannel = requiredChoice(body, 'source_channel', SOURCE_CHANNELS);
   const requestedAmount = moneyValue(body.requested_amount, 'requested_amount', true);
   const sponsor = resolveSponsor(body.sponsor);
@@ -806,11 +835,18 @@ function createDealUnchecked(body: Record<string, unknown>): Deal {
     source_channel: sourceChannel,
     source_date: String(body.source_date ?? nowIso().slice(0, 10)),
     requested_amount: requestedAmount,
-    purpose: optionalStringFieldMax(body, 'purpose', 160),
-    profile: optionalStringFieldMax(body, 'profile', 160),
+    purpose: 'purpose' in body ? requiredChoice(body, 'purpose', DEAL_PURPOSES) : '',
+    profile: 'profile' in body ? requiredChoice(body, 'profile', DEAL_PROFILES) : '',
     estimated_value: nullableMoney(body, 'estimated_value'),
     renovation_budget: nullableMoney(body, 'renovation_budget'),
     description: optionalStringField(body, 'description'),
+    deposit_status: '',
+    deposit_received_date: null,
+    deposit_account_label: '',
+    deposit_refund_conditions: '',
+    exclusivity_granted: null,
+    exclusivity_expiry_date: null,
+    key_negotiation_changes: '',
     current_stage_entered_at: nowIso(),
     days_in_current_stage: 0,
     details: {},
@@ -851,14 +887,15 @@ function updateDeal(deal: Deal, body: Record<string, unknown>): Deal {
 function updateDealUnchecked(deal: Deal, body: Record<string, unknown>): Deal {
   if ('name' in body) deal.name = requireStringMax(body, 'name', 255);
   if ('investment_type' in body) {
-    deal.investment_type = requiredChoice(body, 'investment_type', INVESTMENT_TYPES);
-    deal.investment_category = deriveCategory(deal.investment_type);
+    const investmentType = requiredChoice(body, 'investment_type', SUPPORTED_DEBT_INVESTMENT_TYPES);
+    deal.investment_type = investmentType;
+    deal.investment_category = deriveCategory(investmentType);
   }
   if ('requested_amount' in body) {
     deal.requested_amount = moneyValue(body.requested_amount, 'requested_amount', true);
   }
-  if ('purpose' in body) deal.purpose = stringFieldMax(body, 'purpose', 160);
-  if ('profile' in body) deal.profile = stringFieldMax(body, 'profile', 160);
+  if ('purpose' in body) deal.purpose = requiredChoice(body, 'purpose', DEAL_PURPOSES);
+  if ('profile' in body) deal.profile = requiredChoice(body, 'profile', DEAL_PROFILES);
   if ('estimated_value' in body) deal.estimated_value = nullableMoney(body, 'estimated_value');
   if ('renovation_budget' in body) deal.renovation_budget = nullableMoney(body, 'renovation_budget');
   if ('description' in body) deal.description = stringField(body, 'description');
@@ -866,35 +903,76 @@ function updateDealUnchecked(deal: Deal, body: Record<string, unknown>): Deal {
     deal.source_channel = requiredChoice(body, 'source_channel', SOURCE_CHANNELS);
   }
   if ('source_date' in body) deal.source_date = requireString(body, 'source_date');
+  if ('assigned_analyst' in body) {
+    if (!MOCK_USER.is_staff) {
+      badRequest('assigned_analyst', 'Only staff may reassign a deal.');
+    }
+    if (body.assigned_analyst !== null && body.assigned_analyst !== MOCK_USER_ID) {
+      badRequest('assigned_analyst', 'Selected analyst is not available.');
+    }
+    deal.assigned_analyst = body.assigned_analyst as number | null;
+    deal.assigned_analyst_detail = deal.assigned_analyst === null
+      ? null
+      : { id: MOCK_USER_ID, username: MOCK_USER.username };
+  }
+  if ('deposit_status' in body) {
+    deal.deposit_status = requiredChoice(
+      body,
+      'deposit_status',
+      ['', 'pending', 'received', 'applied_to_closing', 'refunded'] as const,
+    );
+  }
+  if ('deposit_received_date' in body) {
+    deal.deposit_received_date = body.deposit_received_date
+      ? requireString(body, 'deposit_received_date')
+      : null;
+  }
+  if ('deposit_account_label' in body) {
+    deal.deposit_account_label = stringFieldMax(body, 'deposit_account_label', 120);
+  }
+  if ('deposit_refund_conditions' in body) {
+    deal.deposit_refund_conditions = stringField(body, 'deposit_refund_conditions');
+  }
+  if ('exclusivity_granted' in body) {
+    if (body.exclusivity_granted !== null && typeof body.exclusivity_granted !== 'boolean') {
+      badRequest('exclusivity_granted', 'Must be a valid boolean or null.');
+    }
+    deal.exclusivity_granted = body.exclusivity_granted as boolean | null;
+  }
+  if ('exclusivity_expiry_date' in body) {
+    deal.exclusivity_expiry_date = body.exclusivity_expiry_date
+      ? requireString(body, 'exclusivity_expiry_date')
+      : null;
+  }
+  if ('key_negotiation_changes' in body) {
+    deal.key_negotiation_changes = stringField(body, 'key_negotiation_changes');
+  }
   if ('sponsor' in body) {
     const sponsor = resolveExistingSponsor(body.sponsor);
-    if (deal.sponsor && sponsor?.id !== deal.sponsor) {
-      badRequest('sponsor', 'This relationship cannot be changed through this endpoint.');
+    const nextId = sponsor?.id ?? null;
+    if (deal.sponsor && nextId !== deal.sponsor && !MOCK_USER.is_staff) {
+      badRequest('sponsor', 'Only staff may change an existing relationship.');
     }
-    if (!deal.sponsor && sponsor) {
-      deal.sponsor = sponsor.id;
-      deal.sponsor_detail = sponsor;
-    }
+    deal.sponsor = nextId;
+    deal.sponsor_detail = sponsor;
   }
   if ('broker' in body) {
     const broker = resolveExistingBroker(body.broker);
-    if (deal.broker && broker?.id !== deal.broker) {
-      badRequest('broker', 'This relationship cannot be changed through this endpoint.');
+    const nextId = broker?.id ?? null;
+    if (deal.broker && nextId !== deal.broker && !MOCK_USER.is_staff) {
+      badRequest('broker', 'Only staff may change an existing relationship.');
     }
-    if (!deal.broker && broker) {
-      deal.broker = broker.id;
-      deal.broker_detail = broker;
-    }
+    deal.broker = nextId;
+    deal.broker_detail = broker;
   }
   if ('fund' in body) {
     const fund = resolveFund(body.fund);
-    if (deal.fund && fund?.id !== deal.fund) {
-      badRequest('fund', 'This relationship cannot be changed through this endpoint.');
+    const nextId = fund?.id ?? null;
+    if (deal.fund && nextId !== deal.fund && !MOCK_USER.is_staff) {
+      badRequest('fund', 'Only staff may change an existing relationship.');
     }
-    if (!deal.fund && fund) {
-      deal.fund = fund.id;
-      deal.fund_detail = fund;
-    }
+    deal.fund = nextId;
+    deal.fund_detail = fund;
   }
   if (Array.isArray(body.property_ids)) {
     if (body.property_ids.length === 0) badRequest('property_ids', 'property_ids must include at least one property when provided.');
@@ -928,14 +1006,6 @@ function stringFieldMax(data: Record<string, unknown>, field: string, maxLength:
 
 function optionalStringField(data: Record<string, unknown>, field: string): string {
   return field in data ? stringField(data, field) : '';
-}
-
-function optionalStringFieldMax(
-  data: Record<string, unknown>,
-  field: string,
-  maxLength: number,
-): string {
-  return field in data ? stringFieldMax(data, field, maxLength) : '';
 }
 
 function canonicalDealField(deal: Deal, field: (typeof DEAL_AUDIT_FIELDS)[number]): string {
@@ -1353,10 +1423,17 @@ function screeningInput(body: Record<string, unknown>): CreateScreeningAssessmen
     stabilized_value: nullableDecimal('stabilized_value'),
     project_cost: nullableDecimal('project_cost'),
     noi: nullableDecimal('noi'),
+    stabilized_noi: nullableDecimal('stabilized_noi'),
     annual_debt_service: nullableDecimal('annual_debt_service'),
     occupancy,
     proposed_rate: proposedRate,
     proposed_term_months: positiveInteger('proposed_term_months'),
+    current_average_rent: nullableDecimal('current_average_rent'),
+    market_rent: nullableDecimal('market_rent'),
+    condition_rating: String(body.condition_rating ?? '') as ScreeningAssessment['condition_rating'],
+    unit_mix: String(body.unit_mix ?? ''),
+    exit_strategy: String(body.exit_strategy ?? ''),
+    exit_cap_rate: nullableDecimal('exit_cap_rate'),
     equity_summary: String(body.equity_summary ?? ''),
     equity_target_irr: equityTargetIrr,
     equity_target_multiple: nullableDecimal('equity_target_multiple'),
@@ -1366,10 +1443,19 @@ function screeningInput(body: Record<string, unknown>): CreateScreeningAssessmen
   };
 }
 
+function requireScreeningStage(deal: Deal): void {
+  if (deal.pipeline_status !== 'sourced' && deal.pipeline_status !== 'screening') {
+    badRequest(
+      'deal',
+      'Screening can only be created or changed while the deal is sourced or screening.',
+    );
+  }
+}
+
 function createScreeningAssessment(body: Record<string, unknown>): ScreeningAssessment {
   const input = screeningInput(body);
   if (!input.deal) badRequest('deal', 'A deal is required to create a screening assessment.');
-  findDeal(input.deal);
+  requireScreeningStage(findDeal(input.deal));
   const current = screeningAssessments.find(
     (assessment) => assessment.deal === input.deal && assessment.is_current,
   );
@@ -1384,12 +1470,15 @@ function createScreeningAssessment(body: Record<string, unknown>): ScreeningAsse
   }
   const iso = nowIso();
   const metrics = calculateDebtMetrics(input);
+  const isComplete = screeningIsComplete(input);
   const assessment: ScreeningAssessment = {
     id: newId('screen'),
     ...input,
     ...metrics,
     version,
     is_current: true,
+    is_complete: isComplete,
+    missing_fields: isComplete ? [] : screeningMissingFields(input),
     status: 'draft',
     reviewer: null,
     reviewer_detail: null,
@@ -1418,11 +1507,17 @@ function updateScreeningAssessment(
   if (assessment.status === 'finalized') {
     badRequest('status', 'Finalized screening assessments are immutable.');
   }
+  requireScreeningStage(findDeal(assessment.deal));
   if ('deal' in body && String(body.deal) !== assessment.deal) {
     badRequest('deal', 'An assessment cannot be moved to another deal.');
   }
   const input = screeningInput({ ...assessment, ...body, deal: assessment.deal });
-  Object.assign(assessment, input, calculateDebtMetrics(input), { updated_at: nowIso() });
+  const isComplete = screeningIsComplete(input);
+  Object.assign(assessment, input, calculateDebtMetrics(input), {
+    is_complete: isComplete,
+    missing_fields: isComplete ? [] : screeningMissingFields(input),
+    updated_at: nowIso(),
+  });
   return assessment;
 }
 
@@ -1433,9 +1528,13 @@ function finalizeScreeningAssessment(
   if (assessment.status === 'finalized') {
     badRequest('status', 'Only draft screening assessments can be changed.');
   }
+  requireScreeningStage(findDeal(assessment.deal));
   const decision = String(body.decision ?? '');
   if (!['advance', 'refer', 'decline'].includes(decision)) {
     badRequest('decision', 'Select a supported screening decision.');
+  }
+  if (decision === 'advance' && !assessment.is_complete) {
+    badRequest('detail', `Complete required screening inputs: ${assessment.missing_fields.join(', ')}.`);
   }
   assessment.decision = decision as FinalScreeningDecision;
   if (typeof body.notes === 'string') assessment.notes = body.notes;
@@ -1476,6 +1575,14 @@ function pipelineTransitionReadiness(deal: Deal, to: PipelineStatus) {
         can_override: MOCK_USER.is_staff,
       };
     }
+    if (!latest.is_complete) {
+      return {
+        ready: false,
+        code: 'screening_approval_required',
+        blockers: ['screening_assessment_incomplete'],
+        can_override: MOCK_USER.is_staff,
+      };
+    }
     return {
       ready: true,
       code: 'ready',
@@ -1506,9 +1613,59 @@ function pipelineTransitionReadiness(deal: Deal, to: PipelineStatus) {
         can_override: MOCK_USER.is_staff,
       };
     }
+    const hasEvidence = current.attachments.some((documentId) => {
+      try {
+        const document = findDocument(documentId);
+        return (
+          document.storage_status === 'ready' &&
+          document.category === 'legal' &&
+          (document.subcategory === 'term_sheet' || document.subcategory === 'loi')
+        );
+      } catch {
+        return false;
+      }
+    });
+    if (!hasEvidence) {
+      return {
+        ready: false,
+        code: 'quote_readiness_required',
+        blockers: ['quote_execution_evidence_required'],
+        can_override: MOCK_USER.is_staff,
+      };
+    }
+  }
+
+  if (deal.pipeline_status === 'closing' && to === 'closed') {
+    const blockers = closingReadinessBlockers(deal.id);
+    if (blockers.length) {
+      return {
+        ready: false,
+        code: 'closing_readiness_required',
+        blockers,
+        can_override: MOCK_USER.is_staff,
+      };
+    }
   }
 
   return { ready: true, code: 'ready', blockers: [], can_override: false };
+}
+
+function screeningMissingFields(input: CreateScreeningAssessmentPayload): string[] {
+  const required: Array<keyof CreateScreeningAssessmentPayload> = [
+    'loan_amount',
+    'project_cost',
+    'noi',
+    'stabilized_noi',
+    'annual_debt_service',
+    'occupancy',
+    'proposed_rate',
+    'proposed_term_months',
+    'exit_strategy',
+    'exit_cap_rate',
+  ];
+  const missing = required.filter((field) => input[field] === null || input[field] === '');
+  if (!input.as_is_value && !input.stabilized_value) missing.push('as_is_value');
+  return missing;
 }
 
 function allowedSyndicationTransitions(deal: Deal): SyndicationStatus[] {
@@ -1576,6 +1733,9 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
       return paginate(filterDeals(query), query);
     }
     if (second === 'summary') return buildSummary(query);
+    if (second === 'assignees') {
+      return [{ id: MOCK_USER_ID, username: MOCK_USER.username }];
+    }
 
     const deal = findDeal(second);
     if (!third) {
@@ -1612,6 +1772,41 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
     }
     if (second && third === 'download' && method === 'GET') {
       return downloadDocument(second);
+    }
+    if (second && !third && (method === 'PATCH' || method === 'PUT')) {
+      const document = findDocument(second);
+      const evidenceLocked = document.is_executed || documentIsExecutedQuoteEvidence(document.id);
+      if (evidenceLocked && 'subcategory' in body) {
+        const next = String(body.subcategory ?? '');
+        if (next !== (document.subcategory ?? '')) {
+          badRequest('subcategory', 'Executed document metadata cannot be changed.');
+        }
+      }
+      if ('subcategory' in body) document.subcategory = String(body.subcategory ?? '');
+      if ('expiry_date' in body) document.expiry_date = body.expiry_date ? String(body.expiry_date) : null;
+      if ('notes' in body) document.notes = String(body.notes ?? '');
+      return document;
+    }
+    if (second && !third && method === 'DELETE') {
+      const document = findDocument(second);
+      if (documentIsClosingLinked(document.id)) {
+        throw new ApiError('Validation failed', 400, {
+          detail: 'Document is linked to a closing checklist item and cannot be deleted.',
+        });
+      }
+      if (documentIsExecutedQuoteEvidence(document.id)) {
+        throw new ApiError('Validation failed', 400, {
+          detail: 'Document is attached to an executed quote and cannot be deleted.',
+        });
+      }
+      if (document.is_executed && !MOCK_USER.is_staff) {
+        throw new ApiError('Only staff may delete executed documents.', 403, {
+          detail: 'Only staff may delete executed documents.',
+        });
+      }
+      const idx = documents.findIndex((row) => row.id === document.id);
+      if (idx >= 0) documents.splice(idx, 1);
+      return {};
     }
     const dealId = query.get('deal');
     const filtered = documents.filter(
@@ -1683,13 +1878,82 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
     });
   }
 
+  if (
+    resource === 'dd-templates' ||
+    resource === 'closing-packages' ||
+    resource === 'closing-generations' ||
+    resource === 'dd-checklist-items' ||
+    resource === 'conditions-precedent'
+  ) {
+    const dealId = resolveClosingDealId({
+      resource,
+      id: second,
+      action: third,
+      query,
+      body,
+    });
+    const deal = dealId ? deals.find((row) => row.id === dealId) : undefined;
+    const closingResponse = handleClosingRequest({
+      method,
+      resource,
+      id: second,
+      action: third,
+      query,
+      body,
+      dealStatus: deal?.pipeline_status,
+      isStaff: MOCK_USER.is_staff,
+      resolveDocuments: (ids) =>
+        ids
+          .map((docId) => documents.find((doc) => doc.id === docId && doc.storage_status === 'ready'))
+          .filter((doc): doc is (typeof documents)[number] => Boolean(doc))
+          .map((doc) => ({
+            id: doc.id,
+            document_name: doc.document_name,
+            category: doc.category,
+            subcategory: doc.subcategory,
+            storage_status: doc.storage_status,
+            file_type: doc.file_type,
+            file_size_bytes: doc.file_size_bytes,
+            visibility_roles: doc.visibility_roles,
+          })),
+    });
+    if (closingResponse !== null) return closingResponse;
+  }
+
   if (resource === 'contacts') {
     if (!second && method === 'POST') return createContact(body);
+    if (second && (method === 'PATCH' || method === 'PUT')) {
+      const contact = contacts.find((row) => row.id === second);
+      if (!contact) throw new ApiError('Not found', 404, { detail: 'Not found.' });
+      for (const field of ['full_name', 'title', 'company_name', 'email', 'phone'] as const) {
+        if (field in body) contact[field] = String(body[field] ?? '').trim();
+      }
+      if (!contact.full_name) badRequest('full_name', 'Contact name cannot be empty.');
+      contact.updated_at = nowIso();
+      for (const link of dealContacts) {
+        if (link.contact === contact.id) link.contact_detail = contact;
+      }
+      return contact;
+    }
     return paginate(contacts, query);
   }
 
   if (resource === 'deal-contacts') {
     if (!second && method === 'POST') return createDealContact(body);
+    if (second && (method === 'PATCH' || method === 'PUT')) {
+      const link = dealContacts.find((row) => row.id === second);
+      if (!link) throw new ApiError('Not found', 404, { detail: 'Not found.' });
+      if ('is_primary' in body) link.is_primary = Boolean(body.is_primary);
+      if ('notes' in body) link.notes = String(body.notes ?? '');
+      link.updated_at = nowIso();
+      return link;
+    }
+    if (second && method === 'DELETE') {
+      const index = dealContacts.findIndex((row) => row.id === second);
+      if (index < 0) throw new ApiError('Not found', 404, { detail: 'Not found.' });
+      dealContacts.splice(index, 1);
+      return {};
+    }
     const dealId = query.get('deal');
     const role = query.get('role');
     const filtered = dealContacts.filter(

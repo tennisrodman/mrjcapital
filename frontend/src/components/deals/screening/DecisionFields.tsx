@@ -33,22 +33,11 @@ export function DecisionFields({
         />
       </FormField>
       <FormField
-        label="Equity context"
-        htmlFor="screening-equity-summary"
-        hint="Optional manual summary only — no equity model is calculated here."
-        error={errors.equity_summary?.message}
-        className="sm:row-span-2"
+        label="Underwriting notes"
+        htmlFor="screening-notes"
+        error={errors.notes?.message}
+        className="sm:col-span-2"
       >
-        <Textarea
-          id="screening-equity-summary"
-          disabled={disabled}
-          placeholder="Brief co-invest, pref, or sponsor equity context…"
-          aria-invalid={Boolean(errors.equity_summary)}
-          className="h-full min-h-[112px]"
-          {...register('equity_summary')}
-        />
-      </FormField>
-      <FormField label="Underwriting notes" htmlFor="screening-notes" error={errors.notes?.message}>
         <Textarea
           id="screening-notes"
           disabled={disabled}

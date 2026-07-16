@@ -125,6 +125,20 @@ export async function downloadDocument(doc: DealDocument): Promise<void> {
   triggerBrowserDownload(blob, payload.filename);
 }
 
+export function updateDocumentMetadata(
+  documentId: string,
+  payload: { subcategory?: string; expiry_date?: string | null; notes?: string },
+): Promise<DealDocument> {
+  return apiRequest<DealDocument>(`api/documents/${documentId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteDocument(documentId: string): Promise<void> {
+  return apiRequest<void>(`api/documents/${documentId}/`, { method: 'DELETE' });
+}
+
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = window.document.createElement('a');
@@ -149,6 +163,28 @@ export function useUploadDocument(dealId: string) {
 export function useDownloadDocument() {
   return useMutation({
     mutationFn: (doc: DealDocument) => downloadDocument(doc),
+  });
+}
+
+export function useUpdateDocumentMetadata(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ documentId, payload }: {
+      documentId: string;
+      payload: { subcategory?: string; expiry_date?: string | null; notes?: string };
+    }) => updateDocumentMetadata(documentId, payload),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['deal-documents', dealId] }),
+  });
+}
+
+export function useDeleteDocument(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteDocument,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['deal-documents', dealId] });
+      void queryClient.invalidateQueries({ queryKey: ['deal-activity', dealId] });
+    },
   });
 }
 

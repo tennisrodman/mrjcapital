@@ -3,7 +3,12 @@ from rest_framework import serializers
 
 from api.models.deal import Deal
 from api.models.quote import Quote
-from api.services.quotes import create_next_quote, update_draft_quote
+from api.services.quotes import (
+    create_next_quote,
+    quote_is_send_ready,
+    quote_missing_send_fields,
+    update_draft_quote,
+)
 
 
 class QuoteCreatedBySerializer(serializers.Serializer):
@@ -18,7 +23,9 @@ class QuoteSerializer(serializers.ModelSerializer):
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
     created_by_detail = QuoteCreatedBySerializer(source='created_by', read_only=True)
     is_current = serializers.SerializerMethodField(read_only=True)
-    attachments = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    is_send_ready = serializers.SerializerMethodField(read_only=True)
+    missing_send_fields = serializers.SerializerMethodField(read_only=True)
+    attachments = serializers.SerializerMethodField(read_only=True)
     seed_from_screening = serializers.BooleanField(required=False, default=True, write_only=True)
 
     class Meta:
@@ -28,6 +35,8 @@ class QuoteSerializer(serializers.ModelSerializer):
             'deal',
             'version',
             'is_current',
+            'is_send_ready',
+            'missing_send_fields',
             'status',
             'is_counter',
             'created_by',
@@ -123,14 +132,34 @@ class QuoteSerializer(serializers.ModelSerializer):
             _raise_django_validation(exc)
 
     def update(self, instance, validated_data):
+        request = self.context.get('request')
+        performed_by = getattr(request, 'user', None) if request else None
         try:
-            return update_draft_quote(instance, **validated_data)
+            return update_draft_quote(instance, performed_by=performed_by, **validated_data)
         except DjangoValidationError as exc:
             _raise_django_validation(exc)
 
     def get_is_current(self, obj):
         annotated_value = getattr(obj, 'is_current_annotation', None)
         return bool(annotated_value) if annotated_value is not None else obj.is_current
+
+    def get_is_send_ready(self, obj):
+        return quote_is_send_ready(obj)
+
+    def get_missing_send_fields(self, obj):
+        return quote_missing_send_fields(obj)
+
+    def get_attachments(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        attachments = list(obj.attachments.all())
+        if user is not None and not (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)):
+            attachments = [
+                document
+                for document in attachments
+                if 'internal' in (document.visibility_roles or [])
+            ]
+        return [document.pk for document in attachments]
 
 
 class QuoteSendSerializer(serializers.Serializer):

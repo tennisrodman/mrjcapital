@@ -10,6 +10,9 @@ export type InvestmentType =
   | 'lp_equity';
 
 export type InvestmentCategory = 'debt' | 'hybrid' | 'equity';
+export type DealPurpose = 'acquisition' | 'refinance' | 'construction' | 'recapitalization';
+export type DealProfile = 'value_add' | 'construction' | 'stabilized';
+export type DepositStatus = '' | 'pending' | 'received' | 'applied_to_closing' | 'refunded';
 
 export type PipelineStatus =
   | 'sourced'
@@ -51,11 +54,33 @@ export type PropertyType =
   | 'master_planned_residential'
   | 'other';
 
+export type PropertyEnvironmentalStatus =
+  | ''
+  | 'none'
+  | 'phase_1_clean'
+  | 'phase_1_rec'
+  | 'phase_2_required'
+  | 'phase_2_clean'
+  | 'remediation';
+
 export type SponsorEntityType = 'llc' | 'lp' | 'corp' | 'trust' | 'individual';
 
 export type RelationshipRating = 'new' | 'developing' | 'established' | 'strategic';
+export type SponsorConnectionSource =
+  | ''
+  | 'broker_referral'
+  | 'direct'
+  | 'repeat'
+  | 'marketing'
+  | 'conference';
 
 export type BrokerStatus = 'active' | 'inactive' | 'blocked';
+export type BrokerCommissionType =
+  | ''
+  | 'percent_of_loan'
+  | 'flat_fee'
+  | 'percent_of_equity'
+  | 'referral_fee';
 
 export type FundStatus = 'forming' | 'open' | 'closed';
 
@@ -95,6 +120,12 @@ export interface Sponsor {
   years_experience: number | null;
   completed_projects: number | null;
   bankruptcy_history: boolean | null;
+  business_address: string;
+  total_units_owned: number | null;
+  total_sf_managed: number | null;
+  assets_under_management: string | null;
+  track_record: unknown[];
+  connection_source: SponsorConnectionSource;
   details: Record<string, unknown>;
 }
 
@@ -105,6 +136,10 @@ export interface Broker {
   email: string;
   phone: string;
   status: BrokerStatus;
+  default_commission_rate: string | null;
+  commission_type: BrokerCommissionType;
+  preferred_deal_types: string[];
+  geographic_focus: string[];
   details: Record<string, unknown>;
 }
 
@@ -130,6 +165,13 @@ export interface Property {
   year_renovated: number | null;
   county: string;
   msa: string;
+  number_of_buildings: number | null;
+  number_of_stories: number | null;
+  parking_spaces: number | null;
+  lot_size_acres: string | null;
+  flood_zone: string;
+  zoning_designation: string;
+  environmental_status: PropertyEnvironmentalStatus;
   details: Record<string, unknown>;
 }
 
@@ -163,11 +205,18 @@ export interface Deal {
   source_channel: SourceChannel;
   source_date: string;
   requested_amount: string;
-  purpose: string;
-  profile: string;
+  purpose: DealPurpose | '';
+  profile: DealProfile | '';
   estimated_value: string | null;
   renovation_budget: string | null;
   description: string;
+  deposit_status: DepositStatus;
+  deposit_received_date: string | null;
+  deposit_account_label: string;
+  deposit_refund_conditions: string;
+  exclusivity_granted: boolean | null;
+  exclusivity_expiry_date: string | null;
+  key_negotiation_changes: string;
   current_stage_entered_at: string;
   days_in_current_stage: number;
   details: Record<string, unknown>;

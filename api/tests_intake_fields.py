@@ -14,6 +14,46 @@ class ReleaseOneIntakeFieldTests(APITestCase):
         self.user = User.objects.create_user('intake-analyst', password='pw')
         self.client.force_authenticate(self.user)
 
+    def test_new_and_changed_investment_types_are_debt_only_but_legacy_records_remain_readable(self):
+        rejected_create = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Unsupported Equity Intake',
+                'investment_type': 'preferred_equity',
+                'source_channel': 'direct',
+                'requested_amount': '1000000.00',
+            },
+            format='json',
+        )
+        self.assertEqual(rejected_create.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('investment_type', rejected_create.data)
+
+        debt_deal = Deal.objects.create(
+            name='Debt Intake',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.user,
+        )
+        rejected_change = self.client.patch(
+            f'/api/deals/{debt_deal.pk}/',
+            {'investment_type': 'mezzanine'},
+            format='json',
+        )
+        self.assertEqual(rejected_change.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('investment_type', rejected_change.data)
+
+        legacy_deal = Deal.objects.create(
+            name='Legacy Equity Record',
+            investment_type='preferred_equity',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.user,
+        )
+        readable = self.client.get(f'/api/deals/{legacy_deal.pk}/')
+        self.assertEqual(readable.status_code, status.HTTP_200_OK)
+        self.assertEqual(readable.data['investment_type'], 'preferred_equity')
+
     def test_nested_create_persists_promoted_deal_sponsor_and_property_fields(self):
         response = self.client.post(
             '/api/deals/',
@@ -22,8 +62,8 @@ class ReleaseOneIntakeFieldTests(APITestCase):
                 'investment_type': 'whole_loan_bridge',
                 'source_channel': 'direct',
                 'requested_amount': '7500000.00',
-                'purpose': 'Acquisition financing',
-                'profile': 'Value add',
+                'purpose': 'acquisition',
+                'profile': 'value_add',
                 'estimated_value': '10000000.00',
                 'renovation_budget': '1250000.00',
                 'description': 'Bridge loan for unit renovations and lease-up.',
@@ -58,8 +98,8 @@ class ReleaseOneIntakeFieldTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         deal = Deal.objects.get(pk=response.data['id'])
-        self.assertEqual(deal.purpose, 'Acquisition financing')
-        self.assertEqual(deal.profile, 'Value add')
+        self.assertEqual(deal.purpose, 'acquisition')
+        self.assertEqual(deal.profile, 'value_add')
         self.assertEqual(str(deal.estimated_value), '10000000.00')
         self.assertEqual(str(deal.renovation_budget), '1250000.00')
         self.assertEqual(deal.description, 'Bridge loan for unit renovations and lease-up.')
@@ -95,8 +135,8 @@ class ReleaseOneIntakeFieldTests(APITestCase):
         response = self.client.patch(
             f'/api/deals/{deal.pk}/',
             {
-                'purpose': 'Refinance',
-                'profile': 'Core plus',
+                'purpose': 'refinance',
+                'profile': 'stabilized',
                 'estimated_value': '2000000.00',
                 'renovation_budget': '100000.00',
                 'description': 'Updated intake narrative.',
@@ -106,7 +146,7 @@ class ReleaseOneIntakeFieldTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         deal.refresh_from_db()
-        self.assertEqual(deal.purpose, 'Refinance')
+        self.assertEqual(deal.purpose, 'refinance')
         logged_fields = set(
             ActivityLog.objects.filter(
                 deal=deal,

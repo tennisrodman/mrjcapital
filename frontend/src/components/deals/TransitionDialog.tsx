@@ -20,8 +20,15 @@ const READINESS_BLOCKER_LABELS: Record<string, string> = {
   screening_assessment_missing: 'Create a screening assessment before moving to Quoting.',
   screening_assessment_not_finalized: 'Finalize the current screening assessment before moving to Quoting.',
   screening_decision_not_advance: 'The current screening decision must be Advance before moving to Quoting.',
+  screening_assessment_incomplete: 'Complete the required debt screening inputs before moving to Quoting.',
   quote_required_for_negotiating: 'Send or execute the current quote before moving to Negotiating.',
   quote_execution_required: 'Execute the current quote (with a ready legal term sheet or LOI) before moving to Signed.',
+  quote_execution_evidence_required: 'Attach ready execution evidence to the executed quote before moving to Signed.',
+  closing_package_required: 'Create the closing package before marking the deal Closed.',
+  closing_funding_details_incomplete: 'Record actual close, wired funds, final loan amount, attorney, and title company.',
+  closing_checklist_required: 'Generate a current closing checklist before marking the deal Closed.',
+  closing_dd_incomplete: 'Complete or waive every current due-diligence item.',
+  closing_cp_incomplete: 'Satisfy or waive every current condition precedent.',
 };
 
 interface TransitionDialogProps {

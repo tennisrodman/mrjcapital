@@ -24,6 +24,13 @@ const property: Property = {
   year_renovated: 2021,
   county: 'Travis',
   msa: 'Austin',
+  number_of_buildings: null,
+  number_of_stories: null,
+  parking_spaces: null,
+  lot_size_acres: null,
+  flood_zone: '',
+  zoning_designation: '',
+  environmental_status: '',
   details: {},
 };
 
@@ -94,6 +101,7 @@ describe('PropertyFactsDialog', () => {
     const user = userEvent.setup();
     render(<PropertyFactsDialog property={property} open onOpenChange={vi.fn()} />);
 
+    await user.clear(screen.getByLabelText('Subtype'));
     await user.click(screen.getByRole('button', { name: 'Save property facts' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent(

@@ -3,7 +3,12 @@ from rest_framework import serializers
 
 from api.models.deal import Deal
 from api.models.screening import ScreeningAssessment
-from api.services.screening import create_next_assessment, update_draft_assessment
+from api.services.screening import (
+    create_next_assessment,
+    screening_is_complete,
+    screening_missing_fields,
+    update_draft_assessment,
+)
 
 
 class ScreeningReviewerSerializer(serializers.Serializer):
@@ -18,6 +23,8 @@ class ScreeningAssessmentSerializer(serializers.ModelSerializer):
     reviewer = serializers.PrimaryKeyRelatedField(read_only=True)
     reviewer_detail = ScreeningReviewerSerializer(source='reviewer', read_only=True)
     is_current = serializers.SerializerMethodField(read_only=True)
+    is_complete = serializers.SerializerMethodField(read_only=True)
+    missing_fields = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = ScreeningAssessment
@@ -26,6 +33,8 @@ class ScreeningAssessmentSerializer(serializers.ModelSerializer):
             'deal',
             'version',
             'is_current',
+            'is_complete',
+            'missing_fields',
             'status',
             'reviewer',
             'reviewer_detail',
@@ -37,10 +46,17 @@ class ScreeningAssessmentSerializer(serializers.ModelSerializer):
             'stabilized_value',
             'project_cost',
             'noi',
+            'stabilized_noi',
             'annual_debt_service',
             'occupancy',
             'proposed_rate',
             'proposed_term_months',
+            'current_average_rent',
+            'market_rent',
+            'condition_rating',
+            'unit_mix',
+            'exit_strategy',
+            'exit_cap_rate',
             'max_ltv',
             'max_ltc',
             'min_dscr',
@@ -110,6 +126,12 @@ class ScreeningAssessmentSerializer(serializers.ModelSerializer):
     def get_is_current(self, obj):
         annotated_value = getattr(obj, 'is_current_annotation', None)
         return bool(annotated_value) if annotated_value is not None else obj.is_current
+
+    def get_is_complete(self, obj):
+        return screening_is_complete(obj)
+
+    def get_missing_fields(self, obj):
+        return screening_missing_fields(obj)
 
 
 class ScreeningFinalizeSerializer(serializers.Serializer):

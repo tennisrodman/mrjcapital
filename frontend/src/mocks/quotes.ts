@@ -145,6 +145,10 @@ function applyCalculated(quote: Quote): void {
   const feePct = quote.origination_fee_pct !== null ? Number(quote.origination_fee_pct) : null;
   const holdback = quote.holdback_amount !== null ? Number(quote.holdback_amount) : null;
 
+  if (loan !== null && holdback !== null && holdback > loan) {
+    badRequest('holdback_amount', 'Holdback cannot exceed the loan amount.');
+  }
+
   if (loan !== null && feePct !== null) {
     quote.origination_fee_amount = quantizeMoney((loan * feePct) / 100);
   } else {
@@ -155,6 +159,15 @@ function applyCalculated(quote: Quote): void {
     quote.initial_funding_amount = quantizeMoney(loan - holdback);
   } else {
     quote.initial_funding_amount = null;
+  }
+}
+
+function requireQuotePipeline(deal: Deal): void {
+  if (!QUOTE_PIPELINE_STATUSES.has(deal.pipeline_status)) {
+    badRequest(
+      'deal',
+      'Quote actions are only allowed while the deal is in quoting or negotiating.',
+    );
   }
 }
 
@@ -280,7 +293,10 @@ export function createQuote(
   if (!dealId) badRequest('deal', 'A deal is required to create a quote.');
   const deal = deps.findDeal(dealId);
   if (!QUOTE_PIPELINE_STATUSES.has(deal.pipeline_status)) {
-    badRequest('deal', 'Quotes can only be created while the deal is in quoting or negotiating.');
+    badRequest(
+      'deal',
+      'Quote actions are only allowed while the deal is in quoting or negotiating.',
+    );
   }
 
   const current = getCurrent(dealId);
@@ -321,6 +337,8 @@ export function createQuote(
     deal: dealId,
     version: (current?.version ?? 0) + 1,
     is_current: true,
+    is_send_ready: false,
+    missing_send_fields: [],
     status: 'draft',
     is_counter: Boolean(options.isCounter),
     created_by: 1,
@@ -363,11 +381,17 @@ export function createQuote(
     updated_at: iso,
   };
   applyCalculated(quote);
+  refreshSendReadiness(quote);
   quotes.unshift(quote);
   return quote;
 }
 
-export function updateQuote(quote: Quote, body: Record<string, unknown>): Quote {
+export function updateQuote(
+  quote: Quote,
+  body: Record<string, unknown>,
+  findDeal: (id: string) => Deal,
+): Quote {
+  requireQuotePipeline(findDeal(quote.deal));
   if (quote.status !== 'draft') {
     badRequest('status', 'Non-draft quotes are immutable.');
   }
@@ -385,28 +409,61 @@ export function updateQuote(quote: Quote, body: Record<string, unknown>): Quote 
   const fields = parseWritable(body, quote);
   Object.assign(quote, fields, { updated_at: nowIso() });
   applyCalculated(quote);
+  refreshSendReadiness(quote);
   return quote;
 }
 
-export function sendQuote(quote: Quote, body: Record<string, unknown>): Quote {
+export function sendQuote(
+  quote: Quote,
+  body: Record<string, unknown>,
+  findDeal: (id: string) => Deal,
+): Quote {
+  requireQuotePipeline(findDeal(quote.deal));
   requireCurrent(quote);
   if (!SENDABLE_FROM.has(quote.status)) {
     badRequest('status', 'Only draft quotes can be sent.');
   }
-  quote.sent_at = nowIso();
   if ('expires_at' in body) {
     const raw = body.expires_at;
     quote.expires_at = raw === null || raw === undefined || raw === '' ? null : String(raw);
   }
+  refreshSendReadiness(quote);
+  if (!quote.is_send_ready) {
+    badRequest('detail', `Complete required quote terms: ${quote.missing_send_fields.join(', ')}.`);
+  }
+  if (quote.expires_at && new Date(quote.expires_at).getTime() <= Date.now()) {
+    badRequest('expires_at', 'Expiration must be in the future.');
+  }
+  quote.sent_at = nowIso();
   quote.status = quote.is_counter ? 'countered' : 'sent';
   quote.updated_at = nowIso();
   return quote;
+}
+
+function refreshSendReadiness(quote: Quote): void {
+  const required: Array<keyof Quote> = [
+    'loan_amount',
+    'rate_type',
+    'term_months',
+    'amortization_type',
+    'recourse_type',
+    'expires_at',
+  ];
+  const missing = required.filter((field) => quote[field] === null || quote[field] === '');
+  if (quote.rate_type === 'fixed' && quote.interest_rate === null) missing.push('interest_rate');
+  if (quote.rate_type === 'floating' || quote.rate_type === 'hybrid') {
+    if (!quote.index_name.trim()) missing.push('index_name');
+    if (quote.spread === null) missing.push('spread');
+  }
+  quote.missing_send_fields = missing;
+  quote.is_send_ready = missing.length === 0;
 }
 
 export function counterQuote(
   quote: Quote,
   deps: Pick<QuotesHandlerDeps, 'findDeal' | 'getScreeningSeed'>,
 ): Quote {
+  requireQuotePipeline(deps.findDeal(quote.deal));
   requireCurrent(quote);
   if (!COUNTERABLE_FROM.has(quote.status)) {
     badRequest('status', 'Only the current sent or countered quote can be countered.');
@@ -418,28 +475,39 @@ export function counterQuote(
   return createQuote(copied, deps, { isCounter: true });
 }
 
-export function executeQuote(quote: Quote, findDocument: (id: string) => DealDocument): Quote {
+export function executeQuote(
+  quote: Quote,
+  findDocument: (id: string) => DealDocument,
+  findDeal: (id: string) => Deal,
+): Quote {
+  requireQuotePipeline(findDeal(quote.deal));
   requireCurrent(quote);
   if (!EXECUTABLE_FROM.has(quote.status)) {
     badRequest('status', 'Only the current sent or countered quote can be executed.');
   }
-  const ready = quote.attachments.some((documentId) => {
+  const readyDocs: DealDocument[] = [];
+  for (const documentId of quote.attachments) {
     try {
       const document = findDocument(documentId);
-      return (
+      if (
         document.storage_status === 'ready' &&
         document.category === 'legal' &&
         QUOTE_SUBCATEGORIES.has(document.subcategory ?? '')
-      );
+      ) {
+        readyDocs.push(document);
+      }
     } catch {
-      return false;
+      // skip missing
     }
-  });
-  if (!ready) {
+  }
+  if (readyDocs.length === 0) {
     badRequest(
       'attachments',
       'Attach at least one ready legal term sheet or LOI document before executing.',
     );
+  }
+  for (const document of readyDocs) {
+    document.is_executed = true;
   }
   quote.signed_at = nowIso();
   quote.status = 'executed';
@@ -447,7 +515,8 @@ export function executeQuote(quote: Quote, findDocument: (id: string) => DealDoc
   return quote;
 }
 
-export function withdrawQuote(quote: Quote): Quote {
+export function withdrawQuote(quote: Quote, findDeal: (id: string) => Deal): Quote {
+  requireQuotePipeline(findDeal(quote.deal));
   requireCurrent(quote);
   if (!WITHDRAWABLE_FROM.has(quote.status)) {
     badRequest('status', 'This quote cannot be withdrawn.');
@@ -458,7 +527,8 @@ export function withdrawQuote(quote: Quote): Quote {
   return quote;
 }
 
-export function expireQuote(quote: Quote): Quote {
+export function expireQuote(quote: Quote, findDeal: (id: string) => Deal): Quote {
+  requireQuotePipeline(findDeal(quote.deal));
   requireCurrent(quote);
   if (!EXPIRABLE_FROM.has(quote.status)) {
     badRequest('status', 'Only sent or countered quotes can be expired.');
@@ -472,7 +542,9 @@ export function setQuoteAttachments(
   quote: Quote,
   body: Record<string, unknown>,
   findDocument: (id: string) => DealDocument,
+  findDeal: (id: string) => Deal,
 ): Quote {
+  requireQuotePipeline(findDeal(quote.deal));
   requireCurrent(quote);
   if (!ATTACHMENT_EDITABLE.has(quote.status)) {
     badRequest('status', 'Attachments can only be changed on draft, sent, or countered quotes.');
@@ -491,6 +563,9 @@ export function setQuoteAttachments(
     if (document.deal !== quote.deal) {
       badRequest('document_ids', 'One or more documents are missing or not on this deal.');
     }
+    if (document.storage_status !== 'ready') {
+      badRequest('document_ids', 'One or more documents are missing or not on this deal.');
+    }
     if (document.category !== 'legal') {
       badRequest('document_ids', 'Quote attachments must use the legal document category.');
     }
@@ -502,6 +577,13 @@ export function setQuoteAttachments(
   quote.attachments = documents.map((document) => document.id);
   quote.updated_at = nowIso();
   return quote;
+}
+
+/** True when a document id is attached to an executed quote. */
+export function documentIsExecutedQuoteEvidence(documentId: string): boolean {
+  return quotes.some(
+    (quote) => quote.status === 'executed' && quote.attachments.includes(documentId),
+  );
 }
 
 export function listQuotesForDeal(dealId: string | null, status: string | null, currentOnly: boolean | null): Quote[] {
@@ -538,15 +620,17 @@ export function handleQuotesRequest(deps: QuotesHandlerDeps): unknown {
 
   const quote = findQuote(second);
 
-  if (third === 'send' && method === 'POST') return sendQuote(quote, body);
+  if (third === 'send' && method === 'POST') return sendQuote(quote, body, deps.findDeal);
   if (third === 'counter' && method === 'POST') return counterQuote(quote, deps);
-  if (third === 'execute' && method === 'POST') return executeQuote(quote, deps.findDocument);
-  if (third === 'withdraw' && method === 'POST') return withdrawQuote(quote);
-  if (third === 'expire' && method === 'POST') return expireQuote(quote);
-  if (third === 'attachments' && method === 'POST') {
-    return setQuoteAttachments(quote, body, deps.findDocument);
+  if (third === 'execute' && method === 'POST') {
+    return executeQuote(quote, deps.findDocument, deps.findDeal);
   }
-  if (method === 'PATCH' || method === 'PUT') return updateQuote(quote, body);
+  if (third === 'withdraw' && method === 'POST') return withdrawQuote(quote, deps.findDeal);
+  if (third === 'expire' && method === 'POST') return expireQuote(quote, deps.findDeal);
+  if (third === 'attachments' && method === 'POST') {
+    return setQuoteAttachments(quote, body, deps.findDocument, deps.findDeal);
+  }
+  if (method === 'PATCH' || method === 'PUT') return updateQuote(quote, body, deps.findDeal);
   if (method === 'DELETE') {
     badRequest('status', 'Quote versions cannot be deleted; create a new version instead.');
   }

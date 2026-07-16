@@ -3,6 +3,7 @@ export type DecimalString = string;
 export type ScreeningAssessmentStatus = 'draft' | 'finalized';
 export type ScreeningDecision = '' | 'advance' | 'refer' | 'decline';
 export type FinalScreeningDecision = Exclude<ScreeningDecision, ''>;
+export type PropertyConditionRating = '' | 'poor' | 'fair' | 'good' | 'excellent';
 
 export interface DebtScreeningOutputs {
   /** Ratios are fractional decimal strings: "0.6500" means 65%. */
@@ -24,6 +25,8 @@ export interface ScreeningAssessment extends DebtScreeningOutputs {
   deal: string;
   version: number;
   is_current: boolean;
+  is_complete: boolean;
+  missing_fields: string[];
   status: ScreeningAssessmentStatus;
   reviewer: number | null;
   reviewer_detail: ScreeningReviewer | null;
@@ -35,10 +38,17 @@ export interface ScreeningAssessment extends DebtScreeningOutputs {
   stabilized_value: DecimalString | null;
   project_cost: DecimalString | null;
   noi: DecimalString | null;
+  stabilized_noi: DecimalString | null;
   annual_debt_service: DecimalString | null;
   occupancy: DecimalString | null;
   proposed_rate: DecimalString | null;
   proposed_term_months: number | null;
+  current_average_rent: DecimalString | null;
+  market_rent: DecimalString | null;
+  condition_rating: PropertyConditionRating;
+  unit_mix: string;
+  exit_strategy: string;
+  exit_cap_rate: DecimalString | null;
   max_ltv: DecimalString;
   max_ltc: DecimalString;
   min_dscr: DecimalString;
@@ -58,10 +68,17 @@ export interface CreateScreeningAssessmentPayload {
   stabilized_value: DecimalString | null;
   project_cost: DecimalString | null;
   noi: DecimalString | null;
+  stabilized_noi: DecimalString | null;
   annual_debt_service: DecimalString | null;
   occupancy: DecimalString | null;
   proposed_rate: DecimalString | null;
   proposed_term_months: number | null;
+  current_average_rent: DecimalString | null;
+  market_rent: DecimalString | null;
+  condition_rating: PropertyConditionRating;
+  unit_mix: string;
+  exit_strategy: string;
+  exit_cap_rate: DecimalString | null;
   equity_summary: string;
   equity_target_irr: DecimalString | null;
   equity_target_multiple: DecimalString | null;
@@ -84,10 +101,17 @@ export interface ScreeningAssessmentFormValues {
   stabilized_value: string;
   project_cost: string;
   noi: string;
+  stabilized_noi: string;
   annual_debt_service: string;
   occupancy: string;
   proposed_rate: string;
   proposed_term_months: string;
+  current_average_rent: string;
+  market_rent: string;
+  condition_rating: PropertyConditionRating;
+  unit_mix: string;
+  exit_strategy: string;
+  exit_cap_rate: string;
   equity_summary: string;
   equity_target_irr: string;
   equity_target_multiple: string;

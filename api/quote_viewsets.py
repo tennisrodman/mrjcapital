@@ -87,6 +87,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
             sent = send_quote(
                 quote,
                 expires_at=serializer.validated_data.get('expires_at'),
+                performed_by=request.user,
             )
         except DjangoValidationError as exc:
             _raise_drf_validation(exc)
@@ -105,7 +106,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
     def execute(self, request, pk=None):
         quote = self.get_object()
         try:
-            executed = execute_quote(quote)
+            executed = execute_quote(quote, performed_by=request.user)
         except DjangoValidationError as exc:
             _raise_drf_validation(exc)
         return Response(self.get_serializer(executed).data)
@@ -114,7 +115,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
     def withdraw(self, request, pk=None):
         quote = self.get_object()
         try:
-            withdrawn = withdraw_quote(quote)
+            withdrawn = withdraw_quote(quote, performed_by=request.user)
         except DjangoValidationError as exc:
             _raise_drf_validation(exc)
         return Response(self.get_serializer(withdrawn).data)
@@ -123,7 +124,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
     def expire(self, request, pk=None):
         quote = self.get_object()
         try:
-            expired = expire_quote(quote)
+            expired = expire_quote(quote, performed_by=request.user)
         except DjangoValidationError as exc:
             _raise_drf_validation(exc)
         return Response(self.get_serializer(expired).data)
@@ -134,7 +135,11 @@ class QuoteViewSet(viewsets.ModelViewSet):
         serializer = QuoteAttachmentsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            updated = set_quote_attachments(quote, serializer.validated_data['document_ids'])
+            updated = set_quote_attachments(
+                quote,
+                serializer.validated_data['document_ids'],
+                user=request.user,
+            )
         except DjangoValidationError as exc:
             _raise_drf_validation(exc)
         return Response(self.get_serializer(updated).data)

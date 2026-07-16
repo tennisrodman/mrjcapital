@@ -7,6 +7,14 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+class ScreeningUndeletableQuerySet(models.QuerySet):
+    def delete(self):
+        raise ValidationError('Screening assessment versions cannot be deleted via queryset.')
+
+
+ScreeningUndeletableManager = models.Manager.from_queryset(ScreeningUndeletableQuerySet)
+
+
 class ScreeningAssessment(models.Model):
     """A versioned, point-in-time first-pass underwriting assessment.
 
@@ -24,6 +32,12 @@ class ScreeningAssessment(models.Model):
         ADVANCE = 'advance', 'Advance'
         REFER = 'refer', 'Refer'
         DECLINE = 'decline', 'Decline'
+
+    class ConditionRating(models.TextChoices):
+        POOR = 'poor', 'Poor'
+        FAIR = 'fair', 'Fair'
+        GOOD = 'good', 'Good'
+        EXCELLENT = 'excellent', 'Excellent'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     deal = models.ForeignKey('Deal', on_delete=models.PROTECT, related_name='screening_assessments')
@@ -79,6 +93,13 @@ class ScreeningAssessment(models.Model):
         blank=True,
         validators=[MinValueValidator(Decimal('0'))],
     )
+    stabilized_noi = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
     annual_debt_service = models.DecimalField(
         max_digits=16,
         decimal_places=2,
@@ -106,6 +127,39 @@ class ScreeningAssessment(models.Model):
         null=True,
         blank=True,
         validators=[MinValueValidator(1)],
+    )
+    current_average_rent = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    market_rent = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    condition_rating = models.CharField(
+        max_length=16,
+        choices=ConditionRating.choices,
+        blank=True,
+        default='',
+    )
+    unit_mix = models.TextField(
+        blank=True,
+        help_text='Concise manual description of unit, tenant, or collateral mix.',
+    )
+    exit_strategy = models.TextField(blank=True)
+    exit_cap_rate = models.DecimalField(
+        max_digits=7,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('100'))],
+        help_text='Expected exit capitalization rate expressed as a percentage.',
     )
 
     # Explicit, versioned threshold fields are the underwriting-policy
@@ -173,6 +227,8 @@ class ScreeningAssessment(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ScreeningUndeletableManager()
 
     class Meta:
         ordering = ['deal', '-version']

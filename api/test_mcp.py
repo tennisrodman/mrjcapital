@@ -264,12 +264,18 @@ class MCPDealQueryTests(MCPDealFixtureMixin, TestCase):
         summary = get_deal_summary(self.staff_user)
 
         self.assertEqual(summary['active_deals'], 2)
-        self.assertEqual(summary['pipeline_value'], '3000000')
-        self.assertEqual(summary['gross_pipeline_value'], '3100000')
+        self.assertEqual(summary['pipeline_value'], '3000000.00')
+        self.assertEqual(summary['gross_pipeline_value'], '3100000.00')
         self.assertEqual(
             {row['pipeline_status']: row['count'] for row in summary['by_pipeline_status']},
             {'closing': 1, 'dead': 1, 'sourced': 1},
         )
+
+        Deal.objects.filter(pk=self.bridge_deal.pk).update(pipeline_status=PipelineStatus.CLOSED)
+        closed_summary = get_deal_summary(self.staff_user)
+        self.assertEqual(closed_summary['active_deals'], 1)
+        self.assertEqual(closed_summary['pipeline_value'], '500000.00')
+        Deal.objects.filter(pk=self.bridge_deal.pk).update(pipeline_status=PipelineStatus.CLOSING)
 
     def test_mcp_queries_are_read_only(self):
         before_deals = list(

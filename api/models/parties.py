@@ -1,11 +1,18 @@
 import uuid
+from decimal import Decimal
 
-from django.core.validators import MaxValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from api.fields import EncryptedTextField
 
-from .choices import BrokerStatus, RelationshipRating, SponsorEntityType
+from .choices import (
+    BrokerCommissionType,
+    BrokerStatus,
+    RelationshipRating,
+    SponsorConnectionSource,
+    SponsorEntityType,
+)
 
 
 class Sponsor(models.Model):
@@ -32,6 +39,22 @@ class Sponsor(models.Model):
     )
     completed_projects = models.PositiveIntegerField(null=True, blank=True)
     bankruptcy_history = models.BooleanField(null=True, blank=True)
+    business_address = models.TextField(blank=True)
+    total_units_owned = models.PositiveIntegerField(null=True, blank=True)
+    total_sf_managed = models.PositiveBigIntegerField(null=True, blank=True)
+    assets_under_management = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    track_record = models.JSONField(default=list, blank=True)
+    connection_source = models.CharField(
+        max_length=32,
+        choices=SponsorConnectionSource.choices,
+        blank=True,
+    )
     details = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -54,6 +77,20 @@ class Broker(models.Model):
     email = models.EmailField(db_index=True)
     phone = models.CharField(max_length=40, blank=True)
     status = models.CharField(max_length=16, choices=BrokerStatus.choices, default=BrokerStatus.ACTIVE)
+    default_commission_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    commission_type = models.CharField(
+        max_length=32,
+        choices=BrokerCommissionType.choices,
+        blank=True,
+    )
+    preferred_deal_types = models.JSONField(default=list, blank=True)
+    geographic_focus = models.JSONField(default=list, blank=True)
     details = models.JSONField(default=dict, blank=True)
 
     class Meta:

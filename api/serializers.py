@@ -3,6 +3,7 @@ import re
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from api.models import (
@@ -15,6 +16,7 @@ from api.models import (
     Document,
     DocumentCategory,
     Fund,
+    InvestmentType,
     Property,
     Sponsor,
 )
@@ -28,6 +30,18 @@ from api.services.audit import SENSITIVE_SPONSOR_FIELDS
 
 
 ALLOWED_DOCUMENT_VISIBILITY_ROLES = {'internal', 'investor', 'borrower', 'counsel'}
+SUPPORTED_DEBT_INVESTMENT_TYPES = {
+    InvestmentType.WHOLE_LOAN_BRIDGE,
+    InvestmentType.WHOLE_LOAN_PERMANENT,
+}
+
+
+def _validate_supported_investment_type(value):
+    if value not in SUPPORTED_DEBT_INVESTMENT_TYPES:
+        raise serializers.ValidationError(
+            'Only whole-loan debt investments are available in the current release.'
+        )
+    return value
 
 
 def _validate_visibility_roles(value):
@@ -84,6 +98,12 @@ class SponsorSerializer(serializers.ModelSerializer):
             'years_experience',
             'completed_projects',
             'bankruptcy_history',
+            'business_address',
+            'total_units_owned',
+            'total_sf_managed',
+            'assets_under_management',
+            'track_record',
+            'connection_source',
             'details',
         ]
 
@@ -131,6 +151,10 @@ class BrokerSerializer(serializers.ModelSerializer):
             'email',
             'phone',
             'status',
+            'default_commission_rate',
+            'commission_type',
+            'preferred_deal_types',
+            'geographic_focus',
             'details',
         ]
 
@@ -161,6 +185,13 @@ class PropertySerializer(serializers.ModelSerializer):
             'year_renovated',
             'county',
             'msa',
+            'number_of_buildings',
+            'number_of_stories',
+            'parking_spaces',
+            'lot_size_acres',
+            'flood_zone',
+            'zoning_designation',
+            'environmental_status',
             'details',
         ]
 
@@ -211,6 +242,14 @@ class DealPropertySerializer(serializers.ModelSerializer):
                 if field_name in attrs and attrs[field_name] != getattr(self.instance, field_name):
                     raise serializers.ValidationError({field_name: 'This relationship cannot be changed after creation.'})
         deal = attrs.get('deal') or getattr(self.instance, 'deal', None)
+        property_obj = attrs.get('property') or getattr(self.instance, 'property', None)
+        if property_obj and not self.instance:
+            request = self.context.get('request')
+            user = getattr(request, 'user', None) if request else None
+            if not _can_attach_property(user, property_obj):
+                raise serializers.ValidationError({
+                    'property': 'Selected property is not available.',
+                })
         is_primary = attrs.get('is_primary', getattr(self.instance, 'is_primary', False))
         if deal and is_primary:
             existing = DealProperty.objects.filter(deal=deal, is_primary=True)
@@ -287,7 +326,11 @@ class DealSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    assigned_analyst = serializers.PrimaryKeyRelatedField(read_only=True)
+    assigned_analyst = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
     # Read-only expansions so list/detail views can render names without N+1 lookups.
     # The writable FK fields above remain the canonical inputs; encrypted sponsor
     # fields stay write-only and never surface through sponsor_detail.
@@ -327,6 +370,13 @@ class DealSerializer(serializers.ModelSerializer):
             'estimated_value',
             'renovation_budget',
             'description',
+            'deposit_status',
+            'deposit_received_date',
+            'deposit_account_label',
+            'deposit_refund_conditions',
+            'exclusivity_granted',
+            'exclusivity_expiry_date',
+            'key_negotiation_changes',
             'details',
             'properties',
             'property_ids',
@@ -348,22 +398,37 @@ class DealSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('One or more selected properties are not available.')
         return value
 
+    def validate_investment_type(self, value):
+        return _validate_supported_investment_type(value)
+
     def validate_details(self, value):
         _reject_sensitive_details(value)
         return value
 
     def validate(self, attrs):
         if self.instance:
+            request = self.context.get('request')
+            user = getattr(request, 'user', None) if request else None
+            if 'assigned_analyst' in attrs and not _is_staff_user(user):
+                raise serializers.ValidationError({
+                    'assigned_analyst': 'Only staff may reassign a deal.',
+                })
             for field_name in ['sponsor', 'broker', 'fund']:
                 if field_name not in attrs:
                     continue
                 current_id = getattr(self.instance, f'{field_name}_id')
                 incoming_obj = attrs[field_name]
                 incoming_id = incoming_obj.pk if incoming_obj else None
-                if current_id and incoming_id != current_id:
+                if current_id and incoming_id != current_id and not _is_staff_user(user):
                     raise serializers.ValidationError({
-                        field_name: 'This relationship cannot be changed through this endpoint.',
+                        field_name: 'Only staff may change an existing relationship.',
                     })
+                # Empty → set must use the same visibility rules as deal create.
+                if not current_id and incoming_obj is not None:
+                    if not _can_attach_related_entity(user, incoming_obj):
+                        raise serializers.ValidationError({
+                            field_name: 'Selected record is not available.',
+                        })
         return attrs
 
     def create(self, validated_data):
@@ -453,6 +518,9 @@ class DealCreateSerializer(serializers.ModelSerializer):
     def validate_details(self, value):
         _reject_sensitive_details(value)
         return value
+
+    def validate_investment_type(self, value):
+        return _validate_supported_investment_type(value)
 
     def validate_fund(self, value):
         request = self.context.get('request')
@@ -704,6 +772,17 @@ class DocumentSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {field_name: f'{field_name} cannot be changed after creation.'}
                     )
+            from api.services.quotes import document_is_executed_quote_evidence
+
+            evidence_locked = (
+                self.instance.is_executed
+                or document_is_executed_quote_evidence(self.instance)
+            )
+            if evidence_locked and 'subcategory' in attrs:
+                if attrs['subcategory'] != self.instance.subcategory:
+                    raise serializers.ValidationError({
+                        'subcategory': 'Executed document metadata cannot be changed.',
+                    })
         return attrs
 
     def validate_visibility_roles(self, value):

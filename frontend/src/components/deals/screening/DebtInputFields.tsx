@@ -2,6 +2,8 @@ import type { FieldErrors, UseFormRegister } from 'react-hook-form';
 
 import { FormField } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { SelectNative } from '@/components/ui/select-native';
+import { Textarea } from '@/components/ui/textarea';
 import type { ScreeningAssessmentFormValues } from '@/types/screening';
 import { isOptionalDecimal, isOptionalPositiveInteger, isPositiveDecimal } from './calculations';
 
@@ -11,10 +13,14 @@ type DebtFieldName =
   | 'stabilized_value'
   | 'project_cost'
   | 'noi'
+  | 'stabilized_noi'
   | 'annual_debt_service'
   | 'occupancy'
   | 'proposed_rate'
-  | 'proposed_term_months';
+  | 'proposed_term_months'
+  | 'current_average_rent'
+  | 'market_rent'
+  | 'exit_cap_rate';
 
 interface DecimalFieldProps {
   name: DebtFieldName;
@@ -138,8 +144,18 @@ export function DebtInputFields({
       />
       <DecimalField
         name="noi"
-        label="Annual NOI"
-        hint="In-place or stabilized NOI used for coverage."
+        label="Current annual NOI"
+        hint="In-place NOI used for current coverage."
+        prefix="$"
+        positive
+        disabled={disabled}
+        register={register}
+        errors={errors}
+      />
+      <DecimalField
+        name="stabilized_noi"
+        label="Stabilized annual NOI"
+        hint="Required before an Advance decision."
         prefix="$"
         positive
         disabled={disabled}
@@ -186,6 +202,69 @@ export function DebtInputFields({
         register={register}
         errors={errors}
       />
+      <DecimalField
+        name="current_average_rent"
+        label="Current average rent"
+        hint="Per unit or comparable collateral measure · optional."
+        prefix="$"
+        positive
+        disabled={disabled}
+        register={register}
+        errors={errors}
+      />
+      <DecimalField
+        name="market_rent"
+        label="Market rent"
+        hint="Per unit or comparable collateral measure · optional."
+        prefix="$"
+        positive
+        disabled={disabled}
+        register={register}
+        errors={errors}
+      />
+      <DecimalField
+        name="exit_cap_rate"
+        label="Exit cap rate"
+        hint="Required before an Advance decision."
+        suffix="%"
+        positive
+        disabled={disabled}
+        register={register}
+        errors={errors}
+      />
+      <FormField label="Property condition" hint="Optional">
+        <SelectNative
+          placeholder="Not assessed"
+          options={[
+            { value: 'poor', label: 'Poor' },
+            { value: 'fair', label: 'Fair' },
+            { value: 'good', label: 'Good' },
+            { value: 'excellent', label: 'Excellent' },
+          ]}
+          disabled={disabled}
+          {...register('condition_rating')}
+        />
+      </FormField>
+      <FormField label="Unit / collateral mix" hint="Optional" className="sm:col-span-2">
+        <Textarea
+          rows={3}
+          disabled={disabled}
+          placeholder="Example: 40 one-bedroom and 24 two-bedroom units"
+          {...register('unit_mix')}
+        />
+      </FormField>
+      <FormField
+        label="Exit strategy"
+        hint="Required before an Advance decision."
+        className="sm:col-span-2"
+      >
+        <Textarea
+          rows={3}
+          disabled={disabled}
+          placeholder="Describe repayment, refinance, or sale assumptions."
+          {...register('exit_strategy')}
+        />
+      </FormField>
     </div>
   );
 }

@@ -8,6 +8,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.models import (
+    ActivityActionType,
+    ActivityLog,
     Document,
     DocumentCategory,
     DocumentStorageStatus,
@@ -127,10 +129,33 @@ def get_current_quote(deal):
     return Quote.objects.filter(deal=deal).order_by('-version').first()
 
 
+def quote_missing_send_fields(quote):
+    """Return fields that make a debt quote nonsensical or unusable to send."""
+    required = ('loan_amount', 'rate_type', 'term_months', 'amortization_type', 'recourse_type', 'expires_at')
+    missing = [field for field in required if getattr(quote, field, None) in (None, '')]
+    if quote.rate_type == Quote.RateType.FIXED and quote.interest_rate in (None, ''):
+        missing.append('interest_rate')
+    if quote.rate_type in {Quote.RateType.FLOATING, Quote.RateType.HYBRID}:
+        if not quote.index_name.strip():
+            missing.append('index_name')
+        if quote.spread in (None, ''):
+            missing.append('spread')
+    return missing
+
+
+def quote_is_send_ready(quote):
+    return not quote_missing_send_fields(quote)
+
+
 def apply_calculated_quote_fields(quote):
     loan_amount = _decimal_or_none(quote.loan_amount)
     fee_pct = _decimal_or_none(quote.origination_fee_pct)
     holdback = _decimal_or_none(quote.holdback_amount)
+
+    if loan_amount is not None and holdback is not None and holdback > loan_amount:
+        raise ValidationError({
+            'holdback_amount': 'Holdback cannot exceed the loan amount.',
+        })
 
     if loan_amount is not None and fee_pct is not None:
         quote.origination_fee_amount = (loan_amount * fee_pct / HUNDRED).quantize(
@@ -150,6 +175,54 @@ def apply_calculated_quote_fields(quote):
     return quote
 
 
+def quote_execution_evidence_queryset(quote):
+    return quote.attachments.filter(
+        storage_status=DocumentStorageStatus.READY,
+        category=QUOTE_DOCUMENT_CATEGORY,
+        subcategory__in=QUOTE_DOCUMENT_SUBCATEGORIES,
+    )
+
+
+def quote_has_execution_evidence(quote) -> bool:
+    return quote_execution_evidence_queryset(quote).exists()
+
+
+def document_is_executed_quote_evidence(document) -> bool:
+    """True when a document is attached to an executed quote (immutable evidence)."""
+    return document.quotes.filter(status=Quote.Status.EXECUTED).exists()
+
+
+def _authenticated_actor(user):
+    if user is not None and getattr(user, 'is_authenticated', False):
+        return user
+    return None
+
+
+def _log_quote(deal, action_type, performed_by, *, description, metadata=None, old_value='', new_value=''):
+    ActivityLog.objects.create(
+        deal=deal,
+        action_type=action_type,
+        performed_by=_authenticated_actor(performed_by),
+        description=description,
+        old_value=old_value,
+        new_value=new_value,
+        metadata=metadata or {},
+    )
+
+
+def _require_quote_pipeline(deal):
+    if deal.pipeline_status not in QUOTE_PIPELINE_STATUSES:
+        raise ValidationError({
+            'deal': 'Quote actions are only allowed while the deal is in quoting or negotiating.',
+        })
+
+
+def _lock_deal_for_quote(deal_id) -> Deal:
+    deal = Deal.objects.select_for_update().get(pk=deal_id)
+    _require_quote_pipeline(deal)
+    return deal
+
+
 def create_next_quote(
     *,
     deal,
@@ -160,11 +233,7 @@ def create_next_quote(
 ):
     _reject_unknown_create_fields(fields)
     with transaction.atomic():
-        locked_deal = Deal.objects.select_for_update().get(pk=deal.pk)
-        if locked_deal.pipeline_status not in QUOTE_PIPELINE_STATUSES:
-            raise ValidationError({
-                'deal': 'Quotes can only be created while the deal is in quoting or negotiating.',
-            })
+        locked_deal = _lock_deal_for_quote(deal.pk)
         current = get_current_quote(locked_deal)
         if current and current.status == Quote.Status.DRAFT:
             raise ValidationError({
@@ -189,10 +258,26 @@ def create_next_quote(
         apply_calculated_quote_fields(quote)
         quote.full_clean()
         quote.save()
+        _log_quote(
+            locked_deal,
+            ActivityActionType.QUOTE_COUNTERED if is_counter else ActivityActionType.QUOTE_CREATED,
+            created_by,
+            description=(
+                f'Quote v{quote.version} countered'
+                if is_counter
+                else f'Quote v{quote.version} created'
+            ),
+            metadata={
+                'quote_id': str(quote.pk),
+                'version': quote.version,
+                'is_counter': is_counter,
+            },
+            new_value=quote.status,
+        )
         return quote
 
 
-def update_draft_quote(quote, **fields):
+def update_draft_quote(quote, *, performed_by=None, **fields):
     unknown = sorted(set(fields) - EDITABLE_DRAFT_FIELDS)
     if unknown:
         raise ValidationError({
@@ -203,8 +288,10 @@ def update_draft_quote(quote, **fields):
         raise ValidationError({'deal': 'A quote cannot be moved to another deal.'})
 
     with transaction.atomic():
+        locked_deal = _lock_deal_for_quote(quote.deal_id)
         locked = Quote.objects.select_for_update().get(pk=quote.pk)
         _require_current_draft(locked)
+        changed = sorted(fields.keys())
         for field_name, value in fields.items():
             setattr(locked, field_name, value)
         apply_calculated_quote_fields(locked)
@@ -215,27 +302,59 @@ def update_draft_quote(quote, **fields):
             'initial_funding_amount',
             'updated_at',
         ])
+        if changed:
+            _log_quote(
+                locked_deal,
+                ActivityActionType.QUOTE_UPDATED,
+                performed_by,
+                description=f'Quote v{locked.version} draft updated',
+                metadata={
+                    'quote_id': str(locked.pk),
+                    'version': locked.version,
+                    'fields': changed,
+                },
+            )
         return locked
 
 
-def send_quote(quote, *, expires_at=None):
+def send_quote(quote, *, expires_at=None, performed_by=None):
     with transaction.atomic():
+        locked_deal = _lock_deal_for_quote(quote.deal_id)
         locked = Quote.objects.select_for_update().get(pk=quote.pk)
         _require_current(locked)
         if locked.status not in SENDABLE_FROM:
             raise ValidationError({'status': 'Only draft quotes can be sent.'})
-        locked.sent_at = timezone.now()
         if expires_at is not None:
             locked.expires_at = expires_at
+        missing_fields = quote_missing_send_fields(locked)
+        if missing_fields:
+            raise ValidationError({
+                field_name: 'Required before a quote can be sent.'
+                for field_name in missing_fields
+            })
+        if locked.expires_at <= timezone.now():
+            raise ValidationError({'expires_at': 'Expiration must be in the future.'})
+        old_status = locked.status
+        locked.sent_at = timezone.now()
         locked.status = Quote.Status.COUNTERED if locked.is_counter else Quote.Status.SENT
         locked.full_clean()
         locked.save(update_fields=['status', 'sent_at', 'expires_at', 'updated_at'])
+        _log_quote(
+            locked_deal,
+            ActivityActionType.QUOTE_SENT,
+            performed_by,
+            description=f'Quote v{locked.version} sent',
+            metadata={'quote_id': str(locked.pk), 'version': locked.version},
+            old_value=old_status,
+            new_value=locked.status,
+        )
         return locked
 
 
 def counter_quote(*, quote, created_by=None):
     with transaction.atomic():
         locked = Quote.objects.select_for_update().select_related('deal').get(pk=quote.pk)
+        _lock_deal_for_quote(locked.deal_id)
         _require_current(locked)
         if locked.status not in COUNTERABLE_FROM:
             raise ValidationError({
@@ -254,70 +373,123 @@ def counter_quote(*, quote, created_by=None):
         )
 
 
-def execute_quote(quote, *, signed_at=None):
+def execute_quote(quote, *, signed_at=None, performed_by=None):
     with transaction.atomic():
-        locked = Quote.objects.select_for_update().prefetch_related('attachments').get(pk=quote.pk)
+        locked_deal = _lock_deal_for_quote(quote.deal_id)
+        locked = (
+            Quote.objects.select_for_update()
+            .prefetch_related('attachments')
+            .get(pk=quote.pk)
+        )
         _require_current(locked)
         if locked.status not in EXECUTABLE_FROM:
             raise ValidationError({
                 'status': 'Only the current sent or countered quote can be executed.',
             })
-        ready = locked.attachments.filter(
-            storage_status=DocumentStorageStatus.READY,
-            category=QUOTE_DOCUMENT_CATEGORY,
-            subcategory__in=QUOTE_DOCUMENT_SUBCATEGORIES,
-        )
-        if not ready.exists():
+        ready = list(quote_execution_evidence_queryset(locked))
+        if not ready:
             raise ValidationError({
                 'attachments': (
                     'Attach at least one ready legal term sheet or LOI document '
                     'before executing.'
                 ),
             })
+        # Lock execution artifacts so later deletes cannot erase Signed evidence.
+        Document.objects.filter(pk__in=[doc.pk for doc in ready]).update(is_executed=True)
+        old_status = locked.status
         locked.signed_at = signed_at or timezone.now()
         locked.status = Quote.Status.EXECUTED
         locked.full_clean()
         locked.save(update_fields=['status', 'signed_at', 'updated_at'])
+        _log_quote(
+            locked_deal,
+            ActivityActionType.QUOTE_EXECUTED,
+            performed_by,
+            description=f'Quote v{locked.version} executed',
+            metadata={
+                'quote_id': str(locked.pk),
+                'version': locked.version,
+                'attachment_ids': [str(doc.pk) for doc in ready],
+            },
+            old_value=old_status,
+            new_value=locked.status,
+        )
         return locked
 
 
-def withdraw_quote(quote):
+def withdraw_quote(quote, *, performed_by=None):
     with transaction.atomic():
+        locked_deal = _lock_deal_for_quote(quote.deal_id)
         locked = Quote.objects.select_for_update().get(pk=quote.pk)
         _require_current(locked)
         if locked.status not in WITHDRAWABLE_FROM:
             raise ValidationError({'status': 'This quote cannot be withdrawn.'})
+        old_status = locked.status
         locked.withdrawn_at = timezone.now()
         locked.status = Quote.Status.WITHDRAWN
         locked.full_clean()
         locked.save(update_fields=['status', 'withdrawn_at', 'updated_at'])
+        _log_quote(
+            locked_deal,
+            ActivityActionType.QUOTE_WITHDRAWN,
+            performed_by,
+            description=f'Quote v{locked.version} withdrawn',
+            metadata={'quote_id': str(locked.pk), 'version': locked.version},
+            old_value=old_status,
+            new_value=locked.status,
+        )
         return locked
 
 
-def expire_quote(quote):
+def expire_quote(quote, *, performed_by=None):
     with transaction.atomic():
+        locked_deal = _lock_deal_for_quote(quote.deal_id)
         locked = Quote.objects.select_for_update().get(pk=quote.pk)
         _require_current(locked)
         if locked.status not in EXPIRABLE_FROM:
             raise ValidationError({'status': 'Only sent or countered quotes can be expired.'})
+        old_status = locked.status
         locked.status = Quote.Status.EXPIRED
         locked.full_clean()
         locked.save(update_fields=['status', 'updated_at'])
+        _log_quote(
+            locked_deal,
+            ActivityActionType.QUOTE_EXPIRED,
+            performed_by,
+            description=f'Quote v{locked.version} expired',
+            metadata={'quote_id': str(locked.pk), 'version': locked.version},
+            old_value=old_status,
+            new_value=locked.status,
+        )
         return locked
 
 
-def set_quote_attachments(quote, document_ids):
+def set_quote_attachments(quote, document_ids, *, user=None):
     normalized_ids = _normalize_document_ids(document_ids)
     with transaction.atomic():
-        locked = Quote.objects.select_for_update().get(pk=quote.pk)
+        locked_deal = _lock_deal_for_quote(quote.deal_id)
+        locked = Quote.objects.select_for_update().prefetch_related('attachments').get(pk=quote.pk)
         _require_current(locked)
         if locked.status not in ATTACHMENT_EDITABLE_STATUSES:
             raise ValidationError({
                 'status': 'Attachments can only be changed on draft, sent, or countered quotes.',
             })
+        existing = list(locked.attachments.all())
+        before_ids = {str(doc.pk) for doc in existing}
+        actor = user
         documents = list(
-            Document.objects.filter(pk__in=normalized_ids, deal_id=locked.deal_id)
+            Document.objects.filter(
+                pk__in=normalized_ids,
+                deal_id=locked.deal_id,
+                storage_status=DocumentStorageStatus.READY,
+            )
         )
+        if actor is not None and not (getattr(actor, 'is_staff', False) or getattr(actor, 'is_superuser', False)):
+            documents = [
+                document
+                for document in documents
+                if 'internal' in (document.visibility_roles or [])
+            ]
         found_ids = {document.pk for document in documents}
         missing = [str(document_id) for document_id in normalized_ids if document_id not in found_ids]
         if missing:
@@ -333,7 +505,30 @@ def set_quote_attachments(quote, document_ids):
                 raise ValidationError({
                     'document_ids': 'Quote attachments must use subcategory term_sheet or loi.',
                 })
-        locked.attachments.set(documents)
+        invisible = []
+        if actor is not None and not (getattr(actor, 'is_staff', False) or getattr(actor, 'is_superuser', False)):
+            invisible = [
+                document
+                for document in existing
+                if 'internal' not in (document.visibility_roles or [])
+            ]
+        final_docs = {document.pk: document for document in documents}
+        for document in invisible:
+            final_docs[document.pk] = document
+        locked.attachments.set(list(final_docs.values()))
+        after_ids = {str(doc_id) for doc_id in final_docs}
+        _log_quote(
+            locked_deal,
+            ActivityActionType.QUOTE_ATTACHMENTS_UPDATED,
+            actor,
+            description=f'Quote v{locked.version} attachments updated',
+            metadata={
+                'quote_id': str(locked.pk),
+                'version': locked.version,
+                'attached_document_ids': sorted(after_ids - before_ids),
+                'detached_document_ids': sorted(before_ids - after_ids),
+            },
+        )
         return locked
 
 

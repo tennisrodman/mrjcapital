@@ -39,6 +39,7 @@ type DebtField = keyof Pick<
   | 'amortization_months'
   | 'origination_fee_pct'
   | 'exit_fee_pct'
+  | 'extension_terms'
   | 'holdback_amount'
   | 'good_faith_deposit'
   | 'min_dscr'
@@ -47,7 +48,10 @@ type DebtField = keyof Pick<
   | 'prepayment_terms'
   | 'recourse_type'
   | 'recourse_carveouts'
+  | 'interest_reserve_months'
+  | 'interest_reserve_amount'
   | 'notes'
+  | 'expires_on'
 >;
 
 interface DebtTermsFieldsProps {
@@ -259,6 +263,16 @@ export function DebtTermsFields({
         />
       </FormField>
 
+      <FormField label="Expiration date" htmlFor="quote-expires-on" hint="Required before sending.">
+        <Input
+          id="quote-expires-on"
+          type="date"
+          disabled={disabled}
+          value={values.expires_on}
+          onChange={(event) => onChange('expires_on', event.target.value)}
+        />
+      </FormField>
+
       <FormField label="Holdback" htmlFor="quote-holdback-amount">
         <MoneyInput
           id="quote-holdback-amount"
@@ -287,6 +301,29 @@ export function DebtTermsFields({
           disabled={disabled}
           onChange={(value) => onChange('good_faith_deposit', value)}
         />
+      </FormField>
+
+      <FormField label="Interest reserve" htmlFor="quote-interest-reserve-amount">
+        <MoneyInput
+          id="quote-interest-reserve-amount"
+          value={values.interest_reserve_amount}
+          disabled={disabled}
+          onChange={(value) => onChange('interest_reserve_amount', value)}
+        />
+      </FormField>
+
+      <FormField label="Interest reserve period" htmlFor="quote-interest-reserve-months">
+        <div className="relative">
+          <Input
+            id="quote-interest-reserve-months"
+            inputMode="numeric"
+            disabled={disabled}
+            value={values.interest_reserve_months}
+            onChange={(event) => onChange('interest_reserve_months', event.target.value)}
+            className="pr-10 tabular-nums"
+          />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[var(--slate)]">mo</span>
+        </div>
       </FormField>
 
       <FormField label="Min DSCR" htmlFor="quote-min-dscr">
@@ -335,6 +372,22 @@ export function DebtTermsFields({
           disabled={disabled}
           options={RECOURSE_OPTIONS}
           onChange={(event) => onChange('recourse_type', event.target.value)}
+        />
+      </FormField>
+
+      <FormField
+        label="Extension options"
+        htmlFor="quote-extension-terms"
+        hint="Number, length, fee, and conditions."
+        className="sm:col-span-2"
+      >
+        <Textarea
+          id="quote-extension-terms"
+          disabled={disabled}
+          rows={2}
+          placeholder="Two 6-month extensions; 0.25% fee; no default and tests maintained."
+          value={values.extension_terms}
+          onChange={(event) => onChange('extension_terms', event.target.value)}
         />
       </FormField>
 

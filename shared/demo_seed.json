@@ -490,8 +490,8 @@
       "source_channel": "broker",
       "source_date": "2026-05-18",
       "requested_amount": "12400000.00",
-      "purpose": "Acquisition and light renovation",
-      "profile": "Value-add multifamily bridge",
+      "purpose": "acquisition",
+      "profile": "value_add",
       "estimated_value": "19000000.00",
       "renovation_budget": "1350000.00",
       "description": "Bridge financing for the acquisition and renovation of a 184-unit garden-style community.",
@@ -2439,6 +2439,276 @@
       "new_value": "quoting",
       "reason": "Credit team issued terms",
       "performed_at": "2026-06-08T16:53:00.000Z"
+    }
+  ],
+  "dd_templates": [
+    {
+      "id": "tmpl-debt",
+      "key": "debt_acquisition",
+      "name": "Debt acquisition",
+      "description": "Standard acquisition financing closing checklist.",
+      "is_active": true,
+      "items": [
+        {
+          "id": "tmpl-debt-dd-1",
+          "sort_order": 1,
+          "kind": "dd",
+          "title": "Title commitment / proforma policy",
+          "description": "",
+          "default_days_before_target_close": 14
+        },
+        {
+          "id": "tmpl-debt-dd-2",
+          "sort_order": 2,
+          "kind": "dd",
+          "title": "Survey",
+          "description": "",
+          "default_days_before_target_close": 14
+        },
+        {
+          "id": "tmpl-debt-dd-3",
+          "sort_order": 3,
+          "kind": "dd",
+          "title": "Environmental (Phase I)",
+          "description": "",
+          "default_days_before_target_close": 21
+        },
+        {
+          "id": "tmpl-debt-dd-4",
+          "sort_order": 4,
+          "kind": "dd",
+          "title": "Appraisal",
+          "description": "",
+          "default_days_before_target_close": 21
+        },
+        {
+          "id": "tmpl-debt-dd-5",
+          "sort_order": 5,
+          "kind": "dd",
+          "title": "Insurance binder",
+          "description": "",
+          "default_days_before_target_close": 7
+        },
+        {
+          "id": "tmpl-debt-dd-6",
+          "sort_order": 6,
+          "kind": "dd",
+          "title": "Entity / authority docs",
+          "description": "",
+          "default_days_before_target_close": 10
+        },
+        {
+          "id": "tmpl-debt-dd-7",
+          "sort_order": 7,
+          "kind": "dd",
+          "title": "Loan documents drafted",
+          "description": "",
+          "default_days_before_target_close": 5
+        },
+        {
+          "id": "tmpl-debt-cp-1",
+          "sort_order": 1,
+          "kind": "cp",
+          "title": "Executed loan documents received",
+          "description": "",
+          "default_days_before_target_close": 0
+        },
+        {
+          "id": "tmpl-debt-cp-2",
+          "sort_order": 2,
+          "kind": "cp",
+          "title": "Title clear to close",
+          "description": "",
+          "default_days_before_target_close": 0
+        }
+      ]
+    },
+    {
+      "id": "tmpl-bridge",
+      "key": "bridge_loan",
+      "name": "Bridge loan",
+      "description": "Shorter bridge closing checklist.",
+      "is_active": true,
+      "items": [
+        {
+          "id": "tmpl-bridge-dd-1",
+          "sort_order": 1,
+          "kind": "dd",
+          "title": "Title commitment",
+          "description": "",
+          "default_days_before_target_close": 10
+        },
+        {
+          "id": "tmpl-bridge-dd-2",
+          "sort_order": 2,
+          "kind": "dd",
+          "title": "Insurance binder",
+          "description": "",
+          "default_days_before_target_close": 7
+        },
+        {
+          "id": "tmpl-bridge-dd-3",
+          "sort_order": 3,
+          "kind": "dd",
+          "title": "Entity / authority docs",
+          "description": "",
+          "default_days_before_target_close": 7
+        },
+        {
+          "id": "tmpl-bridge-dd-4",
+          "sort_order": 4,
+          "kind": "dd",
+          "title": "Loan documents drafted",
+          "description": "",
+          "default_days_before_target_close": 5
+        },
+        {
+          "id": "tmpl-bridge-cp-1",
+          "sort_order": 1,
+          "kind": "cp",
+          "title": "Executed loan documents received",
+          "description": "",
+          "default_days_before_target_close": 0
+        },
+        {
+          "id": "tmpl-bridge-cp-2",
+          "sort_order": 2,
+          "kind": "cp",
+          "title": "Title clear to close",
+          "description": "",
+          "default_days_before_target_close": 0
+        }
+      ]
+    },
+    {
+      "id": "tmpl-equity",
+      "key": "equity_investment",
+      "name": "Equity investment",
+      "description": "General equity / hybrid investment closing checklist.",
+      "is_active": true,
+      "items": [
+        {
+          "id": "tmpl-equity-dd-1",
+          "sort_order": 1,
+          "kind": "dd",
+          "title": "Entity docs",
+          "description": "",
+          "default_days_before_target_close": 14
+        },
+        {
+          "id": "tmpl-equity-dd-2",
+          "sort_order": 2,
+          "kind": "dd",
+          "title": "Operating agreement / subscription docs",
+          "description": "",
+          "default_days_before_target_close": 14
+        },
+        {
+          "id": "tmpl-equity-dd-3",
+          "sort_order": 3,
+          "kind": "dd",
+          "title": "Insurance (as applicable)",
+          "description": "",
+          "default_days_before_target_close": 7
+        },
+        {
+          "id": "tmpl-equity-dd-4",
+          "sort_order": 4,
+          "kind": "dd",
+          "title": "Third-party reports (as applicable)",
+          "description": "",
+          "default_days_before_target_close": 21
+        },
+        {
+          "id": "tmpl-equity-cp-1",
+          "sort_order": 1,
+          "kind": "cp",
+          "title": "Executed investment documents received",
+          "description": "",
+          "default_days_before_target_close": 0
+        },
+        {
+          "id": "tmpl-equity-cp-2",
+          "sort_order": 2,
+          "kind": "cp",
+          "title": "KYC/AML package complete",
+          "description": "",
+          "default_days_before_target_close": 0
+        }
+      ]
+    }
+  ],
+  "closing_packages": [
+    {
+      "id": "cpkg-vista",
+      "deal": "deal-vista",
+      "target_close_date": "2026-08-15",
+      "notes": "Demo closing package for Vista Ridge.",
+      "created_at": "2026-06-20T15:00:00.000Z",
+      "updated_at": "2026-06-20T15:00:00.000Z"
+    }
+  ],
+  "closing_generations": [
+    {
+      "id": "cgen-vista-1",
+      "package": "cpkg-vista",
+      "version": 1,
+      "template": "tmpl-equity",
+      "template_key": "equity_investment",
+      "template_name": "Equity investment",
+      "is_current": true,
+      "generated_at": "2026-06-20T15:05:00.000Z",
+      "generated_by": 1,
+      "superseded_at": null,
+      "superseded_by": null,
+      "supersede_reason": ""
+    }
+  ],
+  "dd_checklist_items": [
+    {
+      "id": "dd-vista-1",
+      "generation": "cgen-vista-1",
+      "source_template_item": "tmpl-equity-dd-1",
+      "sort_order": 1,
+      "title": "Entity docs",
+      "description": "",
+      "status": "in_progress",
+      "owner": null,
+      "due_date": "2026-08-01",
+      "waiver_reason": "",
+      "completed_at": null,
+      "waived_at": null,
+      "documents": [
+        {
+          "id": "doc-009",
+          "document_name": "Vista Ridge Self-Storage - Entity Certificate.xlsx",
+          "category": "entity_docs",
+          "storage_status": "ready",
+          "file_type": "xlsx",
+          "file_size_bytes": null
+        }
+      ],
+      "created_at": "2026-06-20T15:05:00.000Z",
+      "updated_at": "2026-06-22T12:00:00.000Z"
+    }
+  ],
+  "conditions_precedent": [
+    {
+      "id": "cp-vista-1",
+      "generation": "cgen-vista-1",
+      "source_template_item": "tmpl-equity-cp-1",
+      "sort_order": 1,
+      "title": "Executed investment documents received",
+      "description": "",
+      "status": "open",
+      "owner": null,
+      "due_date": "2026-08-15",
+      "waiver_reason": "",
+      "satisfied_at": null,
+      "waived_at": null,
+      "documents": [],
+      "created_at": "2026-06-20T15:05:00.000Z",
+      "updated_at": "2026-06-20T15:05:00.000Z"
     }
   ]
 }

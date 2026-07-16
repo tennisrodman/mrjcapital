@@ -1,10 +1,11 @@
 import uuid
+from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 
-from .choices import PropertyType
+from .choices import PropertyEnvironmentalStatus, PropertyType
 
 
 class Property(models.Model):
@@ -30,6 +31,23 @@ class Property(models.Model):
     )
     county = models.CharField(max_length=120, blank=True, db_index=True)
     msa = models.CharField(max_length=160, blank=True, db_index=True)
+    number_of_buildings = models.PositiveIntegerField(null=True, blank=True)
+    number_of_stories = models.PositiveIntegerField(null=True, blank=True)
+    parking_spaces = models.PositiveIntegerField(null=True, blank=True)
+    lot_size_acres = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    flood_zone = models.CharField(max_length=32, blank=True)
+    zoning_designation = models.CharField(max_length=80, blank=True)
+    environmental_status = models.CharField(
+        max_length=32,
+        choices=PropertyEnvironmentalStatus.choices,
+        blank=True,
+    )
     details = models.JSONField(default=dict, blank=True)
 
     class Meta:

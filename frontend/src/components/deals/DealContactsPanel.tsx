@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { AlertTriangle, Mail, Phone, Plus, UserPlus, X } from 'lucide-react';
+import { AlertTriangle, Mail, Pencil, Phone, Plus, Trash2, UserPlus, X } from 'lucide-react';
 
 import { Panel } from '@/components/deals/Panel';
 import { Badge } from '@/components/ui/badge';
@@ -14,12 +14,16 @@ import {
   useCreateAndLinkContact,
   useCreateDealContactLink,
   useDealContacts,
+  useDeleteDealContact,
+  useUpdateContact,
+  useUpdateDealContact,
 } from '@/lib/api/contacts';
 import { apiErrorMessage, fieldErrors } from '@/lib/apiError';
 import {
   DEAL_CONTACT_ROLE_LABELS,
   type Contact,
   type CreateAndLinkContactPayload,
+  type DealContact,
   type DealContactRole,
 } from '@/types/contact';
 
@@ -81,20 +85,44 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
   const contactsQuery = useDealContacts(dealId);
   const createAndLink = useCreateAndLinkContact(dealId);
   const retryLink = useCreateDealContactLink(dealId);
+  const updateContact = useUpdateContact(dealId);
+  const updateLink = useUpdateDealContact(dealId);
+  const deleteLink = useDeleteDealContact(dealId);
   const [formOpen, setFormOpen] = useState(false);
   const [savedButUnlinked, setSavedButUnlinked] = useState<Contact | null>(null);
+  const [editingLink, setEditingLink] = useState<DealContact | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const form = useForm<ContactFormValues>({ defaultValues: initialValues() });
   const { register, handleSubmit, reset, setError, clearErrors, formState } = form;
   const errors = formState.errors;
 
-  const isSaving = createAndLink.isPending || retryLink.isPending;
+  const isSaving = createAndLink.isPending || retryLink.isPending || updateContact.isPending || updateLink.isPending;
   const contactFieldsLocked = Boolean(savedButUnlinked);
 
   const openForm = () => {
     reset(initialValues());
     setSavedButUnlinked(null);
+    setEditingLink(null);
+    setBanner(null);
+    setNotice(null);
+    setFormOpen(true);
+  };
+
+  const openEdit = (link: DealContact) => {
+    const contact = link.contact_detail;
+    reset({
+      full_name: contact.full_name,
+      title: contact.title,
+      company_name: contact.company_name,
+      email: contact.email,
+      phone: contact.phone,
+      role: link.role,
+      is_primary: link.is_primary,
+      notes: link.notes,
+    });
+    setSavedButUnlinked(null);
+    setEditingLink(link);
     setBanner(null);
     setNotice(null);
     setFormOpen(true);
@@ -103,6 +131,7 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
   const closeForm = () => {
     reset(initialValues());
     setSavedButUnlinked(null);
+    setEditingLink(null);
     setBanner(null);
     setFormOpen(false);
   };
@@ -125,7 +154,17 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
     setBanner(null);
     setNotice(null);
     try {
-      if (savedButUnlinked) {
+      if (editingLink) {
+        await updateContact.mutateAsync({
+          contactId: editingLink.contact,
+          payload: personPayload(values).contact,
+        });
+        await updateLink.mutateAsync({
+          linkId: editingLink.id,
+          payload: { is_primary: values.is_primary, notes: values.notes.trim() },
+        });
+        setNotice(`${values.full_name.trim()} updated.`);
+      } else if (savedButUnlinked) {
         await retryLink.mutateAsync({
           contact: savedButUnlinked.id,
           role: values.role,
@@ -139,6 +178,7 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
       }
       reset(initialValues());
       setSavedButUnlinked(null);
+      setEditingLink(null);
       setFormOpen(false);
     } catch (error) {
       if (error instanceof ContactCreatedButUnlinkedError) {
@@ -179,7 +219,18 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
       ) : (
         <ul className="divide-y divide-[var(--border)]">
           {links.map((link) => (
-            <ContactRow key={link.id} link={link} />
+            <ContactRow
+              key={link.id}
+              link={link}
+              onEdit={() => openEdit(link)}
+              onRemove={() => {
+                if (!window.confirm(`Remove ${link.contact_detail.full_name} from this deal?`)) return;
+                deleteLink.mutate(link.id, {
+                  onSuccess: () => setNotice(`${link.contact_detail.full_name} removed from this deal.`),
+                  onError: (error) => setBanner(apiErrorMessage(error, 'Could not remove contact.')),
+                });
+              }}
+            />
           ))}
         </ul>
       )}
@@ -193,10 +244,12 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h3 className="font-display text-base font-medium text-[var(--ink)]">
-                {savedButUnlinked ? 'Finish linking contact' : 'Add deal contact'}
+                {editingLink ? 'Edit deal contact' : savedButUnlinked ? 'Finish linking contact' : 'Add deal contact'}
               </h3>
               <p className="mt-1 text-xs text-[var(--slate)]">
-                {savedButUnlinked
+                {editingLink
+                  ? 'Update the reusable person and this deal-specific primary setting or notes.'
+                  : savedButUnlinked
                   ? `${savedButUnlinked.full_name} is saved. Adjust the deal role or primary setting, then retry.`
                   : 'Create a reusable person, then link them to this deal.'}
               </p>
@@ -274,7 +327,7 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
               <SelectNative
                 id="deal-contact-role"
                 options={ROLE_OPTIONS}
-                disabled={isSaving}
+                disabled={isSaving || Boolean(editingLink)}
                 aria-invalid={Boolean(errors.role)}
                 {...register('role', { required: 'Select a deal role' })}
               />
@@ -310,7 +363,7 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
             </Button>
             <Button type="submit" disabled={isSaving}>
               <UserPlus className="h-4 w-4" strokeWidth={1.75} />
-              {isSaving ? 'Saving…' : savedButUnlinked ? 'Retry link' : 'Add contact'}
+              {isSaving ? 'Saving…' : editingLink ? 'Save contact' : savedButUnlinked ? 'Retry link' : 'Add contact'}
             </Button>
           </div>
         </form>
@@ -321,13 +374,12 @@ export function DealContactsPanel({ dealId }: { dealId: string }) {
 
 function ContactRow({
   link,
+  onEdit,
+  onRemove,
 }: {
-  link: {
-    contact_detail: Contact;
-    role: DealContactRole;
-    is_primary: boolean;
-    notes: string;
-  };
+  link: DealContact;
+  onEdit: () => void;
+  onRemove: () => void;
 }) {
   const contact = link.contact_detail;
   const descriptor = [contact.title, contact.company_name].filter(Boolean).join(' · ');
@@ -346,6 +398,12 @@ function ContactRow({
           {link.is_primary ? (
             <Badge className="border-[var(--brass)]/35 bg-[var(--brass)]/12 text-[var(--ink)]">Primary</Badge>
           ) : null}
+          <Button type="button" variant="ghost" size="sm" onClick={onEdit} aria-label={`Edit ${contact.full_name}`}>
+            <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onRemove} aria-label={`Remove ${contact.full_name}`}>
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </Button>
         </div>
       </div>
       {contact.email || contact.phone ? (

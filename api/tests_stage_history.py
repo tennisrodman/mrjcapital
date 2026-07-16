@@ -129,7 +129,7 @@ class DealStageHistoryTests(APITestCase):
         self.assertEqual(response.data['average_days_in_current_stage'], 3)
         by_status = {row['pipeline_status']: row for row in response.data['by_pipeline_status']}
         self.assertEqual(by_status[PipelineStatus.SCREENING]['average_days_in_current_stage'], 3)
-        self.assertEqual(str(by_status[PipelineStatus.SCREENING]['requested_amount']), '2500000')
+        self.assertEqual(str(by_status[PipelineStatus.SCREENING]['requested_amount']), '2500000.00')
         durations = {row['pipeline_status']: row for row in response.data['average_stage_duration_days']}
         self.assertEqual(durations[PipelineStatus.SOURCED]['average_days'], 2)
         self.assertEqual(durations[PipelineStatus.SOURCED]['completed_events'], 1)

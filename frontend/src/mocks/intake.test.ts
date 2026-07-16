@@ -1,9 +1,116 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { ActivityLogEntry, Deal, Paginated, Sponsor } from '@/types/deal';
+import type { ActivityLogEntry, Deal, DealSummary, Paginated, Sponsor } from '@/types/deal';
+import { setDemoIsStaffForTests } from '@/config/flags';
 import { mockApiRequest } from './handlers';
 
 describe('expanded intake mock API', () => {
+  beforeEach(() => {
+    setDemoIsStaffForTests(true);
+  });
+
+  it('enforces the same debt-only origination boundary as Live mode', async () => {
+    const payload = {
+      name: 'Debt-only boundary',
+      requested_amount: '1000000.00',
+      source_channel: 'direct',
+      source_date: '2026-07-10',
+    };
+    await expect(
+      mockApiRequest('api/deals/', {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, investment_type: 'preferred_equity' }),
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const created = await mockApiRequest<Deal>('api/deals/', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, investment_type: 'whole_loan_permanent' }),
+    });
+    await expect(
+      mockApiRequest(`api/deals/${created.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ investment_type: 'mezzanine' }),
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('blocks non-staff from clearing existing relationships', async () => {
+    setDemoIsStaffForTests(false);
+    const sponsors = await mockApiRequest<Paginated<Sponsor>>('api/sponsors/');
+    const created = await mockApiRequest<Deal>('api/deals/', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Analyst relationship lock',
+        investment_type: 'whole_loan_bridge',
+        requested_amount: '2500000.00',
+        source_channel: 'direct',
+        source_date: '2026-07-10',
+        sponsor: sponsors.results[0].id,
+      }),
+    });
+    await expect(
+      mockApiRequest(`api/deals/${created.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ sponsor: null }),
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      data: { sponsor: ['Only staff may change an existing relationship.'] },
+    });
+  });
+
+  it('supports staff assignment and negotiation maintenance in Demo mode', async () => {
+    const sponsors = await mockApiRequest<Paginated<Sponsor>>('api/sponsors/');
+    const created = await mockApiRequest<Deal>('api/deals/', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Demo maintenance parity',
+        investment_type: 'whole_loan_bridge',
+        requested_amount: '2500000.00',
+        source_channel: 'direct',
+        source_date: '2026-07-10',
+        sponsor: sponsors.results[0].id,
+      }),
+    });
+    const assignees = await mockApiRequest<Array<{ id: number; username: string }>>('api/deals/assignees/');
+    expect(assignees).toEqual([{ id: 1, username: expect.any(String) }]);
+
+    const updated = await mockApiRequest<Deal>(`api/deals/${created.id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        assigned_analyst: null,
+        sponsor: null,
+        deposit_status: 'received',
+        deposit_received_date: '2026-07-12',
+        deposit_account_label: 'Operating escrow',
+        deposit_refund_conditions: 'Refundable if title is not cleared.',
+        exclusivity_granted: true,
+        exclusivity_expiry_date: '2026-08-01',
+        key_negotiation_changes: 'Reduced the holdback.',
+      }),
+    });
+    expect(updated).toMatchObject({
+      assigned_analyst: null,
+      assigned_analyst_detail: null,
+      sponsor: null,
+      sponsor_detail: null,
+      deposit_status: 'received',
+      deposit_received_date: '2026-07-12',
+      exclusivity_granted: true,
+      key_negotiation_changes: 'Reduced the holdback.',
+    });
+  });
+
+  it('excludes post-pipeline records from active Demo summary metrics', async () => {
+    const allDeals = await mockApiRequest<Paginated<Deal>>('api/deals/?page_size=1000');
+    const summary = await mockApiRequest<DealSummary>('api/deals/summary/');
+    const inactive = new Set(['dead', 'closed', 'servicing', 'exited']);
+    expect(summary.active_deals).toBe(
+      allDeals.results.filter((deal) => !inactive.has(deal.pipeline_status)).length,
+    );
+  });
+
   it('preserves the promoted deal, sponsor, and property fields through nested creation and edit', async () => {
     const created = await mockApiRequest<Deal>('api/deals/', {
       method: 'POST',
@@ -11,8 +118,8 @@ describe('expanded intake mock API', () => {
         name: 'Demo Expanded Intake',
         investment_type: 'whole_loan_bridge',
         requested_amount: '7200000.00',
-        purpose: 'Acquisition financing',
-        profile: 'Light value-add industrial',
+        purpose: 'acquisition',
+        profile: 'value_add',
         estimated_value: '11000000.00',
         renovation_budget: '450000.00',
         description: 'Manual test deal with the promoted Release 1 intake fields.',
@@ -47,8 +154,8 @@ describe('expanded intake mock API', () => {
     });
 
     expect(created).toMatchObject({
-      purpose: 'Acquisition financing',
-      profile: 'Light value-add industrial',
+      purpose: 'acquisition',
+      profile: 'value_add',
       estimated_value: '11000000.00',
       renovation_budget: '450000.00',
       description: 'Manual test deal with the promoted Release 1 intake fields.',
@@ -72,14 +179,14 @@ describe('expanded intake mock API', () => {
     const updated = await mockApiRequest<Deal>(`api/deals/${created.id}/`, {
       method: 'PATCH',
       body: JSON.stringify({
-        purpose: 'Refinance',
+        purpose: 'refinance',
         estimated_value: null,
         renovation_budget: '525000.00',
         description: 'Updated during manual underwriting review.',
       }),
     });
     expect(updated).toMatchObject({
-      purpose: 'Refinance',
+      purpose: 'refinance',
       estimated_value: null,
       renovation_budget: '525000.00',
       description: 'Updated during manual underwriting review.',
@@ -142,7 +249,7 @@ describe('expanded intake mock API', () => {
         name: 'Atomic Demo Edit',
         investment_type: 'whole_loan_bridge',
         requested_amount: '1000000',
-        purpose: 'Original purpose',
+        purpose: 'acquisition',
         source_channel: 'direct',
         source_date: '2026-07-10',
       }),
@@ -151,12 +258,12 @@ describe('expanded intake mock API', () => {
     await expect(
       mockApiRequest(`api/deals/${created.id}/`, {
         method: 'PATCH',
-        body: JSON.stringify({ purpose: 'Must not persist', fund: 'missing-fund' }),
+        body: JSON.stringify({ purpose: 'refinance', fund: 'missing-fund' }),
       }),
     ).rejects.toMatchObject({ status: 400 });
 
     const after = await mockApiRequest<Deal>(`api/deals/${created.id}/`);
-    expect(after.purpose).toBe('Original purpose');
+    expect(after.purpose).toBe('acquisition');
     expect(after.fund).toBeNull();
     const activity = await mockApiRequest<Paginated<ActivityLogEntry>>(
       `api/activity-logs/?deal=${created.id}`,
@@ -194,10 +301,10 @@ describe('expanded intake mock API', () => {
         method: 'PATCH',
         body: JSON.stringify({ purpose: null }),
       }),
-    ).rejects.toMatchObject({ status: 400, data: { purpose: ['Not a valid string.'] } });
+    ).rejects.toMatchObject({ status: 400, data: { purpose: expect.any(Array) } });
   });
 
-  it('rejects overlength promoted Deal and nested Sponsor strings', async () => {
+  it('rejects unsupported controlled Deal choices and overlength nested Sponsor strings', async () => {
     const base = {
       name: 'Oversized Inline Fields',
       investment_type: 'whole_loan_bridge',
@@ -211,10 +318,7 @@ describe('expanded intake mock API', () => {
           method: 'POST',
           body: JSON.stringify({ ...base, [field]: 'x'.repeat(161) }),
         }),
-      ).rejects.toMatchObject({
-        status: 400,
-        data: { [field]: ['Ensure this field has no more than 160 characters.'] },
-      });
+      ).rejects.toMatchObject({ status: 400 });
     }
 
     await expect(

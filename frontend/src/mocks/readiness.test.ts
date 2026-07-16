@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { ActivityLogEntry, Deal, DealStageEvent, Paginated } from '@/types/deal';
 import type { ScreeningAssessment } from '@/types/screening';
+import { setDemoIsStaffForTests } from '@/config/flags';
 import { ApiError } from '@/lib/apiError';
 import { mockApiRequest } from './handlers';
 
@@ -36,7 +37,22 @@ async function createScreeningDeal(name: string): Promise<Deal> {
 async function finalizeDecision(dealId: string, decision: 'advance' | 'refer' | 'decline') {
   const assessment = await mockApiRequest<ScreeningAssessment>('api/screening-assessments/', {
     method: 'POST',
-    body: JSON.stringify({ deal: dealId }),
+    body: JSON.stringify({
+      deal: dealId,
+      ...(decision === 'advance' ? {
+        loan_amount: '4000000',
+        as_is_value: '6000000',
+        project_cost: '5000000',
+        noi: '500000',
+        stabilized_noi: '600000',
+        annual_debt_service: '350000',
+        occupancy: '92.00',
+        proposed_rate: '8.0000',
+        proposed_term_months: 24,
+        exit_strategy: 'Refinance after stabilization.',
+        exit_cap_rate: '5.5000',
+      } : {}),
+    }),
   });
   return mockApiRequest<ScreeningAssessment>(
     `api/screening-assessments/${assessment.id}/finalize/`,
@@ -45,6 +61,10 @@ async function finalizeDecision(dealId: string, decision: 'advance' | 'refer' | 
 }
 
 describe('screening-to-quoting mock readiness', () => {
+  beforeEach(() => {
+    setDemoIsStaffForTests(true);
+  });
+
   it('blocks quoting until the current finalized screening decision is advance', async () => {
     const deal = await createScreeningDeal('Demo Readiness Advance');
 
@@ -157,6 +177,10 @@ describe('screening-to-quoting mock readiness', () => {
 });
 
 describe('quoting-to-signed mock readiness', () => {
+  beforeEach(() => {
+    setDemoIsStaffForTests(true);
+  });
+
   async function moveToQuoting(name: string): Promise<Deal> {
     const deal = await createScreeningDeal(name);
     await finalizeDecision(deal.id, 'advance');
@@ -188,6 +212,15 @@ describe('quoting-to-signed mock readiness', () => {
       can_override: true,
     });
 
+    await mockApiRequest(`api/quotes/${quote.id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        rate_type: 'fixed',
+        amortization_type: 'interest_only',
+        recourse_type: 'limited',
+        expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      }),
+    });
     await mockApiRequest(`api/quotes/${quote.id}/send/`, {
       method: 'POST',
       body: JSON.stringify({}),

@@ -30,6 +30,19 @@ CALCULATED_FIELDS = (
     'quick_score',
 )
 
+SCREENING_REQUIRED_FOR_ADVANCE = (
+    'loan_amount',
+    'project_cost',
+    'noi',
+    'stabilized_noi',
+    'annual_debt_service',
+    'occupancy',
+    'proposed_rate',
+    'proposed_term_months',
+    'exit_strategy',
+    'exit_cap_rate',
+)
+
 # The service owns these fields.  They are never accepted through draft
 # creation/update, which prevents callers from choosing a version, forging a
 # reviewer, or supplying stale calculated values.
@@ -95,7 +108,7 @@ def calculate_screening_metrics(
         checks.append(debt_yield >= min_debt_yield)
 
     quick_score = 0
-    if checks:
+    if len(checks) == 4:
         quick_score = int(
             (Decimal(sum(checks)) * HUNDRED / Decimal(len(checks))).quantize(
                 SCORE_QUANTUM,
@@ -141,6 +154,7 @@ def create_next_assessment(*, deal, **fields):
     _reject_protected_fields(fields)
     with transaction.atomic():
         locked_deal = Deal.objects.select_for_update().get(pk=deal.pk)
+        _require_screening_stage(locked_deal)
         current = ScreeningAssessment.objects.filter(deal=locked_deal).order_by('-version').first()
         if current and current.status == ScreeningAssessment.Status.DRAFT:
             raise ValidationError({
@@ -168,6 +182,7 @@ def update_draft_assessment(*, assessment, **fields):
     with transaction.atomic():
         locked_assessment = ScreeningAssessment.objects.select_for_update().get(pk=assessment.pk)
         _require_current_draft(locked_assessment)
+        _require_screening_stage(locked_assessment.deal)
         for field_name, value in fields.items():
             setattr(locked_assessment, field_name, value)
         apply_calculated_metrics(locked_assessment)
@@ -186,6 +201,14 @@ def finalize_assessment(*, assessment, reviewer, decision, notes=None):
     with transaction.atomic():
         locked_assessment = ScreeningAssessment.objects.select_for_update().get(pk=assessment.pk)
         _require_current_draft(locked_assessment)
+        _require_screening_stage(locked_assessment.deal)
+        if decision == ScreeningAssessment.Decision.ADVANCE:
+            missing_fields = screening_missing_fields(locked_assessment)
+            if missing_fields:
+                raise ValidationError({
+                    field_name: 'Required before an assessment can advance.'
+                    for field_name in missing_fields
+                })
         locked_assessment.decision = decision
         if notes is not None:
             locked_assessment.notes = notes
@@ -211,6 +234,22 @@ def finalize_assessment(*, assessment, reviewer, decision, notes=None):
 def get_current_assessment(deal):
     """Return the latest version for a deal, or ``None`` when it has none."""
     return ScreeningAssessment.objects.filter(deal=deal).order_by('-version').first()
+
+
+def screening_missing_fields(assessment):
+    """Return concrete missing inputs required for an Advance decision."""
+    missing = [
+        field_name
+        for field_name in SCREENING_REQUIRED_FOR_ADVANCE
+        if getattr(assessment, field_name, None) in (None, '')
+    ]
+    if assessment.as_is_value in (None, '') and assessment.stabilized_value in (None, ''):
+        missing.append('as_is_value')
+    return missing
+
+
+def screening_is_complete(assessment):
+    return not screening_missing_fields(assessment)
 
 
 def _decimal_or_none(value):
@@ -245,3 +284,10 @@ def _reject_protected_fields(fields):
     protected = sorted(set(fields) & PROTECTED_FIELDS)
     if protected:
         raise ValidationError({field_name: 'This field is managed by the screening workflow.' for field_name in protected})
+
+
+def _require_screening_stage(deal):
+    if deal.pipeline_status not in {'sourced', 'screening'}:
+        raise ValidationError({
+            'deal': 'Screening can only be created or changed while the deal is sourced or screening.',
+        })

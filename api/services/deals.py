@@ -7,6 +7,10 @@ from django.utils import timezone
 from api.models import (
     ActivityActionType,
     ActivityLog,
+    ClosingChecklistGeneration,
+    ClosingPackage,
+    ConditionPrecedent,
+    DDChecklistItem,
     Deal,
     DealStageEvent,
     PipelineStatus,
@@ -70,6 +74,14 @@ DEAL_FIELD_AUDIT_FIELDS = frozenset({
     'estimated_value',
     'renovation_budget',
     'description',
+    'assigned_analyst',
+    'deposit_status',
+    'deposit_received_date',
+    'deposit_account_label',
+    'deposit_refund_conditions',
+    'exclusivity_granted',
+    'exclusivity_expiry_date',
+    'key_negotiation_changes',
     'sponsor',
     'broker',
     'fund',
@@ -79,10 +91,18 @@ READINESS_READY = 'ready'
 SCREENING_APPROVAL_REQUIRED = 'screening_approval_required'
 SCREENING_ASSESSMENT_MISSING = 'screening_assessment_missing'
 SCREENING_ASSESSMENT_NOT_FINALIZED = 'screening_assessment_not_finalized'
+SCREENING_ASSESSMENT_INCOMPLETE = 'screening_assessment_incomplete'
 SCREENING_DECISION_NOT_ADVANCE = 'screening_decision_not_advance'
 QUOTE_READINESS_REQUIRED = 'quote_readiness_required'
 QUOTE_REQUIRED_FOR_NEGOTIATING = 'quote_required_for_negotiating'
 QUOTE_EXECUTION_REQUIRED = 'quote_execution_required'
+QUOTE_EXECUTION_EVIDENCE_REQUIRED = 'quote_execution_evidence_required'
+CLOSING_READINESS_REQUIRED = 'closing_readiness_required'
+CLOSING_PACKAGE_REQUIRED = 'closing_package_required'
+CLOSING_FUNDING_DETAILS_INCOMPLETE = 'closing_funding_details_incomplete'
+CLOSING_CHECKLIST_REQUIRED = 'closing_checklist_required'
+CLOSING_DD_INCOMPLETE = 'closing_dd_incomplete'
+CLOSING_CP_INCOMPLETE = 'closing_cp_incomplete'
 
 _QUOTE_ACTIVE_FOR_NEGOTIATING = frozenset({
     Quote.Status.SENT,
@@ -92,6 +112,14 @@ _QUOTE_ACTIVE_FOR_NEGOTIATING = frozenset({
 _QUOTE_BLOCKERS = frozenset({
     QUOTE_REQUIRED_FOR_NEGOTIATING,
     QUOTE_EXECUTION_REQUIRED,
+    QUOTE_EXECUTION_EVIDENCE_REQUIRED,
+})
+_CLOSING_BLOCKERS = frozenset({
+    CLOSING_PACKAGE_REQUIRED,
+    CLOSING_FUNDING_DETAILS_INCOMPLETE,
+    CLOSING_CHECKLIST_REQUIRED,
+    CLOSING_DD_INCOMPLETE,
+    CLOSING_CP_INCOMPLETE,
 })
 
 
@@ -126,6 +154,10 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
             blockers.append(SCREENING_ASSESSMENT_NOT_FINALIZED)
         elif assessment.decision != ScreeningAssessment.Decision.ADVANCE:
             blockers.append(SCREENING_DECISION_NOT_ADVANCE)
+        else:
+            from api.services.screening import screening_is_complete
+            if not screening_is_complete(assessment):
+                blockers.append(SCREENING_ASSESSMENT_INCOMPLETE)
 
     if deal.pipeline_status == PipelineStatus.QUOTING and to_status == PipelineStatus.NEGOTIATING:
         quote = Quote.objects.filter(deal=deal).order_by('-version').first()
@@ -136,12 +168,49 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
         quote = Quote.objects.filter(deal=deal).order_by('-version').first()
         if quote is None or quote.status != Quote.Status.EXECUTED:
             blockers.append(QUOTE_EXECUTION_REQUIRED)
+        else:
+            from api.services.quotes import quote_has_execution_evidence
+            if not quote_has_execution_evidence(quote):
+                blockers.append(QUOTE_EXECUTION_EVIDENCE_REQUIRED)
+
+    if deal.pipeline_status == PipelineStatus.CLOSING and to_status == PipelineStatus.CLOSED:
+        package = ClosingPackage.objects.filter(deal=deal).first()
+        if package is None:
+            blockers.append(CLOSING_PACKAGE_REQUIRED)
+        else:
+            required_funding_fields = (
+                'actual_close_date',
+                'funds_wired_date',
+                'funds_wired_amount',
+                'closing_attorney',
+                'title_company',
+                'final_loan_amount',
+            )
+            if any(getattr(package, field, None) in (None, '') for field in required_funding_fields):
+                blockers.append(CLOSING_FUNDING_DETAILS_INCOMPLETE)
+            generation = ClosingChecklistGeneration.objects.filter(
+                package=package,
+                is_current=True,
+            ).first()
+            if generation is None:
+                blockers.append(CLOSING_CHECKLIST_REQUIRED)
+            else:
+                if generation.dd_items.exclude(
+                    status__in=[DDChecklistItem.Status.COMPLETE, DDChecklistItem.Status.WAIVED],
+                ).exists():
+                    blockers.append(CLOSING_DD_INCOMPLETE)
+                if generation.conditions_precedent.exclude(
+                    status__in=[ConditionPrecedent.Status.SATISFIED, ConditionPrecedent.Status.WAIVED],
+                ).exists():
+                    blockers.append(CLOSING_CP_INCOMPLETE)
 
     ready = not blockers
     if ready:
         code = READINESS_READY
     elif any(blocker in _QUOTE_BLOCKERS for blocker in blockers):
         code = QUOTE_READINESS_REQUIRED
+    elif any(blocker in _CLOSING_BLOCKERS for blocker in blockers):
+        code = CLOSING_READINESS_REQUIRED
     else:
         code = SCREENING_APPROVAL_REQUIRED
 
@@ -434,7 +503,7 @@ def _record_pipeline_stage_transition(
 
 
 def _canonical_deal_field_value(deal, field_name):
-    if field_name in {'sponsor', 'broker', 'fund'}:
+    if field_name in {'sponsor', 'broker', 'fund', 'assigned_analyst'}:
         value = getattr(deal, f'{field_name}_id')
     else:
         value = getattr(deal, field_name)

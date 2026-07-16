@@ -6,6 +6,9 @@ const contactApi = vi.hoisted(() => ({
   useDealContacts: vi.fn(),
   useCreateAndLinkContact: vi.fn(),
   useCreateDealContactLink: vi.fn(),
+  useUpdateContact: vi.fn(),
+  useUpdateDealContact: vi.fn(),
+  useDeleteDealContact: vi.fn(),
 }));
 
 vi.mock('@/lib/api/contacts', async () => {
@@ -15,6 +18,9 @@ vi.mock('@/lib/api/contacts', async () => {
     useDealContacts: contactApi.useDealContacts,
     useCreateAndLinkContact: contactApi.useCreateAndLinkContact,
     useCreateDealContactLink: contactApi.useCreateDealContactLink,
+    useUpdateContact: contactApi.useUpdateContact,
+    useUpdateDealContact: contactApi.useUpdateDealContact,
+    useDeleteDealContact: contactApi.useDeleteDealContact,
   };
 });
 
@@ -54,6 +60,9 @@ describe('DealContactsPanel', () => {
     });
     contactApi.useCreateAndLinkContact.mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
     contactApi.useCreateDealContactLink.mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+    contactApi.useUpdateContact.mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+    contactApi.useUpdateDealContact.mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+    contactApi.useDeleteDealContact.mockReturnValue({ isPending: false, mutate: vi.fn() });
   });
 
   it('renders a compact role-aware contact row and exposes an accessible add-person form', async () => {

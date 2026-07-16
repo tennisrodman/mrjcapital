@@ -2,6 +2,7 @@ import { useContext, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import DataModeToggle from '@/components/layout/DataModeToggle';
+import DemoStaffToggle from '@/components/layout/DemoStaffToggle';
 
 const Login = () => {
   const { login, error, isAuthenticated, isLoading: isAuthLoading } = useContext(AuthContext);
@@ -29,8 +30,9 @@ const Login = () => {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
+      <div className="absolute right-4 top-4 flex items-center gap-2 sm:right-6 sm:top-6">
         <DataModeToggle surface="light" />
+        <DemoStaffToggle surface="light" />
       </div>
       <div className="w-full max-w-sm rounded-lg bg-white p-8 shadow">
         <p className="mb-1 text-sm text-gray-500">MRJ Capital</p>

@@ -45,10 +45,17 @@ export function screeningPayloadFromForm(
     stabilized_value: toDecimalString(values.stabilized_value),
     project_cost: toDecimalString(values.project_cost),
     noi: toDecimalString(values.noi),
+    stabilized_noi: toDecimalString(values.stabilized_noi),
     annual_debt_service: toDecimalString(values.annual_debt_service),
     occupancy: toDecimalString(values.occupancy),
     proposed_rate: toDecimalString(values.proposed_rate),
     proposed_term_months: toPositiveInteger(values.proposed_term_months),
+    current_average_rent: toDecimalString(values.current_average_rent),
+    market_rent: toDecimalString(values.market_rent),
+    condition_rating: values.condition_rating,
+    unit_mix: values.unit_mix.trim(),
+    exit_strategy: values.exit_strategy.trim(),
+    exit_cap_rate: toDecimalString(values.exit_cap_rate),
     equity_summary: values.equity_summary.trim(),
     equity_target_irr: toDecimalString(values.equity_target_irr),
     equity_target_multiple: toDecimalString(values.equity_target_multiple),
@@ -118,7 +125,7 @@ export function calculateDebtMetrics(
     ltc: ltc?.formatted ?? null,
     dscr: dscr?.formatted ?? null,
     debt_yield: debtYield?.formatted ?? null,
-    quick_score: checks.length
+    quick_score: checks.length === 4
       ? Math.round((checks.filter(Boolean).length * 100) / checks.length)
       : 0,
   };
@@ -145,10 +152,17 @@ export function assessmentToFormValues(
     stabilized_value: assessment?.stabilized_value ?? '',
     project_cost: assessment?.project_cost ?? '',
     noi: assessment?.noi ?? '',
+    stabilized_noi: assessment?.stabilized_noi ?? '',
     annual_debt_service: assessment?.annual_debt_service ?? '',
     occupancy: assessment?.occupancy ?? '',
     proposed_rate: assessment?.proposed_rate ?? '',
     proposed_term_months: assessment?.proposed_term_months?.toString() ?? '',
+    current_average_rent: assessment?.current_average_rent ?? '',
+    market_rent: assessment?.market_rent ?? '',
+    condition_rating: assessment?.condition_rating ?? '',
+    unit_mix: assessment?.unit_mix ?? '',
+    exit_strategy: assessment?.exit_strategy ?? '',
+    exit_cap_rate: assessment?.exit_cap_rate ?? '',
     equity_summary: assessment?.equity_summary ?? '',
     equity_target_irr: assessment?.equity_target_irr ?? '',
     equity_target_multiple: assessment?.equity_target_multiple ?? '',
@@ -156,4 +170,20 @@ export function assessmentToFormValues(
     decision: assessment?.decision ?? '',
     notes: assessment?.notes ?? '',
   };
+}
+
+export function screeningIsComplete(payload: CreateScreeningAssessmentPayload): boolean {
+  return Boolean(
+    payload.loan_amount
+      && (payload.as_is_value || payload.stabilized_value)
+      && payload.project_cost
+      && payload.noi
+      && payload.stabilized_noi
+      && payload.annual_debt_service
+      && payload.occupancy
+      && payload.proposed_rate
+      && payload.proposed_term_months
+      && payload.exit_strategy
+      && payload.exit_cap_rate,
+  );
 }

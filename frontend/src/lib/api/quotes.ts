@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiRequest } from '@/config/api';
-import type { Paginated } from '@/types/deal';
+import { fetchAllPages } from '@/lib/api/deals';
 import type {
   CreateQuotePayload,
   Quote,
@@ -10,13 +10,7 @@ import type {
   UpdateQuotePayload,
 } from '@/types/quote';
 
-type QuoteListResponse = Paginated<Quote> | Quote[];
-
 const quoteQueryKey = (dealId: string) => ['quotes', dealId] as const;
-
-function listResults(response: QuoteListResponse): Quote[] {
-  return Array.isArray(response) ? response : response.results;
-}
 
 function sortMostRecent(quotes: Quote[]): Quote[] {
   return [...quotes].sort((a, b) => {
@@ -37,10 +31,8 @@ function replaceCachedQuote(existing: Quote[] | undefined, incoming: Quote): Quo
 }
 
 export async function listQuotes(dealId: string): Promise<Quote[]> {
-  const response = await apiRequest<QuoteListResponse>(
-    `api/quotes/?deal=${encodeURIComponent(dealId)}`,
-  );
-  return sortMostRecent(listResults(response));
+  const results = await fetchAllPages<Quote>(`api/quotes/?deal=${encodeURIComponent(dealId)}`);
+  return sortMostRecent(results);
 }
 
 export function createQuote(payload: CreateQuotePayload): Promise<Quote> {

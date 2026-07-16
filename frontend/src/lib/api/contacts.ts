@@ -53,6 +53,27 @@ export function createDealContact(payload: CreateDealContactPayload): Promise<De
   });
 }
 
+export function updateContact(id: string, payload: Partial<CreateContactPayload>): Promise<Contact> {
+  return apiRequest<Contact>(`api/contacts/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateDealContact(
+  id: string,
+  payload: Partial<Pick<CreateDealContactPayload, 'is_primary' | 'notes'>>,
+): Promise<DealContact> {
+  return apiRequest<DealContact>(`api/deal-contacts/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteDealContact(id: string): Promise<void> {
+  return apiRequest<void>(`api/deal-contacts/${id}/`, { method: 'DELETE' });
+}
+
 /**
  * Raised when the person was saved but the second request could not attach it
  * to the deal. The panel can then retry only the link instead of duplicating a
@@ -110,5 +131,33 @@ export function useCreateDealContactLink(dealId: string) {
     mutationFn: (payload: Omit<CreateDealContactPayload, 'deal'>) =>
       createDealContact({ deal: dealId, ...payload }),
     onSuccess: (link) => writeLinkToCache(queryClient, dealId, link),
+  });
+}
+
+export function useUpdateContact(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contactId, payload }: { contactId: string; payload: Partial<CreateContactPayload> }) =>
+      updateContact(contactId, payload),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: dealContactsQueryKey(dealId) }),
+  });
+}
+
+export function useUpdateDealContact(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ linkId, payload }: {
+      linkId: string;
+      payload: Partial<Pick<CreateDealContactPayload, 'is_primary' | 'notes'>>;
+    }) => updateDealContact(linkId, payload),
+    onSuccess: (link) => writeLinkToCache(queryClient, dealId, link),
+  });
+}
+
+export function useDeleteDealContact(dealId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteDealContact,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: dealContactsQueryKey(dealId) }),
   });
 }

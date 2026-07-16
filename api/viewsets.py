@@ -4,6 +4,7 @@ import uuid
 from uuid import UUID
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection, IntegrityError, transaction
 from django.db.models import Count, Max, Sum
@@ -51,6 +52,7 @@ from api.serializers import (
     SyndicationTransitionSerializer,
     _can_attach_property,
 )
+from api.services.money import format_money_aggregate
 from api.services import (
     allowed_pipeline_transition_readiness,
     allowed_pipeline_statuses,
@@ -337,6 +339,17 @@ class DealViewSet(viewsets.ModelViewSet):
         serializer.context['audit_ip_address'] = _client_ip(self.request)
         serializer.save()
 
+    @action(detail=False, methods=['get'], url_path='assignees')
+    def assignees(self, request):
+        if not _is_staff_user(request.user):
+            raise PermissionDenied('Only staff may view deal assignment options.')
+        users = (
+            get_user_model().objects.filter(is_active=True)
+            .order_by('username')
+            .values('id', 'username')
+        )
+        return Response(list(users))
+
     @action(detail=True, methods=['post'], url_path='transition')
     def transition(self, request, pk=None):
         deal = self.get_object()
@@ -393,7 +406,12 @@ class DealViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
         queryset = self.filter_queryset(self.get_queryset())
-        active_queryset = queryset.exclude(pipeline_status__in=[PipelineStatus.DEAD, PipelineStatus.EXITED])
+        active_queryset = queryset.exclude(pipeline_status__in=[
+            PipelineStatus.DEAD,
+            PipelineStatus.CLOSED,
+            PipelineStatus.SERVICING,
+            PipelineStatus.EXITED,
+        ])
         status_counts = list(
             queryset.values('pipeline_status')
             .annotate(count=Count('id'), requested_amount=Sum('requested_amount'))
@@ -403,10 +421,12 @@ class DealViewSet(viewsets.ModelViewSet):
         gross_requested = queryset.aggregate(total=Sum('requested_amount'))['total']
         active_count = active_queryset.count()
         timing_metrics = _stage_timing_metrics(queryset, status_counts)
+        for row in status_counts:
+            row['requested_amount'] = format_money_aggregate(row.get('requested_amount'))
         return Response({
             'active_deals': active_count,
-            'pipeline_value': active_requested or 0,
-            'gross_pipeline_value': gross_requested or 0,
+            'pipeline_value': format_money_aggregate(active_requested),
+            'gross_pipeline_value': format_money_aggregate(gross_requested),
             'by_pipeline_status': status_counts,
             **timing_metrics,
         })
@@ -505,14 +525,38 @@ class DocumentViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
-        if instance.is_executed and not _is_staff_user(self.request.user):
-            raise PermissionDenied('Only staff may delete executed documents.')
+        from api.services.closing import document_is_closing_linked
+        from api.services.quotes import document_is_executed_quote_evidence
         storage_key = instance.file_url
         storage = get_document_storage()
-        if storage_key:
-            storage.delete_object(storage_key)
         with transaction.atomic():
-            instance.delete()
+            deal = Deal.objects.select_for_update().filter(pk=instance.deal_id).first()
+            document = Document.objects.select_for_update().filter(pk=instance.pk).first()
+            if not document:
+                raise NotFound()
+            if document_is_closing_linked(document):
+                raise DRFValidationError({
+                    'detail': 'Document is linked to a closing checklist item and cannot be deleted.',
+                })
+            if document_is_executed_quote_evidence(document):
+                raise DRFValidationError({
+                    'detail': 'Document is attached to an executed quote and cannot be deleted.',
+                })
+            if document.is_executed and not _is_staff_user(self.request.user):
+                raise PermissionDenied('Only staff may delete executed documents.')
+            document.delete()
+        # Best-effort blob cleanup after commit. A storage failure must not
+        # resurrect the row; log and continue so the API still reports success.
+        if storage_key:
+            try:
+                storage.delete_object(storage_key)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    'Failed to delete document blob after DB delete: %s',
+                    storage_key,
+                )
+        _ = deal
 
     @action(detail=False, methods=['post'], url_path='upload-intent')
     def upload_intent(self, request):
@@ -602,11 +646,23 @@ class DocumentViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Checksum verification failed.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         with transaction.atomic():
-            document.storage_status = DocumentStorageStatus.READY
-            if declared_checksum and not document.checksum_sha256:
-                document.checksum_sha256 = declared_checksum
-            document.save(update_fields=['storage_status', 'checksum_sha256'])
-            _log_document_upload(request, document)
+            # Deal-first lock order matches destroy/cleanup to avoid races.
+            deal = Deal.objects.select_for_update().filter(pk=document.deal_id).first()
+            locked = Document.objects.select_for_update().filter(pk=document.pk).first()
+            if not locked:
+                raise NotFound()
+            if locked.storage_status != DocumentStorageStatus.PENDING:
+                return Response(
+                    {'detail': 'Document upload is not pending.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            locked.storage_status = DocumentStorageStatus.READY
+            if declared_checksum and not locked.checksum_sha256:
+                locked.checksum_sha256 = declared_checksum
+            locked.save(update_fields=['storage_status', 'checksum_sha256'])
+            _log_document_upload(request, locked)
+            document = locked
+            _ = deal
 
         return Response(DocumentSerializer(document).data)
 

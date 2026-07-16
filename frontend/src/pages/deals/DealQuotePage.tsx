@@ -4,19 +4,21 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Download,
   FilePlus2,
   Paperclip,
+  Trash2,
 } from 'lucide-react';
 
 import { DebtTermsFields } from '@/components/deals/quote/DebtTermsFields';
-import { EquitySummaryFields } from '@/components/deals/quote/EquitySummaryFields';
 import { QuoteActions } from '@/components/deals/quote/QuoteActions';
 import { QuoteDocumentUploader } from '@/components/deals/quote/QuoteDocumentUploader';
 import { QuoteHistory } from '@/components/deals/quote/QuoteHistory';
 import { ErrorState, Spinner } from '@/components/deals/States';
 import { Panel } from '@/components/deals/Panel';
 import { Button } from '@/components/ui/button';
-import { useDeal } from '@/lib/api/deals';
+import { useDeal, useDealDocuments } from '@/lib/api/deals';
+import { useDownloadDocument } from '@/lib/api/documents';
 import {
   currentQuote,
   useCounterQuote,
@@ -25,10 +27,12 @@ import {
   useExecuteQuote,
   useQuotes,
   useSendQuote,
+  useSetQuoteAttachments,
   useUpdateQuote,
   useWithdrawQuote,
 } from '@/lib/api/quotes';
 import { apiErrorMessage } from '@/lib/apiError';
+import type { DealDocument } from '@/types/deal';
 import type {
   Quote,
   QuoteFormValues,
@@ -53,14 +57,18 @@ function emptyForm(): QuoteFormValues {
     amortization_months: '',
     origination_fee_pct: '',
     exit_fee_pct: '',
+    extension_terms: '',
     prepayment_terms: '',
     recourse_type: '',
     recourse_carveouts: '',
+    interest_reserve_months: '',
+    interest_reserve_amount: '',
     holdback_amount: '',
     good_faith_deposit: '',
     min_dscr: '',
     max_ltv: '',
     min_debt_yield: '',
+    expires_on: '',
     equity_commitment: '',
     ownership_pct: '',
     preferred_return_pct: '',
@@ -84,14 +92,19 @@ function quoteToForm(quote: Quote | undefined): QuoteFormValues {
       quote.amortization_months != null ? String(quote.amortization_months) : '',
     origination_fee_pct: quote.origination_fee_pct ?? '',
     exit_fee_pct: quote.exit_fee_pct ?? '',
+    extension_terms: extensionSummary(quote.extension_options),
     prepayment_terms: quote.prepayment_terms,
     recourse_type: quote.recourse_type,
     recourse_carveouts: quote.recourse_carveouts,
+    interest_reserve_months:
+      quote.interest_reserve_months != null ? String(quote.interest_reserve_months) : '',
+    interest_reserve_amount: quote.interest_reserve_amount ?? '',
     holdback_amount: quote.holdback_amount ?? '',
     good_faith_deposit: quote.good_faith_deposit ?? '',
     min_dscr: quote.min_dscr ?? '',
     max_ltv: quote.max_ltv ?? '',
     min_debt_yield: quote.min_debt_yield ?? '',
+    expires_on: quote.expires_at?.slice(0, 10) ?? '',
     equity_commitment: quote.equity_commitment ?? '',
     ownership_pct: quote.ownership_pct ?? '',
     preferred_return_pct: quote.preferred_return_pct ?? '',
@@ -111,6 +124,20 @@ function nullableInt(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function extensionSummary(options: unknown[]): string {
+  if (!options.length) return '';
+  if (options.length === 1 && typeof options[0] === 'object' && options[0] !== null) {
+    const summary = (options[0] as { summary?: unknown }).summary;
+    if (typeof summary === 'string') return summary;
+  }
+  return JSON.stringify(options);
+}
+
+function expiryTimestamp(value: string): string | null {
+  if (!value) return null;
+  return new Date(`${value}T23:59:59`).toISOString();
+}
+
 function formToPayload(values: QuoteFormValues): UpdateQuotePayload {
   return {
     notes: values.notes,
@@ -125,18 +152,20 @@ function formToPayload(values: QuoteFormValues): UpdateQuotePayload {
     amortization_months: nullableInt(values.amortization_months),
     origination_fee_pct: nullableDecimal(values.origination_fee_pct),
     exit_fee_pct: nullableDecimal(values.exit_fee_pct),
+    extension_options: values.extension_terms.trim()
+      ? [{ summary: values.extension_terms.trim() }]
+      : [],
     prepayment_terms: values.prepayment_terms,
     recourse_type: values.recourse_type as QuoteRecourseType,
     recourse_carveouts: values.recourse_carveouts,
+    interest_reserve_months: nullableInt(values.interest_reserve_months),
+    interest_reserve_amount: nullableDecimal(values.interest_reserve_amount),
     holdback_amount: nullableDecimal(values.holdback_amount),
     good_faith_deposit: nullableDecimal(values.good_faith_deposit),
     min_dscr: nullableDecimal(values.min_dscr),
     max_ltv: nullableDecimal(values.max_ltv),
     min_debt_yield: nullableDecimal(values.min_debt_yield),
-    equity_commitment: nullableDecimal(values.equity_commitment),
-    ownership_pct: nullableDecimal(values.ownership_pct),
-    preferred_return_pct: nullableDecimal(values.preferred_return_pct),
-    equity_summary: values.equity_summary,
+    expires_at: expiryTimestamp(values.expires_on),
   };
 }
 
@@ -153,7 +182,7 @@ export default function DealQuotePage({ dealId: dealIdProp }: { dealId?: string 
     );
   }
 
-  return <DealQuoteWorkspace dealId={dealId} />;
+  return <DealQuoteWorkspace key={dealId} dealId={dealId} />;
 }
 
 export function DealQuoteWorkspace({ dealId }: { dealId: string }) {
@@ -213,8 +242,10 @@ function QuoteWorkspaceContent({
   const [banner, setBanner] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [uploaderOpen, setUploaderOpen] = useState(false);
-  const [bootstrapAttempted, setBootstrapAttempted] = useState(false);
 
+  const documentsQuery = useDealDocuments(dealId);
+  const downloadDocument = useDownloadDocument();
+  const setAttachments = useSetQuoteAttachments(dealId);
   const createQuoteMutation = useCreateQuote(dealId);
   const updateQuote = useUpdateQuote(current?.id ?? '', dealId);
   const sendQuote = useSendQuote(dealId);
@@ -222,6 +253,14 @@ function QuoteWorkspaceContent({
   const executeQuote = useExecuteQuote(dealId);
   const withdrawQuote = useWithdrawQuote(dealId);
   const expireQuote = useExpireQuote(dealId);
+
+  const documentsById = useMemo(() => {
+    const map = new Map<string, DealDocument>();
+    for (const doc of documentsQuery.data ?? []) {
+      map.set(doc.id, doc);
+    }
+    return map;
+  }, [documentsQuery.data]);
 
   const canCreateQuotes =
     pipelineStatus === 'quoting' || pipelineStatus === 'negotiating';
@@ -238,7 +277,27 @@ function QuoteWorkspaceContent({
     counterQuote.isPending ||
     executeQuote.isPending ||
     withdrawQuote.isPending ||
-    expireQuote.isPending;
+    expireQuote.isPending ||
+    setAttachments.isPending ||
+    downloadDocument.isPending;
+
+  const showError = (error: unknown, fallback: string) => {
+    setBanner(apiErrorMessage(error, fallback));
+  };
+
+  const onRemoveAttachment = (documentId: string) => {
+    if (!current || !canAttach) return;
+    setBanner(null);
+    setNotice(null);
+    const nextIds = current.attachments.filter((id) => id !== documentId);
+    setAttachments.mutate(
+      { quoteId: current.id, payload: { document_ids: nextIds } },
+      {
+        onSuccess: () => setNotice('Attachment removed from this quote.'),
+        onError: (error) => showError(error, 'Could not remove the attachment.'),
+      },
+    );
+  };
 
   useEffect(() => {
     const next = quoteToForm(current);
@@ -246,30 +305,8 @@ function QuoteWorkspaceContent({
     setBaseline(JSON.stringify(next));
   }, [current]);
 
-  useEffect(() => {
-    if (quotes.length > 0 || !canCreateQuotes || bootstrapAttempted) return;
-    setBootstrapAttempted(true);
-    createQuoteMutation.mutate(
-      { deal: dealId, seed_from_screening: true },
-      {
-        onSuccess: (quote) => {
-          setNotice(`Draft v${quote.version} created from screening where available.`);
-        },
-        onError: (error) => {
-          setBanner(apiErrorMessage(error, 'Could not create the first quote.'));
-        },
-      },
-    );
-    // Intentionally omit createQuoteMutation from deps — fire once per empty deal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quotes.length, canCreateQuotes, bootstrapAttempted, dealId]);
-
   const setField = (field: keyof QuoteFormValues, value: string) => {
     setValues((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const showError = (error: unknown, fallback: string) => {
-    setBanner(apiErrorMessage(error, fallback));
   };
 
   const onSave = () => {
@@ -312,6 +349,17 @@ function QuoteWorkspaceContent({
 
   const onExecute = () => {
     if (!current) return;
+    const attachedNames = current.attachments
+      .map((id) => documentsById.get(id)?.document_name)
+      .filter(Boolean);
+    const evidenceLabel =
+      attachedNames.length > 0
+        ? attachedNames.join(', ')
+        : 'the attached legal term sheet/LOI';
+    const confirmed = window.confirm(
+      `Execute quote v${current.version} using ${evidenceLabel}? This locks the attachment as execution evidence.`,
+    );
+    if (!confirmed) return;
     setBanner(null);
     setNotice(null);
     executeQuote.mutate(current.id, {
@@ -353,6 +401,19 @@ function QuoteWorkspaceContent({
     );
   };
 
+  const onCreateFirstQuote = () => {
+    if (!canCreateQuotes || current) return;
+    setBanner(null);
+    setNotice(null);
+    createQuoteMutation.mutate(
+      { deal: dealId, seed_from_screening: true },
+      {
+        onSuccess: (quote) => setNotice(`Draft v${quote.version} created from screening.`),
+        onError: (error) => showError(error, 'Could not create the first quote.'),
+      },
+    );
+  };
+
   if (!canCreateQuotes && quotes.length === 0) {
     return (
       <div className="space-y-6">
@@ -363,10 +424,6 @@ function QuoteWorkspaceContent({
         />
       </div>
     );
-  }
-
-  if (createQuoteMutation.isPending && quotes.length === 0) {
-    return <Spinner label="Creating first quote…" />;
   }
 
   return (
@@ -382,8 +439,8 @@ function QuoteWorkspaceContent({
               {dealName}
             </h1>
             <p className="mt-2 max-w-2xl text-[var(--slate)]">
-              Capture debt terms and an equity summary, attach a legal term sheet or LOI, then send
-              and execute the current version.
+              Capture debt terms, attach a legal term sheet, then send and execute the current
+              version.
             </p>
           </div>
           {current ? (
@@ -433,14 +490,6 @@ function QuoteWorkspaceContent({
             />
           </Panel>
 
-          <Panel title="Equity summary">
-            <EquitySummaryFields
-              values={values}
-              onChange={setField}
-              disabled={!editable || busy}
-            />
-          </Panel>
-
           <Panel
             title="Attachments"
             count={current?.attachments.length}
@@ -448,24 +497,92 @@ function QuoteWorkspaceContent({
               canAttach ? (
                 <Button type="button" variant="outline" size="sm" onClick={() => setUploaderOpen(true)}>
                   <FilePlus2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  Upload
+                  Attach
                 </Button>
               ) : null
             }
           >
             {current && current.attachments.length > 0 ? (
-              <ul className="space-y-2 text-sm text-[var(--ink)]">
-                {current.attachments.map((documentId) => (
-                  <li key={documentId} className="flex items-center gap-2">
-                    <Paperclip className="h-3.5 w-3.5 text-[var(--slate)]" strokeWidth={1.75} />
-                    <span className="font-mono text-xs">{documentId}</span>
-                  </li>
-                ))}
+              <ul className="space-y-2">
+                {current.attachments.map((documentId) => {
+                  const doc = documentsById.get(documentId);
+                  const subcategoryLabel =
+                    doc?.subcategory === 'loi'
+                      ? 'LOI'
+                      : doc?.subcategory === 'term_sheet'
+                        ? 'Term sheet'
+                        : null;
+                  return (
+                    <li
+                      key={documentId}
+                      className="flex items-start justify-between gap-3 rounded-sm border border-[var(--border)] bg-[var(--paper-elevated)] px-3 py-2.5"
+                    >
+                      <div className="min-w-0 flex items-start gap-2">
+                        <Paperclip className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--slate)]" strokeWidth={1.75} />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-[var(--ink)]">
+                            {doc?.document_name ??
+                              (documentsQuery.isError
+                                ? 'Could not load document'
+                                : 'Document unavailable')}
+                          </p>
+                          <p className="mt-0.5 text-xs text-[var(--slate)]">
+                            {[subcategoryLabel, doc?.storage_status ?? 'unknown']
+                              .filter(Boolean)
+                              .join(' · ')}
+                            {!doc && documentsQuery.isLoading ? 'Loading…' : null}
+                            {!doc && documentsQuery.isError ? (
+                              <button
+                                type="button"
+                                className="ml-1 underline"
+                                onClick={() => void documentsQuery.refetch()}
+                              >
+                                Retry
+                              </button>
+                            ) : null}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {doc ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={downloadDocument.isPending}
+                            onClick={() => {
+                              downloadDocument.mutate(doc, {
+                                onError: (err) =>
+                                  showError(err, `Couldn't download ${doc.document_name}.`),
+                              });
+                            }}
+                            aria-label={`Download ${doc.document_name}`}
+                          >
+                            <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+                          </Button>
+                        ) : null}
+                        {canAttach ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={setAttachments.isPending}
+                            onClick={() => onRemoveAttachment(documentId)}
+                            aria-label={`Remove attachment ${doc?.document_name ?? documentId}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+                          </Button>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-sm text-[var(--slate)]">
-                Attach a legal term sheet or LOI before executing. Uploads are only available on
-                draft, sent, or countered quotes.
+                Attach a legal term sheet or LOI before executing. You can upload a new file or
+                attach an eligible document already on this deal while the quote is draft, sent, or
+                countered.
               </p>
             )}
           </Panel>
@@ -484,6 +601,9 @@ function QuoteWorkspaceContent({
               onWithdraw={onWithdraw}
               onExpire={onExpire}
               onCreateNextVersion={onCreateNextVersion}
+              onCreateFirst={onCreateFirstQuote}
+              sendReady={current?.is_send_ready ?? false}
+              missingSendFields={current?.missing_send_fields ?? []}
             />
           </Panel>
         </div>

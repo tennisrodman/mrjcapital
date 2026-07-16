@@ -1,13 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Paginated } from '@/types/deal';
 import type { ScreeningAssessment } from '@/types/screening';
+import { setDemoIsStaffForTests } from '@/config/flags';
 import { buildInitialDeals } from './fixtures';
 import { mockApiRequest } from './handlers';
 
-const dealId = buildInitialDeals()[0].id;
-const versioningDealId = buildInitialDeals()[1].id;
-const anotherDealId = buildInitialDeals()[2].id;
+const deals = buildInitialDeals();
+const dealId = deals.find((deal) => deal.pipeline_status === 'sourced')!.id;
+const versioningDealId = deals.find((deal) => deal.pipeline_status === 'screening')!.id;
+const anotherDealId = deals.find(
+  (deal) => deal.pipeline_status === 'sourced' && deal.id !== dealId,
+)!.id;
+const quotingDealId = deals.find((deal) => deal.pipeline_status === 'quoting')!.id;
 
 const payload = {
   deal: dealId,
@@ -16,10 +21,17 @@ const payload = {
   stabilized_value: '12000000',
   project_cost: '8000000',
   noi: '1000000',
+  stabilized_noi: '1200000',
   annual_debt_service: '700000',
   occupancy: '92.50',
   proposed_rate: '8.25',
   proposed_term_months: 24,
+  current_average_rent: '1850',
+  market_rent: '2050',
+  condition_rating: 'good',
+  unit_mix: 'Mixed one- and two-bedroom units',
+  exit_strategy: 'Refinance after stabilization.',
+  exit_cap_rate: '5.5000',
   equity_summary: 'Manual equity context only.',
   equity_target_irr: '18.0',
   equity_target_multiple: '1.8',
@@ -29,6 +41,26 @@ const payload = {
 };
 
 describe('screening mock API', () => {
+  beforeEach(() => {
+    setDemoIsStaffForTests(true);
+  });
+
+  it('rejects screening writes outside sourced/screening', async () => {
+    await expect(
+      mockApiRequest('api/screening-assessments/', {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, deal: quotingDealId }),
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      data: {
+        deal: [
+          'Screening can only be created or changed while the deal is sourced or screening.',
+        ],
+      },
+    });
+  });
+
   it('mirrors draft creation, deterministic metrics, and one-way finalization', async () => {
     const created = await mockApiRequest<ScreeningAssessment>('api/screening-assessments/', {
       method: 'POST',

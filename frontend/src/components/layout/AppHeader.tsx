@@ -1,10 +1,11 @@
 import { useContext } from 'react';
 import { NavLink } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Building2, ChevronDown, FileText, LayoutDashboard, LogOut, Plus, Scale } from 'lucide-react';
+import { Building2, ChevronDown, FileText, LayoutDashboard, LogOut, Menu, Plus, Scale } from 'lucide-react';
 import { AuthContext } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 import DataModeToggle from './DataModeToggle';
+import DemoStaffToggle from './DemoStaffToggle';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -76,6 +77,63 @@ const AppHeader = () => {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-sm border border-white/10 bg-white/5 p-2 text-[var(--header-fg)] transition-colors hover:border-white/20 hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brass)]/50 md:hidden"
+                aria-label="Open navigation"
+              >
+                <Menu className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                align="end"
+                sideOffset={8}
+                className="z-50 min-w-[200px] rounded-md border border-[var(--border)] bg-[var(--paper-elevated)] p-1 shadow-xl md:hidden"
+              >
+                {navItems.map(({ to, label, icon: Icon, ...rest }) => {
+                  const disabled = 'disabled' in rest && rest.disabled;
+                  if (disabled) {
+                    return (
+                      <DropdownMenu.Item
+                        key={label}
+                        disabled
+                        className="flex cursor-not-allowed items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--slate)] opacity-60 outline-none"
+                      >
+                        <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                        {label}
+                      </DropdownMenu.Item>
+                    );
+                  }
+                  return (
+                    <DropdownMenu.Item key={label} asChild>
+                      <NavLink
+                        to={to}
+                        end={'end' in rest ? rest.end : false}
+                        className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--ink)] outline-none hover:bg-[var(--paper)] focus:bg-[var(--paper)]"
+                      >
+                        <Icon className="h-3.5 w-3.5 text-[var(--slate)]" strokeWidth={1.75} />
+                        {label}
+                      </NavLink>
+                    </DropdownMenu.Item>
+                  );
+                })}
+                <DropdownMenu.Separator className="my-1 h-px bg-[var(--border)]" />
+                <DropdownMenu.Item asChild>
+                  <NavLink
+                    to="/deals/new"
+                    className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--ink)] outline-none hover:bg-[var(--paper)] focus:bg-[var(--paper)]"
+                  >
+                    <Plus className="h-3.5 w-3.5 text-[var(--slate)]" strokeWidth={1.75} />
+                    New deal
+                  </NavLink>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+
           <NavLink
             to="/deals/new"
             className="hidden items-center gap-2 rounded-sm border border-[var(--brass)]/30 bg-[var(--brass)]/10 px-3 py-1.5 text-sm font-medium text-[var(--brass-light)] transition-colors hover:border-[var(--brass)]/60 hover:bg-[var(--brass)]/15 lg:inline-flex"
@@ -85,6 +143,7 @@ const AppHeader = () => {
           </NavLink>
 
           <DataModeToggle />
+          <DemoStaffToggle />
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>

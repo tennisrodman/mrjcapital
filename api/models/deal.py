@@ -6,7 +6,15 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from .choices import InvestmentType, PipelineStatus, SourceChannel, SyndicationStatus
+from .choices import (
+    DealProfile,
+    DealPurpose,
+    DepositStatus,
+    InvestmentType,
+    PipelineStatus,
+    SourceChannel,
+    SyndicationStatus,
+)
 
 
 class Deal(models.Model):
@@ -66,8 +74,8 @@ class Deal(models.Model):
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.01'))],
     )
-    purpose = models.CharField(max_length=160, blank=True)
-    profile = models.CharField(max_length=160, blank=True)
+    purpose = models.CharField(max_length=32, choices=DealPurpose.choices, blank=True)
+    profile = models.CharField(max_length=32, choices=DealProfile.choices, blank=True)
     estimated_value = models.DecimalField(
         max_digits=16,
         decimal_places=2,
@@ -83,6 +91,13 @@ class Deal(models.Model):
         validators=[MinValueValidator(Decimal('0'))],
     )
     description = models.TextField(blank=True)
+    deposit_status = models.CharField(max_length=24, choices=DepositStatus.choices, blank=True)
+    deposit_received_date = models.DateField(null=True, blank=True)
+    deposit_account_label = models.CharField(max_length=120, blank=True)
+    deposit_refund_conditions = models.TextField(blank=True)
+    exclusivity_granted = models.BooleanField(null=True, blank=True)
+    exclusivity_expiry_date = models.DateField(null=True, blank=True)
+    key_negotiation_changes = models.TextField(blank=True)
     details = models.JSONField(default=dict, blank=True)
     # This is intentionally cached on the Deal row so current-stage timing does
     # not require scanning the stage-event history for list and summary views.

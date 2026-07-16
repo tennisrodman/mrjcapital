@@ -96,12 +96,7 @@ export function useDeal(id: string | undefined) {
 export function useDealDocuments(dealId: string | undefined) {
   return useQuery({
     queryKey: ['deal-documents', dealId],
-    queryFn: async () => {
-      const page = await apiRequest<Paginated<DealDocument>>(
-        `api/documents/?deal=${dealId}`,
-      );
-      return page.results;
-    },
+    queryFn: () => fetchAllPages<DealDocument>(`api/documents/?deal=${dealId}`),
     enabled: Boolean(dealId),
   });
 }
@@ -118,19 +113,14 @@ export function useDealStageHistory(dealId: string | undefined) {
 export function useDealActivity(dealId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: ['deal-activity', dealId],
-    queryFn: async () => {
-      const page = await apiRequest<Paginated<ActivityLogEntry>>(
-        `api/activity-logs/?deal=${dealId}`,
-      );
-      return page.results;
-    },
+    queryFn: () => fetchAllPages<ActivityLogEntry>(`api/activity-logs/?deal=${dealId}`),
     enabled: Boolean(dealId) && enabled,
   });
 }
 
 // --- Reference data (for pickers in the create/edit forms) -----------------
 
-async function fetchAllPages<T>(path: string): Promise<T[]> {
+export async function fetchAllPages<T>(path: string): Promise<T[]> {
   const sep = path.includes('?') ? '&' : '?';
   const first = await apiRequest<Paginated<T>>(`${path}${sep}page=1`);
   const totalPages = Math.min(Math.ceil(first.count / PAGE_SIZE), MAX_PAGES);
@@ -178,6 +168,11 @@ export interface SponsorInput {
   years_experience?: number;
   completed_projects?: number;
   bankruptcy_history?: boolean;
+  business_address?: string;
+  total_units_owned?: number;
+  total_sf_managed?: number;
+  assets_under_management?: string;
+  connection_source?: Sponsor['connection_source'];
 }
 
 export interface BrokerInput {
@@ -185,6 +180,10 @@ export interface BrokerInput {
   contact_name: string;
   email: string;
   phone?: string;
+  default_commission_rate?: string;
+  commission_type?: Broker['commission_type'];
+  preferred_deal_types?: string[];
+  geographic_focus?: string[];
 }
 
 export interface PropertyInput {
@@ -200,14 +199,21 @@ export interface PropertyInput {
   year_renovated?: number;
   county?: string;
   msa?: string;
+  number_of_buildings?: number;
+  number_of_stories?: number;
+  parking_spaces?: number;
+  lot_size_acres?: string;
+  flood_zone?: string;
+  zoning_designation?: string;
+  environmental_status?: Property['environmental_status'];
 }
 
 export interface CreateDealPayload {
   name: string;
   investment_type: Deal['investment_type'];
   requested_amount: string;
-  purpose?: string;
-  profile?: string;
+  purpose?: Deal['purpose'];
+  profile?: Deal['profile'];
   estimated_value?: string;
   renovation_budget?: string;
   description?: string;
@@ -223,8 +229,8 @@ export interface UpdateDealPayload {
   name?: string;
   investment_type?: Deal['investment_type'];
   requested_amount?: string;
-  purpose?: string;
-  profile?: string;
+  purpose?: Deal['purpose'];
+  profile?: Deal['profile'];
   estimated_value?: string | null;
   renovation_budget?: string | null;
   description?: string;
@@ -233,23 +239,62 @@ export interface UpdateDealPayload {
   sponsor?: string | null;
   broker?: string | null;
   fund?: string | null;
+  assigned_analyst?: number | null;
   property_ids?: string[];
+  deposit_status?: Deal['deposit_status'];
+  deposit_received_date?: string | null;
+  deposit_account_label?: string;
+  deposit_refund_conditions?: string;
+  exclusivity_granted?: boolean | null;
+  exclusivity_expiry_date?: string | null;
+  key_negotiation_changes?: string;
 }
 
 export interface UpdateSponsorFactsPayload {
-  website: string;
-  years_experience: number | null;
-  completed_projects: number | null;
-  bankruptcy_history: boolean | null;
+  entity_name?: string;
+  entity_type?: Sponsor['entity_type'];
+  primary_contact_name?: string;
+  primary_contact_email?: string;
+  primary_contact_phone?: string;
+  relationship_rating?: Sponsor['relationship_rating'];
+  website?: string;
+  years_experience?: number | null;
+  completed_projects?: number | null;
+  bankruptcy_history?: boolean | null;
+  business_address?: string;
+  total_units_owned?: number | null;
+  total_sf_managed?: number | null;
+  assets_under_management?: string | null;
+  connection_source?: Sponsor['connection_source'];
 }
 
 export interface UpdatePropertyFactsPayload {
-  subtype: string;
-  units: number | null;
-  rentable_square_feet: number | null;
-  year_built: number | null;
-  year_renovated: number | null;
-  county: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  property_type?: Property['property_type'];
+  subtype?: string;
+  units?: number | null;
+  rentable_square_feet?: number | null;
+  year_built?: number | null;
+  year_renovated?: number | null;
+  county?: string;
+  msa?: string;
+  number_of_buildings?: number | null;
+  number_of_stories?: number | null;
+  parking_spaces?: number | null;
+  lot_size_acres?: string | null;
+  flood_zone?: string;
+  zoning_designation?: string;
+  environmental_status?: Property['environmental_status'];
+}
+
+export type UpdateBrokerFactsPayload = Omit<Broker, 'id' | 'details'>;
+
+export interface DealAssignee {
+  id: number;
+  username: string;
 }
 
 export function useCreateDeal() {
@@ -305,6 +350,39 @@ export function useUpdateProperty(propertyId: string) {
       void queryClient.invalidateQueries({ queryKey: ['deal'] });
       void queryClient.invalidateQueries({ queryKey: ['deals'] });
     },
+  });
+}
+
+export function useCreateProperty() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: PropertyInput) =>
+      apiRequest<Property>('api/properties/', { method: 'POST', body: JSON.stringify(payload) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['properties'] }),
+  });
+}
+
+export function useUpdateBroker(brokerId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateBrokerFactsPayload) =>
+      apiRequest<Broker>(`api/brokers/${brokerId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['brokers'] });
+      void queryClient.invalidateQueries({ queryKey: ['deal'] });
+      void queryClient.invalidateQueries({ queryKey: ['deals'] });
+    },
+  });
+}
+
+export function useDealAssignees(enabled: boolean) {
+  return useQuery({
+    queryKey: ['deal-assignees'],
+    queryFn: () => apiRequest<DealAssignee[]>('api/deals/assignees/'),
+    enabled,
   });
 }
 

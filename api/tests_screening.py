@@ -115,7 +115,13 @@ class ScreeningServiceTests(TestCase):
             'as_is_value': Decimal('1000000.00'),
             'project_cost': Decimal('900000.00'),
             'noi': Decimal('100000.00'),
+            'stabilized_noi': Decimal('120000.00'),
             'annual_debt_service': Decimal('80000.00'),
+            'occupancy': Decimal('92.00'),
+            'proposed_rate': Decimal('8.0000'),
+            'proposed_term_months': 24,
+            'exit_strategy': 'Refinance after stabilization.',
+            'exit_cap_rate': Decimal('5.5000'),
         }
         values.update(overrides)
         return create_next_assessment(deal=self.deal, **values)
@@ -191,6 +197,18 @@ class ScreeningServiceTests(TestCase):
         self.assertEqual(draft.status, ScreeningAssessment.Status.DRAFT)
         self.assertEqual(draft.decision, '')
 
+    def test_advance_requires_complete_manual_underwriting_inputs(self):
+        draft = self._create_draft(exit_strategy='', exit_cap_rate=None)
+        with self.assertRaises(ValidationError) as caught:
+            finalize_assessment(
+                assessment=draft,
+                reviewer=self.analyst,
+                decision=ScreeningAssessment.Decision.ADVANCE,
+            )
+        self.assertEqual(set(caught.exception.message_dict), {'exit_strategy', 'exit_cap_rate'})
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, ScreeningAssessment.Status.DRAFT)
+
     def test_finalize_transaction_leaves_draft_unchanged_when_save_fails(self):
         draft = self._create_draft()
 
@@ -239,10 +257,17 @@ class ScreeningAssessmentApiTests(APITestCase):
             'stabilized_value': '1200000.00',
             'project_cost': '900000.00',
             'noi': '100000.00',
+            'stabilized_noi': '120000.00',
             'annual_debt_service': '80000.00',
             'occupancy': '92.50',
             'proposed_rate': '8.2500',
             'proposed_term_months': 24,
+            'current_average_rent': '1800.00',
+            'market_rent': '2000.00',
+            'condition_rating': 'good',
+            'unit_mix': 'Mixed one- and two-bedroom units.',
+            'exit_strategy': 'Refinance after stabilization.',
+            'exit_cap_rate': '5.5000',
             'equity_summary': 'Manual upside review only.',
             'equity_target_irr': '18.0000',
             'equity_target_multiple': '1.8000',

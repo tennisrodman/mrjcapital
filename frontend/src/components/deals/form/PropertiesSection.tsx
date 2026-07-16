@@ -5,7 +5,11 @@ import { FormField } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { SelectNative } from '@/components/ui/select-native';
 import { ModeToggle } from '@/components/deals/form/ModeToggle';
-import { PROPERTY_TYPE_OPTIONS, STATE_OPTIONS } from '@/components/deals/form/options';
+import {
+  PROPERTY_ENVIRONMENTAL_STATUS_OPTIONS,
+  PROPERTY_TYPE_OPTIONS,
+  STATE_OPTIONS,
+} from '@/components/deals/form/options';
 import { useProperties } from '@/lib/api/deals';
 import { PROPERTY_TYPE_LABELS } from '@/lib/dealChoices';
 import type { CreateDealForm } from '@/components/deals/form/schema';
@@ -25,6 +29,13 @@ const emptyRow = {
   year_renovated: '',
   county: '',
   msa: '',
+  number_of_buildings: '',
+  number_of_stories: '',
+  parking_spaces: '',
+  lot_size_acres: '',
+  flood_zone: '',
+  zoning_designation: '',
+  environmental_status: '',
 };
 
 export function PropertiesSection() {
@@ -66,6 +77,8 @@ export function PropertiesSection() {
       <div className="mt-4 space-y-4">
         {fields.map((field, index) => {
           const mode = watch(`properties.${index}.mode`);
+          const propertyType = watch(`properties.${index}.property_type`);
+          const unitsRequired = ['multifamily', 'self_storage', 'hotel'].includes(propertyType ?? '');
           const rowErrors = errors.properties?.[index];
           return (
             <div key={field.id} className="rounded-md border border-[var(--border)] bg-[var(--paper)] p-4">
@@ -142,7 +155,12 @@ export function PropertiesSection() {
                   <FormField label="Subtype" hint="Optional">
                     <Input placeholder="e.g. Garden-style" {...register(`properties.${index}.subtype`)} />
                   </FormField>
-                  <FormField label="Units" hint="Optional" error={rowErrors?.units?.message}>
+                  <FormField
+                    label="Units / keys"
+                    hint={unitsRequired ? undefined : 'Optional'}
+                    required={unitsRequired}
+                    error={rowErrors?.units?.message}
+                  >
                     <Input
                       type="number"
                       min="0"
@@ -189,6 +207,31 @@ export function PropertiesSection() {
                   </FormField>
                   <FormField label="MSA" hint="Optional">
                     <Input {...register(`properties.${index}.msa`)} />
+                  </FormField>
+                  <FormField label="Number of buildings" hint="Optional" error={rowErrors?.number_of_buildings?.message}>
+                    <Input type="number" min="0" step="1" {...register(`properties.${index}.number_of_buildings`)} />
+                  </FormField>
+                  <FormField label="Number of stories" hint="Optional" error={rowErrors?.number_of_stories?.message}>
+                    <Input type="number" min="0" step="1" {...register(`properties.${index}.number_of_stories`)} />
+                  </FormField>
+                  <FormField label="Parking spaces" hint="Optional" error={rowErrors?.parking_spaces?.message}>
+                    <Input type="number" min="0" step="1" {...register(`properties.${index}.parking_spaces`)} />
+                  </FormField>
+                  <FormField label="Lot size" hint="Acres · optional" error={rowErrors?.lot_size_acres?.message}>
+                    <Input inputMode="decimal" {...register(`properties.${index}.lot_size_acres`)} />
+                  </FormField>
+                  <FormField label="Flood zone" hint="Optional">
+                    <Input placeholder="e.g. X or AE" {...register(`properties.${index}.flood_zone`)} />
+                  </FormField>
+                  <FormField label="Zoning designation" hint="Optional">
+                    <Input {...register(`properties.${index}.zoning_designation`)} />
+                  </FormField>
+                  <FormField label="Environmental status" hint="Optional" className="sm:col-span-2">
+                    <SelectNative
+                      placeholder="Unknown"
+                      options={PROPERTY_ENVIRONMENTAL_STATUS_OPTIONS}
+                      {...register(`properties.${index}.environmental_status`)}
+                    />
                   </FormField>
                 </div>
               )}

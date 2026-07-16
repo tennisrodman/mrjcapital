@@ -44,6 +44,17 @@ class PipelineReadinessApiTests(APITestCase):
             decision=decision,
             reviewer=self.analyst if finalized else None,
             finalized_at=timezone.now() if finalized else None,
+            loan_amount='750000.00',
+            as_is_value='1000000.00',
+            project_cost='900000.00',
+            noi='100000.00',
+            stabilized_noi='120000.00',
+            annual_debt_service='80000.00',
+            occupancy='92.00',
+            proposed_rate='8.0000',
+            proposed_term_months=24,
+            exit_strategy='Refinance after stabilization.',
+            exit_cap_rate='5.5000',
         )
 
     def _transition(self, **overrides):

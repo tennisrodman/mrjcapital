@@ -1,6 +1,7 @@
 // Sample data for the mock API layer. Source of truth: shared/demo_seed.json
 
 import demoSeed from '@shared/demo_seed.json';
+import { getDemoIsStaff } from '@/config/flags';
 import type {
   ActivityLogEntry,
   Broker,
@@ -12,10 +13,13 @@ import type {
   Sponsor,
 } from '@/types/deal';
 
+/** Demo auth persona. `is_staff` follows the Demo staff toggle (default: analyst). */
 export const MOCK_USER = {
   username: 'tchen',
   email: 't@slow.rodeo',
-  is_staff: true,
+  get is_staff() {
+    return getDemoIsStaff();
+  },
 };
 
 const ANALYST = { id: 1, username: 'tchen' };
@@ -47,6 +51,12 @@ export const SPONSORS: Sponsor[] = demoSeed.sponsors.map((row) => {
     years_experience: optional.years_experience ?? null,
     completed_projects: optional.completed_projects ?? null,
     bankruptcy_history: optional.bankruptcy_history ?? null,
+    business_address: '',
+    total_units_owned: null,
+    total_sf_managed: null,
+    assets_under_management: null,
+    track_record: [],
+    connection_source: '',
   });
 });
 
@@ -58,6 +68,10 @@ export const BROKERS: Broker[] = demoSeed.brokers.map((row) =>
     email: row.email,
     phone: row.phone,
     status: row.status as Broker['status'],
+    default_commission_rate: null,
+    commission_type: '',
+    preferred_deal_types: [],
+    geographic_focus: [],
   }),
 );
 
@@ -85,6 +99,13 @@ function propertyRow(row: (typeof demoSeed.properties)[number]): Property {
     year_renovated: optional.year_renovated ?? null,
     county: optional.county ?? '',
     msa: row.msa,
+    number_of_buildings: null,
+    number_of_stories: null,
+    parking_spaces: null,
+    lot_size_acres: null,
+    flood_zone: '',
+    zoning_designation: '',
+    environmental_status: '',
   });
 }
 
@@ -143,11 +164,18 @@ export function buildInitialDeals(): Deal[] {
       source_channel: seed.source_channel as Deal['source_channel'],
       source_date: seed.source_date,
       requested_amount: seed.requested_amount,
-      purpose: optional.purpose ?? '',
-      profile: optional.profile ?? '',
+      purpose: (optional.purpose ?? '') as Deal['purpose'],
+      profile: (optional.profile ?? '') as Deal['profile'],
       estimated_value: optional.estimated_value ?? null,
       renovation_budget: optional.renovation_budget ?? null,
       description: optional.description ?? '',
+      deposit_status: '',
+      deposit_received_date: null,
+      deposit_account_label: '',
+      deposit_refund_conditions: '',
+      exclusivity_granted: null,
+      exclusivity_expiry_date: null,
+      key_negotiation_changes: '',
       current_stage_entered_at: `${seed.source_date}T15:00:00Z`,
       days_in_current_stage: Math.max(
         0,

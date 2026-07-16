@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   CheckCircle2,
+  ClipboardList,
   Clock,
   Download,
   FileSignature,
@@ -19,6 +20,7 @@ import {
   Phone,
   ScanSearch,
   Star,
+  Trash2,
   Upload,
   UserRound,
 } from 'lucide-react';
@@ -27,13 +29,22 @@ import { DealContactsPanel } from '@/components/deals/DealContactsPanel';
 import { AuthContext } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Panel, Field } from '@/components/deals/Panel';
 import { InvestmentChip, PipelineBadge, SyndicationBadge } from '@/components/deals/StatusBadge';
 import { TransitionDialog } from '@/components/deals/TransitionDialog';
 import { StageHistoryPanel } from '@/components/deals/StageHistoryPanel';
 import { EmptyState, ErrorState, Spinner } from '@/components/deals/States';
+import { useClosingPackage } from '@/lib/api/closing';
 import { useDeal, useDealActivity, useDealDocuments, useDealStageHistory } from '@/lib/api/deals';
-import { formatFileSize, useDownloadDocument } from '@/lib/api/documents';
+import {
+  formatFileSize,
+  useDeleteDocument,
+  useDownloadDocument,
+  useUpdateDocumentMetadata,
+} from '@/lib/api/documents';
 import { useDealNotes, useCreateNote, useDeleteNote } from '@/lib/api/notes';
 import { apiErrorMessage } from '@/lib/apiError';
 import {
@@ -107,6 +118,7 @@ export default function DealDetailPage() {
           <PropertiesPanel deal={deal} />
           <DealContactsPanel dealId={deal.id} />
           <DocumentsPanel
+            dealId={deal.id}
             documents={documentsQuery.data ?? []}
             isLoading={documentsQuery.isLoading}
             isError={documentsQuery.isError}
@@ -166,6 +178,10 @@ function DealHeader({
   onMoveStage: () => void;
   onSyndication: () => void;
 }) {
+  const closingPackageQuery = useClosingPackage(deal.id);
+  const showClosingLink =
+    ['signed', 'closing'].includes(deal.pipeline_status) || Boolean(closingPackageQuery.data);
+
   return (
     <header className="animate-fade-up flex flex-col gap-5 border-b border-[var(--border)] pb-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -218,6 +234,14 @@ function DealHeader({
             Quotes
           </Link>
         </Button>
+        {showClosingLink ? (
+          <Button type="button" variant="outline" asChild>
+            <Link to={`/deals/${deal.id}/closing`}>
+              <ClipboardList className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Closing
+            </Link>
+          </Button>
+        ) : null}
         <Button type="button" variant="outline" asChild>
           <Link to={`/deals/${deal.id}/edit`}>
             <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -309,18 +333,26 @@ function PropertiesPanel({ deal }: { deal: Deal }) {
 }
 
 function DocumentsPanel({
+  dealId,
   documents,
   isLoading,
   isError,
   onUpload,
 }: {
+  dealId: string;
   documents: DealDocument[];
   isLoading: boolean;
   isError: boolean;
   onUpload: () => void;
 }) {
   const download = useDownloadDocument();
+  const updateDocument = useUpdateDocumentMetadata(dealId);
+  const deleteDocument = useDeleteDocument(dealId);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [subcategory, setSubcategory] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [notes, setNotes] = useState('');
   const grouped = useMemo(() => {
     const map = new Map<DocumentCategory, DealDocument[]>();
     for (const doc of documents) {
@@ -359,7 +391,7 @@ function DocumentsPanel({
                 {docs.map((doc) => (
                   <li
                     key={doc.id}
-                    className="flex items-center gap-3 rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2"
+                    className="flex flex-wrap items-center gap-3 rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2"
                   >
                     <FileText className="h-4 w-4 shrink-0 text-[var(--slate)]" strokeWidth={1.75} />
                     <div className="min-w-0 flex-1">
@@ -393,11 +425,80 @@ function DocumentsPanel({
                       <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
                       Download
                     </Button>
+                    {!doc.is_executed ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEditingId(editingId === doc.id ? null : doc.id);
+                          setSubcategory(doc.subcategory ?? '');
+                          setExpiryDate(doc.expiry_date ?? '');
+                          setNotes(doc.notes ?? '');
+                        }}
+                        aria-label={`Edit ${doc.document_name}`}
+                      >
+                        <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={deleteDocument.isPending}
+                      onClick={() => {
+                        if (!window.confirm(`Delete ${doc.document_name}? This cannot be undone.`)) return;
+                        setDownloadError(null);
+                        deleteDocument.mutate(doc.id, {
+                          onError: (error) => setDownloadError(apiErrorMessage(error, 'Could not delete document.')),
+                        });
+                      }}
+                      aria-label={`Delete ${doc.document_name}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    </Button>
                     {doc.is_executed ? (
                       <Badge className="border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]">
                         <CheckCircle2 className="h-3 w-3" strokeWidth={2} />
                         Executed
                       </Badge>
+                    ) : null}
+                    {editingId === doc.id ? (
+                      <div className="grid w-full gap-3 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
+                        <FormField label="Subcategory" htmlFor={`doc-subcategory-${doc.id}`} hint="Optional">
+                          <Input id={`doc-subcategory-${doc.id}`} value={subcategory} onChange={(event) => setSubcategory(event.target.value)} />
+                        </FormField>
+                        <FormField label="Expiry date" htmlFor={`doc-expiry-${doc.id}`} hint="Optional">
+                          <Input id={`doc-expiry-${doc.id}`} type="date" value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} />
+                        </FormField>
+                        <FormField label="Notes" htmlFor={`doc-notes-${doc.id}`} className="sm:col-span-2">
+                          <Textarea id={`doc-notes-${doc.id}`} rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} />
+                        </FormField>
+                        <div className="flex justify-end gap-2 sm:col-span-2">
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={updateDocument.isPending}
+                            onClick={() => updateDocument.mutate(
+                              {
+                                documentId: doc.id,
+                                payload: {
+                                  subcategory: subcategory.trim(),
+                                  expiry_date: expiryDate || null,
+                                  notes: notes.trim(),
+                                },
+                              },
+                              {
+                                onSuccess: () => setEditingId(null),
+                                onError: (error) => setDownloadError(apiErrorMessage(error, 'Could not update document.')),
+                              },
+                            )}
+                          >
+                            {updateDocument.isPending ? 'Saving…' : 'Save metadata'}
+                          </Button>
+                        </div>
+                      </div>
                     ) : null}
                   </li>
                 ))}

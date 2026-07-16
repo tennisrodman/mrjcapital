@@ -114,7 +114,7 @@ describe('promoted sponsor and property facts mock API', () => {
       mockApiRequest('api/deals/deal-larkspur/', {
         method: 'PATCH',
         body: JSON.stringify({
-          purpose: 'This failed edit must roll back',
+          purpose: 'refinance',
           fund: 'missing-fund',
         }),
       }),

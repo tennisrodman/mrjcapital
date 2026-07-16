@@ -26,6 +26,8 @@ export interface Quote {
   deal: string;
   version: number;
   is_current: boolean;
+  is_send_ready: boolean;
+  missing_send_fields: string[];
   status: QuoteStatus;
   is_counter: boolean;
   created_by: number | null;
@@ -129,14 +131,18 @@ export interface QuoteFormValues {
   amortization_months: string;
   origination_fee_pct: string;
   exit_fee_pct: string;
+  extension_terms: string;
   prepayment_terms: string;
   recourse_type: QuoteRecourseType;
   recourse_carveouts: string;
+  interest_reserve_months: string;
+  interest_reserve_amount: string;
   holdback_amount: string;
   good_faith_deposit: string;
   min_dscr: string;
   max_ltv: string;
   min_debt_yield: string;
+  expires_on: string;
   equity_commitment: string;
   ownership_pct: string;
   preferred_return_pct: string;

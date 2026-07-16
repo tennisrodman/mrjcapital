@@ -26,6 +26,9 @@ interface QuoteActionsProps {
   onWithdraw: () => void;
   onExpire: () => void;
   onCreateNextVersion?: () => void;
+  onCreateFirst?: () => void;
+  sendReady?: boolean;
+  missingSendFields?: string[];
 }
 
 export function QuoteActions({
@@ -41,12 +44,23 @@ export function QuoteActions({
   onWithdraw,
   onExpire,
   onCreateNextVersion,
+  onCreateFirst,
+  sendReady = false,
+  missingSendFields = [],
 }: QuoteActionsProps) {
   if (!quote || !quote.is_current) {
     return (
-      <p className="text-sm text-[var(--slate)]">
-        Workflow actions apply only to the current quote version.
-      </p>
+      <div className="space-y-3">
+        <p className="text-sm text-[var(--slate)]">
+          No quote exists yet. Create the first draft when you are ready to begin pricing.
+        </p>
+        {canCreateNextVersion && onCreateFirst ? (
+          <Button type="button" variant="brass" disabled={busy} onClick={onCreateFirst}>
+            <FilePlus2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            {busy ? 'Creating…' : 'Create first quote'}
+          </Button>
+        ) : null}
+      </div>
     );
   }
 
@@ -74,7 +88,7 @@ export function QuoteActions({
         ) : null}
 
         {canSend ? (
-          <Button type="button" variant="brass" disabled={disabled || dirty} onClick={onSend}>
+          <Button type="button" variant="brass" disabled={disabled || dirty || !sendReady} onClick={onSend}>
             <Send className="h-3.5 w-3.5" strokeWidth={1.75} />
             Send
           </Button>
@@ -123,6 +137,11 @@ export function QuoteActions({
 
       {canSend && dirty ? (
         <p className="text-xs text-[var(--slate)]">Save changes before sending.</p>
+      ) : null}
+      {canSend && !dirty && !sendReady ? (
+        <p className="text-xs text-[var(--slate)]">
+          Complete required terms before sending: {missingSendFields.join(', ')}.
+        </p>
       ) : null}
       {executeBlocked ? (
         <p className="text-xs text-[var(--slate)]">

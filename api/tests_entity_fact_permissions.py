@@ -339,6 +339,86 @@ class PromotedEntityFactPermissionTests(APITestCase):
                 self.assertEqual(response.data[field_name], ['Selected record is not available.'])
                 self.assertFalse(Deal.objects.filter(name=payload['name']).exists())
 
+    def test_nonstaff_cannot_attach_hidden_related_entities_via_deal_patch(self):
+        hidden_sponsor = Sponsor.objects.create(
+            entity_name='Hidden Patch Sponsor LLC',
+            entity_type='llc',
+            primary_contact_name='Hidden Patch Sponsor',
+            primary_contact_email='hidden-patch-sponsor@example.com',
+            relationship_rating='new',
+        )
+        hidden_broker = Broker.objects.create(
+            company_name='Hidden Patch Broker',
+            contact_name='Hidden Patch Broker Contact',
+            email='hidden-patch-broker@example.com',
+        )
+        hidden_fund = Fund.objects.create(name='Hidden Patch Fund', status='active')
+        self._deal('Other Analyst Patch Deal', self.other_analyst, hidden_sponsor, self.property)
+        Deal.objects.filter(name='Other Analyst Patch Deal').update(
+            broker=hidden_broker,
+            fund=hidden_fund,
+        )
+
+        empty_deal = Deal.objects.create(
+            name='Empty Relationship Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.analyst,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+
+        for field_name, entity in {
+            'sponsor': hidden_sponsor,
+            'broker': hidden_broker,
+            'fund': hidden_fund,
+        }.items():
+            with self.subTest(field=field_name):
+                response = self.client.patch(
+                    f'/api/deals/{empty_deal.pk}/',
+                    {field_name: str(entity.pk)},
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data[field_name], ['Selected record is not available.'])
+                empty_deal.refresh_from_db()
+                self.assertIsNone(getattr(empty_deal, f'{field_name}_id'))
+
+    def test_nonstaff_cannot_link_hidden_property_via_deal_properties(self):
+        hidden_property = Property.objects.create(
+            address='999 Hidden Ave',
+            city='Los Angeles',
+            state='CA',
+            zip='90002',
+            address_normalized=normalize_address('999 Hidden Ave', 'Los Angeles', 'CA', '90002'),
+            property_type='multifamily',
+        )
+        self._deal('Other Analyst Property Deal', self.other_analyst, self.sponsor, hidden_property)
+
+        empty_deal = Deal.objects.create(
+            name='Property Link Target Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.analyst,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+
+        response = self.client.post(
+            '/api/deal-properties/',
+            {
+                'deal': str(empty_deal.pk),
+                'property': str(hidden_property.pk),
+                'is_primary': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['property'], ['Selected property is not available.'])
+        self.assertFalse(
+            DealProperty.objects.filter(deal=empty_deal, property=hidden_property).exists()
+        )
+
 
 class BrokerFundAuthorizationTests(APITestCase):
     """Align Broker/Fund mutation controls with Sponsor/Property/Contact."""

@@ -19,6 +19,7 @@ from api.services.deals import (
     allowed_pipeline_statuses,
     allowed_syndication_statuses,
 )
+from api.services.money import format_money_aggregate
 
 
 MAX_SEARCH_LIMIT = 50
@@ -139,14 +140,21 @@ def get_deal_summary(
             'search': search,
         },
     )
-    active_queryset = queryset.exclude(pipeline_status__in=[PipelineStatus.DEAD, PipelineStatus.EXITED])
+    active_queryset = queryset.exclude(
+        pipeline_status__in=[
+            PipelineStatus.DEAD,
+            PipelineStatus.EXITED,
+            PipelineStatus.CLOSED,
+            PipelineStatus.SERVICING,
+        ]
+    )
     status_counts = queryset.values('pipeline_status').annotate(count=Count('id')).order_by('pipeline_status')
     active_requested = active_queryset.aggregate(total=Sum('requested_amount'))['total']
     gross_requested = queryset.aggregate(total=Sum('requested_amount'))['total']
     return {
         'active_deals': active_queryset.count(),
-        'pipeline_value': _json_safe(active_requested or 0),
-        'gross_pipeline_value': _json_safe(gross_requested or 0),
+        'pipeline_value': format_money_aggregate(active_requested),
+        'gross_pipeline_value': format_money_aggregate(gross_requested),
         'by_pipeline_status': list(status_counts),
     }
 

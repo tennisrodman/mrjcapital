@@ -21,6 +21,12 @@ const sponsor: Sponsor = {
   years_experience: 18,
   completed_projects: 27,
   bankruptcy_history: false,
+  business_address: '',
+  total_units_owned: null,
+  total_sf_managed: null,
+  assets_under_management: null,
+  track_record: [],
+  connection_source: '',
   details: {},
 };
 
@@ -48,7 +54,7 @@ describe('SponsorFactsDialog', () => {
       completed_projects: null,
       bankruptcy_history: null,
     });
-    expect(screen.getByRole('option', { name: 'Unknown' })).toHaveValue('');
+    expect(screen.getAllByRole('option', { name: 'Unknown' })[0]).toHaveValue('');
   });
 
   it('preserves in-progress edits when the live sponsor object refetches', async () => {
@@ -97,6 +103,7 @@ describe('SponsorFactsDialog', () => {
     const user = userEvent.setup();
     render(<SponsorFactsDialog sponsor={sponsor} open onOpenChange={vi.fn()} />);
 
+    await user.clear(screen.getByLabelText('Website'));
     await user.click(screen.getByRole('button', { name: 'Save sponsor facts' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent(
