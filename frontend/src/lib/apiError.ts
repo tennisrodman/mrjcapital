@@ -39,3 +39,14 @@ export function fieldErrors(error: unknown): Record<string, string> {
   }
   return result;
 }
+
+/**
+ * Formats an error for a form-level banner without losing ordinary network or
+ * storage failures. DRF field messages take priority only when at least one is
+ * actually present.
+ */
+export function formErrorMessage(error: unknown, fallback = 'Something went wrong.'): string {
+  const fields = fieldErrors(error);
+  const messages = Object.values(fields).filter(Boolean);
+  return messages.length > 0 ? messages.join(' ') : apiErrorMessage(error, fallback);
+}

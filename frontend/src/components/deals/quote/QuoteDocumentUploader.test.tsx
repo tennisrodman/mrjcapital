@@ -68,4 +68,24 @@ describe('QuoteDocumentUploader', () => {
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it('shows ordinary attachment failures instead of an empty error', async () => {
+    const user = userEvent.setup();
+    hooks.setAttachments.mutateAsync.mockRejectedValueOnce(new Error('Network connection lost'));
+
+    render(
+      <QuoteDocumentUploader
+        dealId="deal-1"
+        quote={quote}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('tab', { name: /Attach existing/i }));
+    await user.selectOptions(screen.getByLabelText(/Eligible document/i), 'doc-ready');
+    await user.click(screen.getByRole('button', { name: /^Attach$/i }));
+
+    expect(await screen.findByText('Network connection lost')).toBeInTheDocument();
+  });
 });

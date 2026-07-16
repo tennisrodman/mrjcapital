@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useDealDocuments } from '@/lib/api/deals';
 import { useSetQuoteAttachments } from '@/lib/api/quotes';
 import { useUploadDocument } from '@/lib/api/documents';
-import { apiErrorMessage, fieldErrors } from '@/lib/apiError';
+import { formErrorMessage } from '@/lib/apiError';
 import type { DealDocument } from '@/types/deal';
 import type { Quote, QuoteAttachmentSubcategory } from '@/types/quote';
 
@@ -109,8 +109,7 @@ export function QuoteDocumentUploader({
       await attachDocumentIds(documentIds);
       onOpenChange(false);
     } catch (err) {
-      const fields = fieldErrors(err);
-      const message = fields ? Object.values(fields).flat().join(' ') : apiErrorMessage(err);
+      const message = formErrorMessage(err, 'Could not upload and attach document.');
       if (uploaded) {
         setMode('existing');
         setSelectedExistingId(uploaded.id);
@@ -137,8 +136,7 @@ export function QuoteDocumentUploader({
       await attachDocumentIds(documentIds);
       onOpenChange(false);
     } catch (err) {
-      const fields = fieldErrors(err);
-      setError(fields ? Object.values(fields).flat().join(' ') : apiErrorMessage(err));
+      setError(formErrorMessage(err, 'Could not attach document.'));
     }
   }
 

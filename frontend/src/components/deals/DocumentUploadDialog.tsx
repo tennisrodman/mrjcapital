@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { SelectNative } from '@/components/ui/select-native';
 import { Textarea } from '@/components/ui/textarea';
 import { useUploadDocument } from '@/lib/api/documents';
-import { apiErrorMessage, fieldErrors } from '@/lib/apiError';
+import { formErrorMessage } from '@/lib/apiError';
 import { DOCUMENT_CATEGORY_LABELS } from '@/lib/dealChoices';
 import type { Deal, DocumentCategory } from '@/types/deal';
 
@@ -66,8 +66,7 @@ export function DocumentUploadDialog({ deal, open, onOpenChange }: DocumentUploa
       });
       onOpenChange(false);
     } catch (err) {
-      const fields = fieldErrors(err);
-      setError(fields ? Object.values(fields).flat().join(' ') : apiErrorMessage(err));
+      setError(formErrorMessage(err, 'Could not upload document.'));
     }
   }
 
