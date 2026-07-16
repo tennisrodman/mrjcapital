@@ -70,6 +70,12 @@ SYNDICATION_ACTIVE_STATUSES = {
     SyndicationStatus.RAISING,
     SyndicationStatus.FULLY_SUBSCRIBED,
 }
+ACTIVE_PIPELINE_EXCLUDED_STATUSES = frozenset({
+    PipelineStatus.CLOSED,
+    PipelineStatus.SERVICING,
+    PipelineStatus.DEAD,
+    PipelineStatus.EXITED,
+})
 
 # `details` is deliberately absent: it is flexible JSON and may contain data
 # that should never be copied into the immutable audit log. Pipeline and

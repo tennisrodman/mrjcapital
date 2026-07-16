@@ -38,6 +38,7 @@ import {
 } from './fixtures';
 import { PIPELINE_TRANSITIONS } from './pipeline';
 import {
+  DEMO_ACTIVE_PIPELINE_EXCLUDED_STATUSES,
   DEMO_SYNDICATION_TRANSITIONS,
   DOCUMENT_UPLOAD_CONTRACT,
 } from './workflowContracts';
@@ -428,8 +429,9 @@ const MOCK_USER_ID = 1;
 
 function buildSummary(query: URLSearchParams) {
   const filtered = filterDeals(query);
-  const inactiveStages: PipelineStatus[] = ['dead', 'closed', 'servicing', 'exited'];
-  const active = filtered.filter((d) => !inactiveStages.includes(d.pipeline_status));
+  const active = filtered.filter(
+    (deal) => !DEMO_ACTIVE_PIPELINE_EXCLUDED_STATUSES.includes(deal.pipeline_status),
+  );
   const sum = (list: Deal[]) =>
     list.reduce((total, d) => total + (Number(d.requested_amount) || 0), 0).toFixed(2);
   const groups = new Map<PipelineStatus, Deal[]>();
@@ -442,12 +444,14 @@ function buildSummary(query: URLSearchParams) {
     active_deals: active.length,
     pipeline_value: sum(active),
     gross_pipeline_value: sum(filtered),
-    average_days_in_current_stage: Number(averageDays(filtered).toFixed(2)),
+    average_days_in_current_stage: Number(averageDays(active).toFixed(2)),
     by_pipeline_status: [...groups.entries()].map(([pipeline_status, rows]) => ({
       pipeline_status,
       count: rows.length,
       requested_amount: sum(rows),
-      average_days_in_current_stage: Number(averageDays(rows).toFixed(2)),
+      average_days_in_current_stage: DEMO_ACTIVE_PIPELINE_EXCLUDED_STATUSES.includes(pipeline_status)
+        ? 0
+        : Number(averageDays(rows).toFixed(2)),
     })),
     average_stage_duration_days: [],
   };

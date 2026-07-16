@@ -134,6 +134,30 @@ class DealStageHistoryTests(APITestCase):
         self.assertEqual(durations[PipelineStatus.SOURCED]['average_days'], 2)
         self.assertEqual(durations[PipelineStatus.SOURCED]['completed_events'], 1)
 
+    def test_summary_stage_age_uses_fractional_days_and_excludes_post_pipeline_deals(self):
+        now = timezone.now().replace(microsecond=0)
+        active = self.create_deal(
+            name='Twenty Hour Active Deal',
+            pipeline_status=PipelineStatus.SCREENING,
+            current_stage_entered_at=now - timedelta(hours=20),
+        )
+        self.create_deal(
+            name='Old Terminal Deal',
+            pipeline_status=PipelineStatus.DEAD,
+            current_stage_entered_at=now - timedelta(days=600),
+        )
+
+        with patch('api.viewsets.timezone.now', return_value=now):
+            response = self.client.get('/api/deals/summary/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['active_deals'], 1)
+        self.assertEqual(response.data['average_days_in_current_stage'], 0.83)
+        by_status = {row['pipeline_status']: row for row in response.data['by_pipeline_status']}
+        self.assertEqual(by_status[PipelineStatus.SCREENING]['average_days_in_current_stage'], 0.83)
+        self.assertEqual(by_status[PipelineStatus.DEAD]['average_days_in_current_stage'], 0)
+        self.assertEqual(active.pipeline_status, PipelineStatus.SCREENING)
+
     def test_deal_field_audit_logs_safe_values_without_copying_details(self):
         deal = self.create_deal()
         sensitive_value = '123-45-6789'

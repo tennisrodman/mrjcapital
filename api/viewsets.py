@@ -79,6 +79,7 @@ from api.services.storage import (
     sanitize_filename,
     sha256_hex,
 )
+from api.services.deals import ACTIVE_PIPELINE_EXCLUDED_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -412,12 +413,9 @@ class DealViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
         queryset = self.filter_queryset(self.get_queryset())
-        active_queryset = queryset.exclude(pipeline_status__in=[
-            PipelineStatus.DEAD,
-            PipelineStatus.CLOSED,
-            PipelineStatus.SERVICING,
-            PipelineStatus.EXITED,
-        ])
+        active_queryset = queryset.exclude(
+            pipeline_status__in=ACTIVE_PIPELINE_EXCLUDED_STATUSES,
+        )
         status_counts = list(
             queryset.values('pipeline_status')
             .annotate(count=Count('id'), requested_amount=Sum('requested_amount'))
@@ -426,7 +424,11 @@ class DealViewSet(viewsets.ModelViewSet):
         active_requested = active_queryset.aggregate(total=Sum('requested_amount'))['total']
         gross_requested = queryset.aggregate(total=Sum('requested_amount'))['total']
         active_count = active_queryset.count()
-        timing_metrics = _stage_timing_metrics(queryset, status_counts)
+        timing_metrics = _stage_timing_metrics(
+            active_queryset,
+            status_counts,
+            history_queryset=queryset,
+        )
         for row in status_counts:
             row['requested_amount'] = format_money_aggregate(row.get('requested_amount'))
         return Response({
@@ -883,14 +885,14 @@ def _client_ip(request):
     return None
 
 
-def _stage_timing_metrics(queryset, status_counts):
+def _stage_timing_metrics(current_queryset, status_counts, *, history_queryset=None):
     """Small, portable timing metrics without database-specific duration SQL."""
     now = timezone.now()
     current_totals = {}
     total_current_days = 0
     current_count = 0
-    for pipeline_status, entered_at in queryset.values_list('pipeline_status', 'current_stage_entered_at'):
-        days = max(0, (now - entered_at).days) if entered_at else 0
+    for pipeline_status, entered_at in current_queryset.values_list('pipeline_status', 'current_stage_entered_at'):
+        days = max(0, (now - entered_at).total_seconds() / 86400) if entered_at else 0
         total, count = current_totals.get(pipeline_status, (0, 0))
         current_totals[pipeline_status] = (total + days, count + 1)
         total_current_days += days
@@ -901,8 +903,9 @@ def _stage_timing_metrics(queryset, status_counts):
         row['average_days_in_current_stage'] = round(total / count, 2) if count else 0
 
     completed_totals = {}
+    history_source = history_queryset if history_queryset is not None else current_queryset
     stage_events = DealStageEvent.objects.filter(
-        deal_id__in=queryset.values('pk'),
+        deal_id__in=history_source.values('pk'),
         exited_at__isnull=False,
     ).values_list('to_status', 'entered_at', 'exited_at')
     for pipeline_status, entered_at, exited_at in stage_events:

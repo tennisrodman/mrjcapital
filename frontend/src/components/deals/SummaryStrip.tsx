@@ -15,7 +15,7 @@ export function SummaryStrip({ summary, isLoading, isError = false, onRetry }: S
   const items = [
     {
       label: 'Active deals',
-      hint: 'Excludes dead & exited',
+      hint: 'In-flight stages only',
       icon: FolderOpen,
       value: summary ? summary.active_deals.toLocaleString('en-US') : null,
     },

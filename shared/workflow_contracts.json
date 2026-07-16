@@ -1,5 +1,6 @@
 {
   "lifecycle": {
+    "active_pipeline_excluded_statuses": ["closed", "servicing", "dead", "exited"],
     "pipeline_transitions": {
       "sourced": ["screening", "on_hold", "dead"],
       "screening": ["quoting", "on_hold", "dead"],

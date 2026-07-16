@@ -11,7 +11,11 @@ from api.serializers import (
     DocumentUploadIntentSerializer,
 )
 from api.services.storage import ALLOWED_FILE_TYPES
-from api.services.deals import PIPELINE_TRANSITIONS, SYNDICATION_TRANSITIONS
+from api.services.deals import (
+    ACTIVE_PIPELINE_EXCLUDED_STATUSES,
+    PIPELINE_TRANSITIONS,
+    SYNDICATION_TRANSITIONS,
+)
 
 
 User = get_user_model()
@@ -73,6 +77,10 @@ class DocumentUploadContractTests(TestCase):
 
     def test_backend_matches_shared_lifecycle_graph(self):
         contract = CONTRACTS['lifecycle']
+        self.assertEqual(
+            sorted(str(status) for status in ACTIVE_PIPELINE_EXCLUDED_STATUSES),
+            sorted(contract['active_pipeline_excluded_statuses']),
+        )
         actual_pipeline = {
             str(source): sorted(str(target) for target in targets)
             for source, targets in PIPELINE_TRANSITIONS.items()
