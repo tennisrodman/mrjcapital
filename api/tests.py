@@ -1536,6 +1536,13 @@ class DealSpineApiTests(APITestCase):
         complete = self.client.post(f'/api/documents/{document["id"]}/complete/', {}, format='json')
         self.assertEqual(complete.status_code, status.HTTP_200_OK)
         self.assertEqual(complete.data['storage_status'], 'ready')
+        duplicate_complete = self.client.post(
+            f'/api/documents/{document["id"]}/complete/',
+            {},
+            format='json',
+        )
+        self.assertEqual(duplicate_complete.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(duplicate_complete.data['detail'], 'Document upload is not pending.')
 
         log = ActivityLog.objects.filter(
             action_type=ActivityActionType.DOCUMENT_UPLOAD,

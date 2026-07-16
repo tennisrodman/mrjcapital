@@ -37,6 +37,10 @@ import {
   SPONSORS,
 } from './fixtures';
 import { PIPELINE_TRANSITIONS } from './pipeline';
+import {
+  DEMO_SYNDICATION_TRANSITIONS,
+  DOCUMENT_UPLOAD_CONTRACT,
+} from './workflowContracts';
 import { handleQuotesRequest, getCurrentQuote, documentIsExecutedQuoteEvidence } from './quotes';
 import {
   documentIsClosingLinked,
@@ -194,16 +198,23 @@ const stageEvents: DealStageEvent[] = deals.flatMap((deal) => {
   return events;
 });
 
-const SYNDICATION_TRANSITIONS: Record<SyndicationStatus, SyndicationStatus[]> = {
-  not_started: ['raising'],
-  raising: ['fully_subscribed', 'cancelled'],
-  fully_subscribed: ['closed', 'cancelled'],
-  closed: [],
-  cancelled: [],
-};
-
 const SYNDICATION_START_STAGES: PipelineStatus[] = ['quoting', 'negotiating', 'signed', 'closing'];
 const SYNDICATION_TERMINAL_STAGES: PipelineStatus[] = ['dead', 'exited'];
+const DOCUMENT_FILE_TYPES = new Set(DOCUMENT_UPLOAD_CONTRACT.allowed_file_types);
+const DOCUMENT_CATEGORIES = new Set(DOCUMENT_UPLOAD_CONTRACT.allowed_categories);
+const DOCUMENT_VISIBILITY_ROLES = new Set(DOCUMENT_UPLOAD_CONTRACT.allowed_visibility_roles);
+const DOCUMENT_CONTENT_TYPES: Record<string, string> = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  csv: 'text/csv',
+  txt: 'text/plain',
+  zip: 'application/zip',
+};
 const SUPPORTED_DEBT_INVESTMENT_TYPES: InvestmentType[] = [
   'whole_loan_bridge',
   'whole_loan_permanent',
@@ -1239,7 +1250,7 @@ function transitionSyndication(deal: Deal, to: SyndicationStatus, reason: string
   if (!reason?.trim()) badRequest('reason', 'A reason is required for every status transition.');
   const from = deal.syndication_status;
   if (to === from) badRequest('to_status', 'Deal is already in that syndication status.');
-  if (!SYNDICATION_TRANSITIONS[from].includes(to)) {
+  if (!DEMO_SYNDICATION_TRANSITIONS[from].includes(to)) {
     badRequest('to_status', `Cannot transition syndication status from ${from} to ${to}.`);
   }
   if (from === 'not_started' && to === 'raising' && !SYNDICATION_START_STAGES.includes(deal.pipeline_status)) {
@@ -1290,9 +1301,43 @@ function nextDocumentVersion(dealId: string, category: string, documentName: str
 function createUploadIntent(body: Record<string, unknown>): unknown {
   const dealId = String(body.deal ?? '');
   findDeal(dealId);
-  const documentName = String(body.document_name ?? '');
+  const documentName = String(body.document_name ?? '').trim();
+  if (!documentName) badRequest('document_name', 'This field may not be blank.');
+  if (documentName.length > 255) {
+    badRequest('document_name', 'Ensure this field has no more than 255 characters.');
+  }
   const category = String(body.category ?? 'other');
-  const fileType = String(body.file_type ?? 'pdf');
+  if (!DOCUMENT_CATEGORIES.has(category)) {
+    badRequest('category', `"${category}" is not a valid choice.`);
+  }
+  const fileType = String(body.file_type ?? '').toLowerCase().replace(/^\./, '');
+  if (!fileType) badRequest('file_type', 'This field may not be blank.');
+  if (!DOCUMENT_FILE_TYPES.has(fileType)) {
+    badRequest('file_type', `Unsupported file type: ${body.file_type ?? ''}`);
+  }
+  const fileSize = Number(body.file_size_bytes);
+  if (!Number.isInteger(fileSize)) {
+    badRequest('file_size_bytes', 'A valid integer is required.');
+  }
+  if (fileSize < 1) {
+    badRequest('file_size_bytes', 'Ensure this value is greater than or equal to 1.');
+  }
+  if (fileSize > DOCUMENT_UPLOAD_CONTRACT.default_max_bytes) {
+    badRequest(
+      'file_size_bytes',
+      `File exceeds maximum upload size of ${DOCUMENT_UPLOAD_CONTRACT.default_max_bytes} bytes.`,
+    );
+  }
+  const visibilityRoles = body.visibility_roles ?? [];
+  if (!Array.isArray(visibilityRoles)) {
+    badRequest('visibility_roles', 'Expected a list of items.');
+  }
+  const invalidRoles = [...new Set(visibilityRoles.map(String))]
+    .filter((role) => !DOCUMENT_VISIBILITY_ROLES.has(role))
+    .sort();
+  if (invalidRoles.length > 0) {
+    badRequest('visibility_roles', `Unsupported visibility role(s): ${invalidRoles.join(', ')}`);
+  }
   const version = nextDocumentVersion(dealId, category, documentName);
   const id = newId('doc');
   const document: DealDocument = {
@@ -1304,8 +1349,8 @@ function createUploadIntent(body: Record<string, unknown>): unknown {
     version,
     file_url: `deals/${dealId}/${id}/v${version}/${documentName}.${fileType}`,
     file_type: fileType,
-    content_type: String(body.content_type ?? ''),
-    file_size_bytes: Number(body.file_size_bytes ?? 0),
+    content_type: String(body.content_type ?? '') || DOCUMENT_CONTENT_TYPES[fileType] || 'application/octet-stream',
+    file_size_bytes: fileSize,
     checksum_sha256: '',
     storage_status: 'pending',
     pipeline_stage_at_upload: null,
@@ -1315,7 +1360,7 @@ function createUploadIntent(body: Record<string, unknown>): unknown {
     is_executed: false,
     expiry_date: null,
     notes: String(body.notes ?? ''),
-    visibility_roles: (body.visibility_roles as string[]) ?? ['internal'],
+    visibility_roles: visibilityRoles.length > 0 ? visibilityRoles.map(String) : ['internal'],
     details: {},
     can_edit: true,
     edit_block_reason: '',
@@ -1334,6 +1379,11 @@ function createUploadIntent(body: Record<string, unknown>): unknown {
 
 function completeUpload(documentId: string): DealDocument {
   const document = findDocument(documentId);
+  if (document.storage_status !== 'pending') {
+    throw new ApiError('Document upload is not pending.', 409, {
+      detail: 'Document upload is not pending.',
+    });
+  }
   document.storage_status = 'ready';
   return withDocumentCapabilities(document);
 }
@@ -1737,7 +1787,7 @@ function allowedSyndicationTransitions(deal: Deal): SyndicationStatus[] {
   ) {
     return [];
   }
-  return SYNDICATION_TRANSITIONS[deal.syndication_status];
+  return DEMO_SYNDICATION_TRANSITIONS[deal.syndication_status];
 }
 
 function allowedTransitions(deal: Deal) {
@@ -1820,6 +1870,11 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
   }
 
   if (resource === 'documents') {
+    if (!second && method === 'POST') {
+      throw new ApiError('Direct document creation is disabled. Use upload-intent.', 403, {
+        detail: 'Direct document creation is disabled. Use upload-intent.',
+      });
+    }
     if (second === 'upload-intent' && method === 'POST') {
       return createUploadIntent(body);
     }
