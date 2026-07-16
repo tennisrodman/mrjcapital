@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.db.models.deletion import ProtectedError
@@ -8,6 +6,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.permissions import IsAuthenticated
 
 from api.contact_serializers import ContactSerializer, DealContactSerializer
+from api.drf import uuid_filter_value as _uuid_filter_value
 from api.models.contact import Contact, DealContact
 from api.models.deal import Deal
 from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
@@ -141,15 +140,6 @@ class DealContactViewSet(viewsets.ModelViewSet):
             raise ValidationError({
                 'detail': 'The contact link conflicts with an existing deal contact.',
             }) from exc
-
-
-def _uuid_filter_value(value, field_name):
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError) as exc:
-        raise ValidationError({field_name: 'Invalid UUID.'}) from exc
-
-
 def _can_access_contact(user, contact):
     if not getattr(user, 'is_authenticated', False):
         return False

@@ -109,35 +109,10 @@ export function useQuotes(dealId: string | undefined) {
   });
 }
 
-export function useCreateQuote(dealId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: createQuote,
-    onSuccess: (quote) => {
-      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
-        replaceCachedQuote(existing, quote),
-      );
-      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
-    },
-  });
-}
-
-export function useUpdateQuote(quoteId: string, dealId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: UpdateQuotePayload) => updateQuote(quoteId, payload),
-    onSuccess: (quote) => {
-      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
-        replaceCachedQuote(existing, quote),
-      );
-      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
-    },
-  });
-}
-
-function useQuoteAction(
+function useQuoteMutation<TVariables>(
   dealId: string,
-  mutationFn: (quoteId: string) => Promise<Quote>,
+  mutationFn: (variables: TVariables) => Promise<Quote>,
+  options: { invalidateDocuments?: boolean } = {},
 ) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -146,23 +121,35 @@ function useQuoteAction(
       queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
         replaceCachedQuote(existing, quote),
       );
+      if (options.invalidateDocuments) {
+        void queryClient.invalidateQueries({ queryKey: ['deal-documents', dealId] });
+      }
       void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
     },
   });
 }
 
+export function useCreateQuote(dealId: string) {
+  return useQuoteMutation(dealId, createQuote);
+}
+
+export function useUpdateQuote(quoteId: string, dealId: string) {
+  return useQuoteMutation(dealId, (payload: UpdateQuotePayload) => updateQuote(quoteId, payload));
+}
+
+function useQuoteAction(
+  dealId: string,
+  mutationFn: (quoteId: string) => Promise<Quote>,
+) {
+  return useQuoteMutation(dealId, mutationFn);
+}
+
 export function useSendQuote(dealId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ quoteId, payload }: { quoteId: string; payload?: SendQuotePayload }) =>
+  return useQuoteMutation(
+    dealId,
+    ({ quoteId, payload }: { quoteId: string; payload?: SendQuotePayload }) =>
       sendQuote(quoteId, payload),
-    onSuccess: (quote) => {
-      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
-        replaceCachedQuote(existing, quote),
-      );
-      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
-    },
-  });
+  );
 }
 
 export function useCounterQuote(dealId: string) {
@@ -182,21 +169,15 @@ export function useExpireQuote(dealId: string) {
 }
 
 export function useSetQuoteAttachments(dealId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
+  return useQuoteMutation(
+    dealId,
+    ({
       quoteId,
       payload,
     }: {
       quoteId: string;
       payload: QuoteAttachmentsPayload;
     }) => setQuoteAttachments(quoteId, payload),
-    onSuccess: (quote) => {
-      queryClient.setQueryData<Quote[]>(quoteQueryKey(dealId), (existing) =>
-        replaceCachedQuote(existing, quote),
-      );
-      void queryClient.invalidateQueries({ queryKey: ['deal-documents', dealId] });
-      void queryClient.invalidateQueries({ queryKey: ['deal-allowed-transitions', dealId] });
-    },
-  });
+    { invalidateDocuments: true },
+  );
 }

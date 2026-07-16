@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Exists, OuterRef
 from rest_framework import viewsets
@@ -10,6 +8,11 @@ from rest_framework.response import Response
 
 from api.models.deal import Deal
 from api.models.quote import Quote
+from api.drf import (
+    boolean_filter_value as _boolean_filter_value,
+    raise_drf_validation as _raise_drf_validation,
+    uuid_filter_value as _uuid_filter_value,
+)
 from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
 from api.quote_serializers import (
     QuoteAttachmentsSerializer,
@@ -144,25 +147,3 @@ class QuoteViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as exc:
             _raise_drf_validation(exc)
         return Response(self.get_serializer(updated).data)
-
-
-def _uuid_filter_value(value, field_name):
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError) as exc:
-        raise DRFValidationError({field_name: 'Invalid UUID.'}) from exc
-
-
-def _boolean_filter_value(value, field_name):
-    normalized = str(value).lower()
-    if normalized in {'1', 'true'}:
-        return True
-    if normalized in {'0', 'false'}:
-        return False
-    raise DRFValidationError({field_name: 'Expected true or false.'})
-
-
-def _raise_drf_validation(exc):
-    if hasattr(exc, 'message_dict'):
-        raise DRFValidationError(exc.message_dict) from exc
-    raise DRFValidationError({'detail': exc.messages}) from exc

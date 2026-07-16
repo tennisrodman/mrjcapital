@@ -1,6 +1,13 @@
 """Small, dependency-light authorization policies shared across API features."""
 
 
+def authenticated_user(user):
+    """Return an authenticated actor or ``None`` for system/anonymous work."""
+    if user is not None and getattr(user, 'is_authenticated', False):
+        return user
+    return None
+
+
 def is_staff_user(user) -> bool:
     return bool(
         user

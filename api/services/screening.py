@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from api.models.deal import Deal
 from api.models.screening import ScreeningAssessment
+from api.services.money import decimal_or_none as _decimal_or_none
 
 
 RATIO_QUANTUM = Decimal('0.0001')
@@ -267,16 +268,6 @@ def screening_advance_errors(assessment):
 
 def screening_is_complete(assessment):
     return not screening_missing_fields(assessment)
-
-
-def _decimal_or_none(value):
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return value
-    return Decimal(str(value))
-
-
 def _safe_ratio(numerator, denominator):
     if numerator is None or denominator is None or denominator <= 0:
         return None

@@ -1,7 +1,6 @@
 from ipaddress import ip_address
 import logging
 import uuid
-from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -30,6 +29,10 @@ from api.models import (
     PipelineStatus,
     Property,
     Sponsor,
+)
+from api.drf import (
+    django_validation_response as _django_validation_response,
+    uuid_filter_value as _uuid_filter_value,
 )
 from api.serializers import (
     ActivityLogSerializer,
@@ -110,12 +113,12 @@ class SponsorViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
-        if not _is_staff_user(self.request.user):
-            raise PermissionDenied('Only staff may delete sponsors.')
-        if instance.deals.exists():
-            raise DRFValidationError({
-                'detail': 'This sponsor is linked to one or more deals and cannot be deleted.',
-            })
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='sponsor',
+            relation_name='deals',
+        )
         return super().perform_destroy(instance)
 
     @action(detail=True, methods=['post'], url_path='sensitive-fields')
@@ -165,12 +168,12 @@ class BrokerViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def perform_destroy(self, instance):
-        if not _is_staff_user(self.request.user):
-            raise PermissionDenied('Only staff may delete brokers.')
-        if instance.deals.exists():
-            raise DRFValidationError({
-                'detail': 'This broker is linked to one or more deals and cannot be deleted.',
-            })
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='broker',
+            relation_name='deals',
+        )
         return super().perform_destroy(instance)
 
 
@@ -197,12 +200,12 @@ class FundViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def perform_destroy(self, instance):
-        if not _is_staff_user(self.request.user):
-            raise PermissionDenied('Only staff may delete funds.')
-        if instance.deals.exists():
-            raise DRFValidationError({
-                'detail': 'This fund is linked to one or more deals and cannot be deleted.',
-            })
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='fund',
+            relation_name='deals',
+        )
         return super().perform_destroy(instance)
 
 
@@ -232,12 +235,13 @@ class PropertyViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
-        if not _is_staff_user(self.request.user):
-            raise PermissionDenied('Only staff may delete properties.')
-        if instance.deal_properties.exists():
-            raise DRFValidationError({
-                'detail': 'This property is linked to one or more deals and cannot be deleted.',
-            })
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='property',
+            subject_plural='properties',
+            relation_name='deal_properties',
+        )
         return super().perform_destroy(instance)
 
     def create(self, request, *args, **kwargs):
@@ -934,13 +938,6 @@ def _valid_ip(value):
     return True
 
 
-def _uuid_filter_value(value, field_name):
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError) as exc:
-        raise DRFValidationError({field_name: 'Invalid UUID.'}) from exc
-
-
 def _int_filter_value(value, field_name):
     try:
         return int(value)
@@ -956,6 +953,22 @@ def _require_exclusive_supporting_entity_access(instance, *, performed_by, subje
         raise PermissionDenied(
             f'A shared {subject_label} can only be changed by staff.'
         )
+
+
+def _require_staff_unlinked_delete(
+    instance,
+    *,
+    user,
+    subject_label,
+    relation_name,
+    subject_plural=None,
+):
+    if not _is_staff_user(user):
+        raise PermissionDenied(f'Only staff may delete {subject_plural or f"{subject_label}s"}.')
+    if getattr(instance, relation_name).exists():
+        raise DRFValidationError({
+            'detail': f'This {subject_label} is linked to one or more deals and cannot be deleted.',
+        })
 
 
 def _filter_visibility_role(queryset, visibility_role):
@@ -1005,16 +1018,6 @@ def _build_download_target(request, document) -> PresignedDownload:
             expires_in=0,
         )
     return get_document_storage().presign_download(document.file_url, _download_filename(document), content_type)
-
-
-def _django_validation_response(exc):
-    if hasattr(exc, 'message_dict'):
-        body = dict(exc.message_dict)
-        readiness = getattr(exc, 'readiness', None)
-        if readiness is not None:
-            body['readiness'] = readiness
-        return Response(body, status=status.HTTP_400_BAD_REQUEST)
-    return Response({'detail': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
 
 
 def _property_integrity_response(address_normalized, user=None):

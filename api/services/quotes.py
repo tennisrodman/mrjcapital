@@ -18,6 +18,8 @@ from api.models import (
     ScreeningAssessment,
 )
 from api.models.deal import Deal
+from api.policies import authenticated_user, is_staff_user
+from api.services.money import decimal_or_none as _decimal_or_none
 
 
 FEE_QUANTUM = Decimal('0.01')
@@ -212,17 +214,11 @@ def document_is_executed_quote_evidence(document) -> bool:
     return policy_check(document)
 
 
-def _authenticated_actor(user):
-    if user is not None and getattr(user, 'is_authenticated', False):
-        return user
-    return None
-
-
 def _log_quote(deal, action_type, performed_by, *, description, metadata=None, old_value='', new_value=''):
     ActivityLog.objects.create(
         deal=deal,
         action_type=action_type,
-        performed_by=_authenticated_actor(performed_by),
+        performed_by=authenticated_user(performed_by),
         description=description,
         old_value=old_value,
         new_value=new_value,
@@ -501,7 +497,7 @@ def set_quote_attachments(quote, document_ids, *, user=None):
                 storage_status=DocumentStorageStatus.READY,
             )
         )
-        if actor is not None and not (getattr(actor, 'is_staff', False) or getattr(actor, 'is_superuser', False)):
+        if actor is not None and not is_staff_user(actor):
             documents = [
                 document
                 for document in documents
@@ -523,7 +519,7 @@ def set_quote_attachments(quote, document_ids, *, user=None):
                     'document_ids': 'Quote attachments must use subcategory term_sheet or loi.',
                 })
         invisible = []
-        if actor is not None and not (getattr(actor, 'is_staff', False) or getattr(actor, 'is_superuser', False)):
+        if actor is not None and not is_staff_user(actor):
             invisible = [
                 document
                 for document in existing
@@ -606,11 +602,3 @@ def _normalize_document_ids(document_ids):
         except (TypeError, ValueError) as exc:
             raise ValidationError({'document_ids': 'Invalid document id.'}) from exc
     return normalized
-
-
-def _decimal_or_none(value):
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return value
-    return Decimal(str(value))

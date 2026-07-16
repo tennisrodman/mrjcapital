@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import mixins, status, viewsets
@@ -20,6 +18,10 @@ from api.closing_serializers import (
     ConditionPrecedentSerializer,
     DDChecklistItemSerializer,
     DDTemplateSerializer,
+)
+from api.drf import (
+    django_validation_response as _django_validation_response,
+    uuid_filter_value as _uuid_filter_value,
 )
 from api.models import (
     ClosingChecklistGeneration,
@@ -46,21 +48,6 @@ from api.services.closing import (
 
 
 User = get_user_model()
-
-
-def _uuid_filter_value(value, field_name):
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError) as exc:
-        raise DRFValidationError({field_name: 'Enter a valid UUID.'}) from exc
-
-
-def _django_validation_response(exc):
-    if hasattr(exc, 'message_dict'):
-        return Response(exc.message_dict, status=status.HTTP_400_BAD_REQUEST)
-    return Response({'detail': list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
-
-
 def _resolve_accessible_deal(user, deal_id):
     deal = Deal.objects.filter(pk=_uuid_filter_value(deal_id, 'deal')).first()
     if not deal or not _can_access_deal(user, deal):

@@ -5,6 +5,15 @@ from decimal import Decimal, ROUND_HALF_UP
 _MONEY_QUANT = Decimal('0.01')
 
 
+def decimal_or_none(value):
+    """Normalize optional model/serializer numeric values to ``Decimal``."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
 def format_money_aggregate(value) -> str:
     """Return a two-decimal money string (e.g. ``\"3000000.00\"``).
 

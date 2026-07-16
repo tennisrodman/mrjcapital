@@ -18,6 +18,7 @@ from api.models import (
     ScreeningAssessment,
     SyndicationStatus,
 )
+from api.policies import authenticated_user, is_staff_user
 
 
 PIPELINE_TRANSITIONS = {
@@ -293,7 +294,7 @@ def initialize_deal_stage_event(deal, performed_by=None):
             from_status=None,
             to_status=locked_deal.pipeline_status,
             entered_at=locked_deal.current_stage_entered_at or locked_deal.created_at or timezone.now(),
-            performed_by=_authenticated_actor(performed_by),
+            performed_by=authenticated_user(performed_by),
         )
 
 
@@ -313,7 +314,7 @@ def capture_deal_field_values(deal, candidate_fields):
 
 def log_deal_field_updates(deal, previous_values, performed_by, ip_address=None):
     """Write immutable audit entries for safe business-field changes only."""
-    actor = _authenticated_actor(performed_by)
+    actor = authenticated_user(performed_by)
     logs = []
     for field_name, old_value in previous_values.items():
         new_value = _canonical_deal_field_value(deal, field_name)
@@ -498,7 +499,7 @@ def _write_status_log(deal, performed_by, ip_address, reason, old_value, new_val
     return ActivityLog.objects.create(
         deal=deal,
         action_type=ActivityActionType.STATUS_CHANGE,
-        performed_by=_authenticated_actor(performed_by),
+        performed_by=authenticated_user(performed_by),
         ip_address=ip_address,
         description=f'{metadata["field"]} changed from {old_value} to {new_value}',
         old_value=old_value,
@@ -549,7 +550,7 @@ def _record_pipeline_stage_transition(
         from_status=from_status,
         to_status=to_status,
         entered_at=entered_at,
-        performed_by=_authenticated_actor(performed_by),
+        performed_by=authenticated_user(performed_by),
         reason=reason,
         is_override=is_override,
     )
@@ -573,15 +574,8 @@ def _audit_deal_field_value(field_name, value):
     return value
 
 
-def _authenticated_actor(performed_by):
-    return performed_by if getattr(performed_by, 'is_authenticated', False) else None
-
-
 def _can_override_readiness(performed_by):
-    return bool(
-        getattr(performed_by, 'is_staff', False)
-        or getattr(performed_by, 'is_superuser', False)
-    )
+    return is_staff_user(performed_by)
 
 
 def _require_reason(reason):

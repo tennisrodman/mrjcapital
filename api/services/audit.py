@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 
 from api.models import ActivityActionType, ActivityLog
+from api.policies import authenticated_user
 
 
 SENSITIVE_SPONSOR_FIELDS = {
@@ -30,11 +31,7 @@ def create_activity_log(
     return ActivityLog.objects.create(
         deal=deal,
         action_type=action_type,
-        performed_by=(
-            performed_by
-            if performed_by is not None and getattr(performed_by, 'is_authenticated', False)
-            else None
-        ),
+        performed_by=authenticated_user(performed_by),
         ip_address=ip_address,
         description=cleaned_description,
         old_value=old_value or '',
