@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiRequest } from '@/config/api';
-import { fetchAllPages } from '@/lib/api/deals';
+import { fetchAllPages } from '@/lib/api/pagination';
 import type { DealNote } from '@/types/deal';
 
 export function fetchDealNotes(dealId: string): Promise<DealNote[]> {

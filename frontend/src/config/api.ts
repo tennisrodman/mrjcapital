@@ -1,5 +1,5 @@
-import { MOCKS_ENABLED, mockApiRequest } from '@/mocks';
 import { ApiError } from '@/lib/apiError';
+import { USE_MOCKS } from './flags';
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from './authKeys';
 
 export { ApiError, apiErrorMessage, fieldErrors } from '@/lib/apiError';
@@ -80,7 +80,10 @@ const refreshAccessToken = async (): Promise<string> => {
 };
 
 export const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
-  if (MOCKS_ENABLED) return mockApiRequest<T>(path, options);
+  if (USE_MOCKS) {
+    const { mockApiRequest } = await import('@/mocks/handlers');
+    return mockApiRequest<T>(path, options);
+  }
 
   const url = endpoint(path);
   let fetchOptions: RequestInit = {

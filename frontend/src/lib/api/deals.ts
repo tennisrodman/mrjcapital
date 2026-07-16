@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query';
 
 import { apiRequest } from '@/config/api';
+import { fetchAllPages } from '@/lib/api/pagination';
 import type {
   ActivityLogEntry,
   Broker,
@@ -19,11 +20,7 @@ import type {
   Property,
   Sponsor,
   SyndicationStatus,
-  Paginated,
 } from '@/types/deal';
-
-const PAGE_SIZE = 50; // DRF PageNumberPagination, see mrj/settings/base.py
-const MAX_PAGES = 20; // Safety cap — fetch at most 1,000 deals into the board/table.
 
 type QueryParams = Record<string, string | undefined>;
 
@@ -47,24 +44,10 @@ function dealFilterParams(filters: DealFilters): QueryParams {
   };
 }
 
-// The board and table want every matching deal, but the API pages at 50. Pull the
-// first page to learn the total, then fetch the remaining pages (capped) so a busy
-// pipeline isn't silently cut off at row 50.
+// The board and table want every matching deal. The shared paginator batches API
+// pages without imposing a hidden record ceiling.
 async function fetchAllDeals(params: QueryParams): Promise<Deal[]> {
-  const first = await apiRequest<Paginated<Deal>>(
-    `api/deals/${buildQuery({ ...params, page: '1' })}`,
-  );
-  const totalPages = Math.min(Math.ceil(first.count / PAGE_SIZE), MAX_PAGES);
-  if (totalPages <= 1) return first.results;
-
-  const rest = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, i) =>
-      apiRequest<Paginated<Deal>>(
-        `api/deals/${buildQuery({ ...params, page: String(i + 2) })}`,
-      ),
-    ),
-  );
-  return [first, ...rest].flatMap((page) => page.results);
+  return fetchAllPages<Deal>(`api/deals/${buildQuery(params)}`);
 }
 
 export function useDeals(filters: DealFilters) {
@@ -119,19 +102,6 @@ export function useDealActivity(dealId: string | undefined, enabled: boolean) {
 }
 
 // --- Reference data (for pickers in the create/edit forms) -----------------
-
-export async function fetchAllPages<T>(path: string): Promise<T[]> {
-  const sep = path.includes('?') ? '&' : '?';
-  const first = await apiRequest<Paginated<T>>(`${path}${sep}page=1`);
-  const totalPages = Math.min(Math.ceil(first.count / PAGE_SIZE), MAX_PAGES);
-  if (totalPages <= 1) return first.results;
-  const rest = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, i) =>
-      apiRequest<Paginated<T>>(`${path}${sep}page=${i + 2}`),
-    ),
-  );
-  return [first, ...rest].flatMap((page) => page.results);
-}
 
 export function useSponsors() {
   return useQuery({ queryKey: ['sponsors'], queryFn: () => fetchAllPages<Sponsor>('api/sponsors/') });

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { API_URL, apiRequest, getAuthHeaders } from '@/config/api';
-import { MOCKS_ENABLED } from '@/mocks';
+import { USE_MOCKS } from '@/config/flags';
 import type {
   DealDocument,
   DocumentDownloadResponse,
@@ -41,7 +41,7 @@ async function uploadFileToTarget(
   headers: Record<string, string>,
   method: string,
 ): Promise<void> {
-  if (MOCKS_ENABLED) return;
+  if (USE_MOCKS) return;
 
   const requestHeaders: HeadersInit = { ...headers };
   if (isSameOriginUrl(uploadUrl)) {
@@ -96,7 +96,7 @@ export async function downloadDocument(doc: DealDocument): Promise<void> {
     `api/documents/${doc.id}/download/`,
   );
 
-  if (MOCKS_ENABLED) {
+  if (USE_MOCKS) {
     const blob = new Blob(
       [`Demo file placeholder for ${doc.document_name}`],
       { type: payload.content_type || 'text/plain' },
