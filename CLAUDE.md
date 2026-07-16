@@ -31,11 +31,11 @@ Django + React + Celery deal workflow for MRJ Capital. Core paths cover intake, 
 
 - Shell scripts use `set -euo pipefail`.
 - Frontend build: `frontend/build/` → staged to `build/` by `build.sh`.
-- Demo/Live data mode is controlled by the header/login toggle, defaults from `frontend/.env` `VITE_USE_MOCKS`, and uses `shared/demo_seed.json` for mock data.
-- `shared/workflow_contracts.json` is the tested Live/Demo lifecycle, active-pipeline, and upload contract. Update both runtime tests when it changes.
+- The frontend always uses the Django API; do not add a second in-browser business-logic implementation.
+- `shared/workflow_contracts.json` is the tested lifecycle, active-pipeline, and upload contract.
 - Put workflow invariants and atomic audit writes in `api/services/`; put shared authorization decisions in `api/policies.py`.
 - Shared query parsing and Django-to-DRF validation translation belong in `api/drf.py`; endpoints should not reimplement UUID/boolean parsers.
-- Frontend routes and the Demo engine are lazy/dynamic. Do not reintroduce a static production import from `frontend/src/mocks/handlers.ts`.
+- Frontend routes are lazy-loaded. Keep workflow rules in backend services and API contract tests.
 - `frontend/npm run build` enforces a 450 KiB entry-chunk budget.
 - Generic DRF collection loading belongs in `frontend/src/lib/api/pagination.ts`; do not add hidden page caps.
 - JWT token keys: `mrj_access_token`, `mrj_refresh_token` in `frontend/src/config/authKeys.ts`.

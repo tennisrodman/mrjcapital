@@ -21,6 +21,7 @@ db.sqlite3
 # Build artifacts
 build/
 frontend/build/
+output/
 
 # Node
 frontend/node_modules/

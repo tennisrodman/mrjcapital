@@ -16,7 +16,7 @@ Full-stack deal workflow for MRJ Capital LLC. It covers debt-deal intake, screen
 ```
 api/               Django domain models, services, policies, serializers, viewsets, and tests
 frontend/          Vite React SPA; built into ../build/ and served by Django in production
-shared/            Demo seed plus Live/Demo workflow contracts
+shared/            Versioned workflow seed manifest and lifecycle contracts
 scripts/           Python utilities importable from Django management commands
 mrj/               Django project: settings, urls, wsgi, celery
 build.sh           Builds the frontend, stages it into build/, runs collectstatic
@@ -39,11 +39,27 @@ cp .env.example .env    # edit values
 
 `setup.sh --with-db` seeds a superuser when `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_EMAIL` / `DJANGO_SUPERUSER_PASSWORD` are set in `.env`.
 
-## Demo / Live data
+## Development data
 
-The frontend has a Demo/Live toggle in the header and on the login page. Demo uses the dynamically loaded in-memory API seeded from `shared/demo_seed.json`; Live uses the Django `/api/` endpoints through `frontend/src/config/api.ts`. Lifecycle and upload parity is enforced by `shared/workflow_contracts.json`.
+The frontend always uses the Django API. The former browser-only Demo mode was removed so normal UI use exercises the same persistence, permissions, audit, upload, and readiness boundaries as normal API operation. The automated frontend suite is component-level; it does not replace a literal browser walkthrough.
 
-`frontend/.env.example` documents `VITE_USE_MOCKS`, which only sets the default mode for a fresh browser. The toggle persists the chosen mode in `localStorage` and clears the local browser session when switching.
+For coherent development examples, use the guarded service-driven workflow seed. It requires `DEBUG=True`, local document storage, and an existing staff actor:
+
+```bash
+source .venv/bin/activate
+
+# Exercise Sourced through Exited, including expected readiness failures.
+# Database writes and the evidence blob are rolled back by default.
+python manage.py exercise_deal_lifecycle --actor tchen
+
+# Persist an append-only, idempotent development matrix for UI inspection.
+python manage.py seed_development_scenarios --actor tchen
+
+# Or seed selected stages only; --target may be repeated.
+python manage.py seed_development_scenarios --actor tchen --target screening --target closing
+```
+
+The durable scenarios are declared in `shared/workflow_seed.v1.json`, start at Sourced, and use screening, quote, transition, syndication, document, and closing services. They create real local evidence with verified size and SHA-256 checksums. Scenario history is intentionally append-only; there is no rebuild command that bypasses protected screening, quote, or closing evidence.
 
 ## Local MCP server
 
@@ -95,6 +111,9 @@ Deal detail policy: `mrj_get_deal` omits `Deal.details` by default; callers can 
 | `DOCUMENT_STORAGE_BACKEND` | `local` for development/tests or `r2` for Cloudflare R2. |
 | `DOCUMENT_MAX_UPLOAD_BYTES` | Server-enforced document upload limit; default 50 MB. |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` | Required when document storage uses R2. |
+| `R2_PRESIGN_UPLOAD_EXPIRY`, `R2_PRESIGN_DOWNLOAD_EXPIRY`, `R2_PRESIGN_DELETE_SAFETY_SKEW` | Signed URL TTLs and the deletion replay-safety margin. |
+
+For browser uploads, the R2 bucket CORS policy must allow `PUT` from the SPA origin and the signed request headers `Content-Type`, `x-amz-checksum-sha256`, and `If-None-Match`. R2 upload intents bind the exact file length and checksum, so clients must use the returned method and headers unchanged.
 
 ## Testing
 
@@ -111,7 +130,7 @@ npm run lint
 npm run build   # includes the production entry-bundle budget check
 ```
 
-The default test checkpoint uses in-memory SQLite. PostgreSQL-specific contract/concurrency tests are separate and are not required for this cleanup effort.
+The fast local checkpoint uses in-memory SQLite. CI also provisions PostgreSQL and runs the production-database contract/concurrency modules with `mrj.settings.test_postgres`.
 
 ## Deploying to Railway
 

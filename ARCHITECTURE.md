@@ -57,7 +57,9 @@ Raising and Fully subscribed can also move to Cancelled. Moving a deal to Dead a
 
 ## Documents and evidence
 
-Documents use an intent → blob upload → complete sequence. Started, completed, and expired pending uploads are distinct audit events, so interruption never masquerades as a successful upload or disappears without evidence. The server owns storage keys, versions, type normalization, size limits, storage status, deterministic ordering, and download targets. Local development writes under `media/deal-documents`; production can use Cloudflare R2.
+Documents use an intent → blob upload → complete sequence. Started, completed, and expired pending uploads are distinct audit events, so interruption never masquerades as a successful upload or disappears without evidence. The server owns storage keys, versions, type normalization, size limits, storage status, deterministic ordering, and download targets. R2 PUT targets bind the exact content length, SHA-256, content type, and create-only precondition into the signature; completion independently streams the object through trusted credentials and verifies its size and digest before marking it ready. Local development writes under `media/deal-documents`; production can use Cloudflare R2.
+
+Deleting a document transactionally removes the database row only after creating a durable blob-deletion outbox entry and a pending-deletion activity event. Celery retries storage deletion with backoff and records confirmed deletion separately. Stale pending-upload cleanup uses the same outbox, so a transient R2 failure cannot silently orphan a blob.
 
 The serialized document includes `can_edit`, `can_delete`, and block reasons. Executed evidence metadata is immutable. Closing-linked and executed-quote evidence cannot be deleted. Clients render these capabilities instead of reconstructing policy.
 
@@ -65,23 +67,22 @@ The serialized document includes `can_edit`, `can_delete`, and block reasons. Ex
 
 ```
 frontend/src/
-├── config/          API/auth/data-mode boundary
+├── config/          API/auth and legacy-session migration boundary
 ├── lib/api/         TanStack Query resources and generic pagination
 ├── components/      reusable workflow and UI components
 ├── pages/           route composition
-├── mocks/           dynamically loaded Demo adapters and feature stores
 └── types/           API response and controlled-choice contracts
 ```
 
-Routes are lazy-loaded. The Demo engine is dynamically imported only when Demo mode handles a request, so Live does not statically depend on it. The production entry chunk is limited to 450 KiB by `frontend/scripts/check-entry-bundle.mjs`.
+Routes are lazy-loaded. The frontend always calls Django through the API adapter, and the production entry chunk is limited to 450 KiB by `frontend/scripts/check-entry-bundle.mjs`.
 
 The shared paginator batches all DRF pages without a silent row ceiling. Feature queries must distinguish loading, error, empty, and success states and invalidate every affected cache after mutation. Complex workspace panels, such as deal notes, live under `components/deals`; route files compose them rather than owning their workflow state.
 
-## Demo and Live
+## Live UI and development scenarios
 
-The header/login toggle persists the chosen data mode. Demo uses `shared/demo_seed.json` and the in-memory adapters under `frontend/src/mocks`; Live calls Django. `shared/workflow_contracts.json` is the parity contract for lifecycle graphs and document-upload validation, tested from both runtimes.
+The React application has one data path: Django. `shared/workflow_contracts.json` remains the backend contract for lifecycle graphs and document-upload validation.
 
-Demo is a product workflow simulator, not a second source of business truth. New reachable behavior must first be encoded in backend services and then mirrored behind shared contract tests. The shared contract currently covers lifecycle transitions, the in-flight pipeline population, and document-upload validation.
+Development scenario inputs live in the versioned `shared/workflow_seed.v1.json` manifest and are replayed by `api/services/lifecycle_scenarios.py`. Scenarios begin at Sourced, advance through domain services, create real local execution evidence, and assert readiness blockers before satisfying them. `exercise_deal_lifecycle` rolls back by default; `seed_development_scenarios` is DEBUG/local-storage-only and append-only.
 
 ## Authentication
 
@@ -89,16 +90,21 @@ The SPA uses SimpleJWT; `/admin/` uses Django sessions.
 
 1. `POST /api/auth/login/` returns access/refresh tokens.
 2. `apiRequest()` refreshes a `401 token_not_valid` once and persists rotated refresh tokens.
-3. Logout uses raw `fetch` with the current refresh token so an implicit retry cannot blacklist a stale token.
+3. Logout is authorized by possession of the current refresh token and deliberately omits the access header, so an expired access token cannot prevent revocation.
 4. `ProtectedRoute` guards routes; DRF permissions and scoped querysets enforce server access.
 
 ## Verification
 
-CI uses the hermetic SQLite settings and does not provision PostgreSQL. PostgreSQL-only concurrency/JSON behavior remains in explicit test modules for a later release gate.
+CI uses the hermetic SQLite settings for the full fast suite and a separate PostgreSQL 17 service for production-database concurrency/JSON contract modules.
 
 ```bash
 python manage.py test --settings=mrj.settings.test
 python manage.py makemigrations --check --dry-run --settings=mrj.settings.test
+
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/mrj \
+  python manage.py test api.tests_postgres_contract api.tests_closing_postgres \
+  api.tests_deal_updates_postgres \
+  --settings=mrj.settings.test_postgres
 
 cd frontend
 npm test -- --run

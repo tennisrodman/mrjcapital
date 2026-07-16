@@ -3,7 +3,7 @@
   "provider": "python",
   "packages": {
     "python": "3.12",
-    "node": "22"
+    "node": "24"
   },
   "steps": {
     "build": {
