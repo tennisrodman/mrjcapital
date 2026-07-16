@@ -70,6 +70,8 @@ from api.services import (
     normalize_address,
     transition_pipeline_status,
     transition_syndication_status,
+    update_broker_facts,
+    update_fund_facts,
     update_property_facts,
     update_sponsor_facts,
 )
@@ -161,12 +163,11 @@ class BrokerViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_update(self, serializer):
-        _require_exclusive_supporting_entity_access(
-            serializer.instance,
+        update_broker_facts(
+            serializer,
             performed_by=self.request.user,
-            subject_label='broker',
+            ip_address=_client_ip(self.request),
         )
-        serializer.save()
 
     def perform_destroy(self, instance):
         _require_staff_unlinked_delete(
@@ -193,12 +194,11 @@ class FundViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_update(self, serializer):
-        _require_exclusive_supporting_entity_access(
-            serializer.instance,
+        update_fund_facts(
+            serializer,
             performed_by=self.request.user,
-            subject_label='fund',
+            ip_address=_client_ip(self.request),
         )
-        serializer.save()
 
     def perform_destroy(self, instance):
         _require_staff_unlinked_delete(
@@ -587,11 +587,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
         from api.services.documents import (
             EXECUTED_DOCUMENT_DELETE_REASON,
             document_action_capabilities,
+            enqueue_document_blob_deletion,
         )
-        storage_key = instance.file_url
-        storage = get_document_storage()
+        from api.models import DocumentBlobDeletion
+
         with transaction.atomic():
-            deal = Deal.objects.select_for_update().filter(pk=instance.deal_id).first()
+            Deal.objects.select_for_update().filter(pk=instance.deal_id).first()
             document = Document.objects.select_for_update().filter(pk=instance.pk).first()
             if not document:
                 raise NotFound()
@@ -601,25 +602,26 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 if reason == EXECUTED_DOCUMENT_DELETE_REASON:
                     raise PermissionDenied(reason)
                 raise DRFValidationError({'detail': reason})
+            enqueue_document_blob_deletion(
+                document,
+                reason=DocumentBlobDeletion.Reason.USER_DELETE,
+                requested_by=self.request.user,
+                ip_address=_client_ip(self.request),
+            )
             document.delete()
-        # Best-effort blob cleanup after commit. A storage failure must not
-        # resurrect the row; log and continue so the API still reports success.
-        if storage_key:
-            try:
-                storage.delete_object(storage_key)
-            except Exception:
-                import logging
-                logging.getLogger(__name__).exception(
-                    'Failed to delete document blob after DB delete: %s',
-                    storage_key,
-                )
-        _ = deal
 
     @action(detail=False, methods=['post'], url_path='upload-intent')
     def upload_intent(self, request):
         serializer = DocumentUploadIntentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        if (
+            getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'r2'
+            and not data.get('checksum_sha256')
+        ):
+            raise DRFValidationError({
+                'checksum_sha256': 'A SHA-256 checksum is required for R2 uploads.',
+            })
         deal = data['deal']
         # Match DealViewSet: inaccessible deals are indistinguishable from missing.
         if not _can_access_deal(request.user, deal):
@@ -689,13 +691,27 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
         serializer = DocumentUploadCompleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        declared_checksum = serializer.validated_data.get('checksum_sha256') or document.checksum_sha256
+        submitted_checksum = serializer.validated_data.get('checksum_sha256')
+        expected_checksum = document.checksum_sha256
+        if submitted_checksum and submitted_checksum != expected_checksum:
+            return Response(
+                {'detail': 'Checksum verification failed.'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        if (
+            getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'r2'
+            and not expected_checksum
+        ):
+            return Response(
+                {'detail': 'This R2 upload has no trusted checksum and cannot be completed.'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
 
-        # Verify the object exists and its size matches. We do not re-download the
-        # object from R2 to hash it — for local storage the SHA-256 was already
-        # computed from the received bytes during the blob PUT.
+        # Inspect through trusted storage credentials. R2's presigned request
+        # signs exact length and checksum headers; this streaming verification is
+        # the independent completion-time backstop before evidence becomes ready.
         storage = get_document_storage()
-        meta = storage.head_object(document.file_url)
+        meta = storage.inspect_object(document.file_url, document.file_size_bytes)
         if meta is None:
             return Response({'detail': 'Uploaded file was not found in storage.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         if document.file_size_bytes is not None and meta.size != document.file_size_bytes:
@@ -703,11 +719,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 {'detail': f'Uploaded size {meta.size} does not match expected {document.file_size_bytes}.'},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
-        if (
-            declared_checksum
-            and document.checksum_sha256
-            and document.checksum_sha256.lower() != declared_checksum.lower()
-        ):
+        if expected_checksum and meta.checksum_sha256.lower() != expected_checksum.lower():
             return Response({'detail': 'Checksum verification failed.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         with transaction.atomic():
@@ -722,8 +734,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_409_CONFLICT,
                 )
             locked.storage_status = DocumentStorageStatus.READY
-            if declared_checksum and not locked.checksum_sha256:
-                locked.checksum_sha256 = declared_checksum
+            if not locked.checksum_sha256:
+                locked.checksum_sha256 = meta.checksum_sha256
             locked.save(update_fields=['storage_status', 'checksum_sha256'])
             log_document_upload_completed(
                 locked,
@@ -969,16 +981,6 @@ def _int_filter_value(value, field_name):
         raise DRFValidationError({field_name: 'Invalid integer.'}) from exc
 
 
-def _require_exclusive_supporting_entity_access(instance, *, performed_by, subject_label):
-    """Block non-staff updates when another analyst's deal also uses the record."""
-    if _is_staff_user(performed_by):
-        return
-    if instance.deals.exclude(assigned_analyst=performed_by).exists():
-        raise PermissionDenied(
-            f'A shared {subject_label} can only be changed by staff.'
-        )
-
-
 def _require_staff_unlinked_delete(
     instance,
     *,
@@ -1016,12 +1018,21 @@ def _build_upload_target(request, document) -> PresignedUpload:
     content_type = document.content_type or 'application/octet-stream'
     if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'local':
         return PresignedUpload(
-            url=request.build_absolute_uri(f'/api/documents/{document.pk}/blob/'),
+            # Keep authenticated local blob traffic on the SPA/API origin. An
+            # absolute development URL points at :8000 while the SPA normally
+            # uses the :3000 proxy, which makes the frontend treat the target as
+            # external and (correctly) withhold its bearer token.
+            url=f'/api/documents/{document.pk}/blob/',
             method='PUT',
             headers={'Content-Type': content_type},
             expires_in=0,
         )
-    return get_document_storage().presign_upload(document.file_url, content_type)
+    return get_document_storage().presign_upload(
+        document.file_url,
+        content_type,
+        document.file_size_bytes,
+        document.checksum_sha256,
+    )
 
 
 def _download_filename(document) -> str:
@@ -1038,7 +1049,7 @@ def _build_download_target(request, document) -> PresignedDownload:
     content_type = document.content_type or 'application/octet-stream'
     if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'local':
         return PresignedDownload(
-            url=request.build_absolute_uri(f'/api/documents/{document.pk}/blob/'),
+            url=f'/api/documents/{document.pk}/blob/',
             expires_in=0,
         )
     return get_document_storage().presign_download(document.file_url, _download_filename(document), content_type)

@@ -1,7 +1,13 @@
-"""Document policies and audit events shared by API and background workflows."""
+"""Document policies, audit events, and durable blob deletion workflows."""
 
-from api.models import ActivityActionType, Quote
-from api.policies import is_staff_user
+from datetime import timedelta
+
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+
+from api.models import ActivityActionType, DocumentBlobDeletion, Quote
+from api.policies import authenticated_user, is_staff_user
 from api.services.audit import create_activity_log
 
 
@@ -62,6 +68,126 @@ def log_document_upload_abandoned(document):
         reason='Upload did not complete before the pending-upload retention deadline.',
         metadata=metadata,
     )
+
+
+def enqueue_document_blob_deletion(
+    document,
+    *,
+    reason,
+    requested_by=None,
+    ip_address=None,
+):
+    """Persist deletion work and truthful pending evidence before removing the row."""
+    next_attempt_at = timezone.now()
+    # An R2 upload target remains usable until its signed PUT expires.  Deleting
+    # the key before then would let that already-issued URL recreate the blob
+    # after the database row and deletion work have disappeared.
+    if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'r2':
+        upload_expiry = int(getattr(settings, 'R2_PRESIGN_UPLOAD_EXPIRY', 3600))
+        safety_skew = int(getattr(settings, 'R2_PRESIGN_DELETE_SAFETY_SKEW', 60))
+        signed_put_safe_at = document.uploaded_date + timedelta(
+            seconds=upload_expiry + safety_skew,
+        )
+        next_attempt_at = max(next_attempt_at, signed_put_safe_at)
+    deletion = DocumentBlobDeletion.objects.create(
+        deal=document.deal,
+        document_id=document.pk,
+        document_name=document.document_name,
+        storage_key=document.file_url,
+        reason=reason,
+        requested_by=authenticated_user(requested_by),
+        requested_ip=ip_address,
+        next_attempt_at=next_attempt_at,
+    )
+    metadata = _document_activity_metadata(document)
+    metadata.update({
+        'blob_deletion_id': str(deletion.pk),
+        'deletion_reason': reason,
+    })
+    create_activity_log(
+        deal=document.deal,
+        action_type=ActivityActionType.DOCUMENT_DELETE_PENDING,
+        performed_by=requested_by,
+        ip_address=ip_address,
+        description=f'Document deletion pending: {document.document_name} v{document.version}',
+        reason=deletion.get_reason_display(),
+        metadata=metadata,
+    )
+    return deletion
+
+
+def process_pending_blob_deletions(*, limit=100, storage=None):
+    """Delete queued blobs idempotently, retaining failures with bounded backoff."""
+    from api.services.storage import get_document_storage
+
+    storage = storage or get_document_storage()
+    now = timezone.now()
+    deletion_ids = list(
+        DocumentBlobDeletion.objects.filter(
+            status=DocumentBlobDeletion.Status.PENDING,
+            next_attempt_at__lte=now,
+        ).order_by('next_attempt_at', 'requested_at').values_list('pk', flat=True)[:limit]
+    )
+    completed = 0
+    failed = 0
+    for deletion_id in deletion_ids:
+        with transaction.atomic():
+            deletion = (
+                DocumentBlobDeletion.objects.select_for_update()
+                .select_related('deal', 'requested_by')
+                .filter(pk=deletion_id)
+                .first()
+            )
+            if (
+                not deletion
+                or deletion.status != DocumentBlobDeletion.Status.PENDING
+                or deletion.next_attempt_at > timezone.now()
+            ):
+                continue
+
+            deletion.attempt_count += 1
+            deletion.last_attempt_at = timezone.now()
+            try:
+                storage.delete_object(deletion.storage_key)
+            except Exception as exc:  # noqa: BLE001 — failure is durably retained for retry
+                delay_seconds = min(3600, 60 * (2 ** min(deletion.attempt_count - 1, 6)))
+                deletion.next_attempt_at = timezone.now() + timedelta(seconds=delay_seconds)
+                deletion.last_error = str(exc)[:4000]
+                deletion.save(update_fields=[
+                    'attempt_count',
+                    'last_attempt_at',
+                    'next_attempt_at',
+                    'last_error',
+                ])
+                failed += 1
+                continue
+
+            deletion.status = DocumentBlobDeletion.Status.COMPLETED
+            deletion.completed_at = timezone.now()
+            deletion.last_error = ''
+            deletion.save(update_fields=[
+                'status',
+                'completed_at',
+                'attempt_count',
+                'last_attempt_at',
+                'last_error',
+            ])
+            create_activity_log(
+                deal=deletion.deal,
+                action_type=ActivityActionType.DOCUMENT_DELETED,
+                performed_by=deletion.requested_by,
+                ip_address=deletion.requested_ip,
+                description=f'Document deleted from storage: {deletion.document_name}',
+                reason=deletion.get_reason_display(),
+                metadata={
+                    'document_id': str(deletion.document_id),
+                    'blob_deletion_id': str(deletion.pk),
+                    'storage_key': deletion.storage_key,
+                    'attempt_count': deletion.attempt_count,
+                },
+            )
+            completed += 1
+    return {'completed': completed, 'failed': failed}
 
 
 def _prefetched_related(document, relation_name):

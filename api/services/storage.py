@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import os
 import re
 from dataclasses import dataclass
@@ -44,6 +45,7 @@ class ObjectMeta:
     size: int
     content_type: str
     etag: str
+    checksum_sha256: str = ''
 
 
 @dataclass(frozen=True)
@@ -61,11 +63,19 @@ class PresignedDownload:
 
 
 class DocumentStorageBackend(Protocol):
-    def presign_upload(self, key: str, content_type: str) -> PresignedUpload: ...
+    def presign_upload(
+        self,
+        key: str,
+        content_type: str,
+        content_length: int,
+        checksum_sha256: str,
+    ) -> PresignedUpload: ...
 
     def presign_download(self, key: str, filename: str, content_type: str) -> PresignedDownload: ...
 
     def head_object(self, key: str) -> ObjectMeta | None: ...
+
+    def inspect_object(self, key: str, expected_size: int | None = None) -> ObjectMeta | None: ...
 
     def delete_object(self, key: str) -> None: ...
 
@@ -124,7 +134,13 @@ class LocalDocumentStorage:
             raise ValueError('Invalid storage key.') from exc
         return path
 
-    def presign_upload(self, key: str, content_type: str) -> PresignedUpload:
+    def presign_upload(
+        self,
+        key: str,
+        content_type: str,
+        content_length: int,
+        checksum_sha256: str,
+    ) -> PresignedUpload:
         # Local uploads use authenticated DocumentViewSet blob actions instead.
         raise NotImplementedError('Use build_local_upload_target from the view layer.')
 
@@ -138,16 +154,52 @@ class LocalDocumentStorage:
         stat = path.stat()
         return ObjectMeta(size=stat.st_size, content_type='application/octet-stream', etag=str(stat.st_mtime_ns))
 
+    def inspect_object(self, key: str, expected_size: int | None = None) -> ObjectMeta | None:
+        path = self._path(key)
+        if not path.is_file():
+            return None
+        stat = path.stat()
+        if expected_size is not None and stat.st_size != expected_size:
+            return ObjectMeta(
+                size=stat.st_size,
+                content_type='application/octet-stream',
+                etag=str(stat.st_mtime_ns),
+            )
+        digest = hashlib.sha256()
+        with path.open('rb') as stored:
+            for chunk in iter(lambda: stored.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return ObjectMeta(
+            size=stat.st_size,
+            content_type='application/octet-stream',
+            etag=str(stat.st_mtime_ns),
+            checksum_sha256=digest.hexdigest(),
+        )
+
     def delete_object(self, key: str) -> None:
         path = self._path(key)
         if path.is_file():
             path.unlink()
+        root = self.root.resolve()
+        parent = path.parent
+        while parent != root:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
 
     def write_object(self, key: str, body: bytes, content_type: str) -> ObjectMeta:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)
-        return ObjectMeta(size=len(body), content_type=content_type, etag=hashlib.sha256(body).hexdigest())
+        checksum = hashlib.sha256(body).hexdigest()
+        return ObjectMeta(
+            size=len(body),
+            content_type=content_type,
+            etag=checksum,
+            checksum_sha256=checksum,
+        )
 
     def read_object(self, key: str) -> tuple[bytes, ObjectMeta]:
         path = self._path(key)
@@ -156,6 +208,7 @@ class LocalDocumentStorage:
             size=len(body),
             content_type='application/octet-stream',
             etag=hashlib.sha256(body).hexdigest(),
+            checksum_sha256=hashlib.sha256(body).hexdigest(),
         )
 
 
@@ -180,14 +233,37 @@ class R2DocumentStorage:
             config=Config(signature_version='s3v4'),
         )
 
-    def presign_upload(self, key: str, content_type: str) -> PresignedUpload:
+    def presign_upload(
+        self,
+        key: str,
+        content_type: str,
+        content_length: int,
+        checksum_sha256: str,
+    ) -> PresignedUpload:
         expires = int(getattr(settings, 'R2_PRESIGN_UPLOAD_EXPIRY', 3600))
+        checksum_base64 = base64.b64encode(bytes.fromhex(checksum_sha256)).decode('ascii')
         url = self.client.generate_presigned_url(
             'put_object',
-            Params={'Bucket': self.bucket, 'Key': key, 'ContentType': content_type},
+            Params={
+                'Bucket': self.bucket,
+                'Key': key,
+                'ContentType': content_type,
+                'ContentLength': content_length,
+                'ChecksumSHA256': checksum_base64,
+                'IfNoneMatch': '*',
+            },
             ExpiresIn=expires,
         )
-        return PresignedUpload(url=url, method='PUT', headers={'Content-Type': content_type}, expires_in=expires)
+        return PresignedUpload(
+            url=url,
+            method='PUT',
+            headers={
+                'Content-Type': content_type,
+                'x-amz-checksum-sha256': checksum_base64,
+                'If-None-Match': '*',
+            },
+            expires_in=expires,
+        )
 
     def presign_download(self, key: str, filename: str, content_type: str) -> PresignedDownload:
         expires = int(getattr(settings, 'R2_PRESIGN_DOWNLOAD_EXPIRY', 900))
@@ -217,6 +293,37 @@ class R2DocumentStorage:
             etag=response.get('ETag', '').strip('"'),
         )
 
+    def inspect_object(self, key: str, expected_size: int | None = None) -> ObjectMeta | None:
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=key)
+        except self.client.exceptions.ClientError as exc:
+            error_code = exc.response.get('Error', {}).get('Code')
+            if error_code in {'404', 'NoSuchKey', 'NotFound'}:
+                return None
+            raise
+
+        size = response['ContentLength']
+        body = response['Body']
+        if expected_size is not None and size != expected_size:
+            body.close()
+            return ObjectMeta(
+                size=size,
+                content_type=response.get('ContentType') or 'application/octet-stream',
+                etag=response.get('ETag', '').strip('"'),
+            )
+        digest = hashlib.sha256()
+        try:
+            for chunk in iter(lambda: body.read(1024 * 1024), b''):
+                digest.update(chunk)
+        finally:
+            body.close()
+        return ObjectMeta(
+            size=size,
+            content_type=response.get('ContentType') or 'application/octet-stream',
+            etag=response.get('ETag', '').strip('"'),
+            checksum_sha256=digest.hexdigest(),
+        )
+
     def delete_object(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
 
@@ -231,6 +338,7 @@ class R2DocumentStorage:
             size=len(body),
             content_type=content_type,
             etag=response.get('ETag', '').strip('"'),
+            checksum_sha256=hashlib.sha256(body).hexdigest(),
         )
 
     def read_object(self, key: str) -> tuple[bytes, ObjectMeta]:
@@ -240,6 +348,7 @@ class R2DocumentStorage:
             size=len(body),
             content_type=response.get('ContentType') or 'application/octet-stream',
             etag=response.get('ETag', '').strip('"'),
+            checksum_sha256=hashlib.sha256(body).hexdigest(),
         )
 
 

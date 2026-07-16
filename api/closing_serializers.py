@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
+from django.utils import timezone
 
 from api.models import (
     ClosingChecklistGeneration,
@@ -85,6 +86,17 @@ class ClosingPackageWriteSerializer(serializers.Serializer):
     closing_costs = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal('0'), required=False, allow_null=True)
     sources_and_uses_notes = serializers.CharField(required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        today = timezone.localdate()
+        errors = {
+            field_name: 'Date cannot be in the future.'
+            for field_name in ('actual_close_date', 'funds_wired_date')
+            if attrs.get(field_name) is not None and attrs[field_name] > today
+        }
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
 
 
 class ClosingChecklistGenerationSerializer(serializers.ModelSerializer):

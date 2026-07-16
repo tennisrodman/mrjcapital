@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from rest_framework.test import APITestCase
 
-from api.models import Deal
+from api.models import ActivityActionType, ActivityLog, Deal
 from api.models.contact import Contact, DealContact, DealContactRole
 
 
@@ -203,3 +203,63 @@ class ContactApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('detail', response.data)
+
+    def test_link_create_update_and_delete_are_audited_atomically(self):
+        contact = Contact.objects.create(
+            full_name='Audited Counsel',
+            created_by=self.analyst,
+        )
+        self.client.force_authenticate(self.analyst)
+
+        created = self.client.post('/api/deal-contacts/', {
+            'deal': str(self.deal.pk),
+            'contact': str(contact.pk),
+            'role': DealContactRole.LENDER_COUNSEL,
+            'notes': 'Initial link',
+        }, format='json')
+        updated = self.client.patch(
+            f"/api/deal-contacts/{created.data['id']}/",
+            {'is_primary': True, 'notes': 'Primary counsel'},
+            format='json',
+        )
+        deleted = self.client.delete(f"/api/deal-contacts/{created.data['id']}/")
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(deleted.status_code, 204)
+        events = ActivityLog.objects.filter(deal=self.deal).order_by('performed_at').values_list(
+            'action_type', flat=True,
+        )
+        self.assertEqual(list(events), [
+            ActivityActionType.DEAL_CONTACT_ADDED,
+            ActivityActionType.DEAL_CONTACT_UPDATED,
+            ActivityActionType.DEAL_CONTACT_DELETED,
+        ])
+        updated_event = ActivityLog.objects.get(
+            action_type=ActivityActionType.DEAL_CONTACT_UPDATED,
+        )
+        self.assertEqual(updated_event.performed_by, self.analyst)
+        self.assertEqual(updated_event.metadata['fields'], ['is_primary', 'notes'])
+
+    def test_link_create_rolls_back_when_audit_write_fails(self):
+        contact = Contact.objects.create(
+            full_name='Atomic Counsel',
+            created_by=self.analyst,
+        )
+        self.client.force_authenticate(self.analyst)
+
+        with patch(
+            'api.services.contacts.create_activity_log',
+            side_effect=IntegrityError('audit failed'),
+        ):
+            with self.assertRaises(IntegrityError):
+                self.client.post('/api/deal-contacts/', {
+                    'deal': str(self.deal.pk),
+                    'contact': str(contact.pk),
+                    'role': DealContactRole.CLOSING_CONTACT,
+                }, format='json')
+
+        self.assertFalse(DealContact.objects.filter(
+            deal=self.deal,
+            contact=contact,
+        ).exists())

@@ -10,16 +10,15 @@ def heartbeat():
 
 @shared_task
 def cleanup_stale_pending_documents():
-    """Remove abandoned pending uploads and their blob storage keys."""
+    """Remove abandoned upload rows and durably enqueue their blob deletion."""
     from datetime import timedelta
     import logging
 
     from django.conf import settings
     from django.db import transaction
 
-    from api.models import Deal, Document, DocumentStorageStatus
-    from api.services.documents import log_document_upload_abandoned
-    from api.services.storage import get_document_storage
+    from api.models import Deal, Document, DocumentBlobDeletion, DocumentStorageStatus
+    from api.services.documents import enqueue_document_blob_deletion, log_document_upload_abandoned
 
     logger = logging.getLogger(__name__)
     cutoff = timezone.now() - timedelta(hours=getattr(settings, 'DOCUMENT_PENDING_MAX_AGE_HOURS', 24))
@@ -29,7 +28,6 @@ def cleanup_stale_pending_documents():
             uploaded_date__lt=cutoff,
         ).values_list('pk', flat=True)
     )
-    storage = get_document_storage()
     deleted = 0
     for document_id in stale_ids:
         try:
@@ -44,18 +42,21 @@ def cleanup_stale_pending_documents():
                     continue
                 if locked.uploaded_date >= cutoff:
                     continue
-                storage_key = locked.file_url
                 log_document_upload_abandoned(locked)
+                enqueue_document_blob_deletion(
+                    locked,
+                    reason=DocumentBlobDeletion.Reason.STALE_UPLOAD,
+                )
                 locked.delete()
-            if storage_key:
-                try:
-                    storage.delete_object(storage_key)
-                except Exception:  # noqa: BLE001 — best-effort blob cleanup
-                    logger.exception(
-                        'Failed to delete blob for cleaned pending document %s',
-                        document_id,
-                    )
             deleted += 1
         except Exception:  # noqa: BLE001 — best-effort sweep; keep going
             logger.exception('Failed to clean up pending document %s', document_id)
     return deleted
+
+
+@shared_task
+def process_document_blob_deletions():
+    """Retry durable document blob deletions until storage confirms success."""
+    from api.services.documents import process_pending_blob_deletions
+
+    return process_pending_blob_deletions()

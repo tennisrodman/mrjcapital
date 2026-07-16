@@ -2,6 +2,7 @@ from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db.models import QuerySet
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
@@ -110,8 +111,8 @@ class ClosingServiceApiTests(APITestCase):
         self.assertIn(CLOSING_CP_INCOMPLETE, partial['blockers'])
 
         package = generation.package
-        package.actual_close_date = date(2026, 9, 1)
-        package.funds_wired_date = date(2026, 9, 1)
+        package.actual_close_date = timezone.localdate()
+        package.funds_wired_date = timezone.localdate()
         package.funds_wired_amount = '2500000.00'
         package.final_loan_amount = '2500000.00'
         package.closing_attorney = 'Morgan Counsel'
@@ -131,6 +132,96 @@ class ClosingServiceApiTests(APITestCase):
 
         ready = pipeline_transition_readiness(self.deal, PipelineStatus.CLOSED, self.analyst)
         self.assertTrue(ready['ready'])
+
+    def test_closed_readiness_rejects_future_completion_dates(self):
+        generation = generate_closing_checklist(
+            self.deal,
+            self.template,
+            performed_by=self.analyst,
+        )
+        package = generation.package
+        package.actual_close_date = timezone.localdate() + timedelta(days=1)
+        package.funds_wired_date = timezone.localdate()
+        package.funds_wired_amount = '2500000.00'
+        package.final_loan_amount = '2500000.00'
+        package.closing_attorney = 'Morgan Counsel'
+        package.title_company = 'Reliable Title'
+        package.save()
+        now = timezone.now()
+        generation.dd_items.update(
+            status=DDChecklistItem.Status.COMPLETE,
+            completed_at=now,
+            completed_by=self.analyst,
+        )
+        generation.conditions_precedent.update(
+            status=ConditionPrecedent.Status.SATISFIED,
+            satisfied_at=now,
+            satisfied_by=self.analyst,
+        )
+
+        readiness = pipeline_transition_readiness(self.deal, PipelineStatus.CLOSED, self.analyst)
+
+        self.assertFalse(readiness['ready'])
+        self.assertIn(CLOSING_FUNDING_DETAILS_INCOMPLETE, readiness['blockers'])
+
+    def test_closed_readiness_requires_every_template_derived_item(self):
+        generation = generate_closing_checklist(
+            self.deal,
+            self.template,
+            performed_by=self.analyst,
+        )
+        missing_dd = generation.dd_items.filter(source_template_item__isnull=False).first()
+        missing_cp = generation.conditions_precedent.filter(source_template_item__isnull=False).first()
+        QuerySet.delete(DDChecklistItem.objects.filter(pk=missing_dd.pk))
+        QuerySet.delete(ConditionPrecedent.objects.filter(pk=missing_cp.pk))
+        now = timezone.now()
+        generation.dd_items.update(
+            status=DDChecklistItem.Status.COMPLETE,
+            completed_at=now,
+            completed_by=self.analyst,
+        )
+        generation.conditions_precedent.update(
+            status=ConditionPrecedent.Status.SATISFIED,
+            satisfied_at=now,
+            satisfied_by=self.analyst,
+        )
+        package = generation.package
+        package.actual_close_date = timezone.localdate()
+        package.funds_wired_date = timezone.localdate()
+        package.funds_wired_amount = '2500000.00'
+        package.final_loan_amount = '2500000.00'
+        package.closing_attorney = 'Morgan Counsel'
+        package.title_company = 'Reliable Title'
+        package.save()
+
+        readiness = pipeline_transition_readiness(self.deal, PipelineStatus.CLOSED, self.analyst)
+
+        self.assertFalse(readiness['ready'])
+        self.assertIn(CLOSING_DD_INCOMPLETE, readiness['blockers'])
+        self.assertIn(CLOSING_CP_INCOMPLETE, readiness['blockers'])
+
+    def test_empty_template_does_not_invent_checklist_requirements(self):
+        empty_template = DDTemplate.objects.create(
+            key='custom_empty',
+            name='Custom empty checklist',
+        )
+        generation = generate_closing_checklist(
+            self.deal,
+            empty_template,
+            performed_by=self.analyst,
+        )
+        package = generation.package
+        package.actual_close_date = timezone.localdate()
+        package.funds_wired_date = timezone.localdate()
+        package.funds_wired_amount = '2500000.00'
+        package.final_loan_amount = '2500000.00'
+        package.closing_attorney = 'Morgan Counsel'
+        package.title_company = 'Reliable Title'
+        package.save()
+
+        readiness = pipeline_transition_readiness(self.deal, PipelineStatus.CLOSED, self.analyst)
+
+        self.assertTrue(readiness['ready'])
 
     def test_upsert_create_and_partial_update(self):
         create = self.client.post(

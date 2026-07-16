@@ -167,6 +167,19 @@ def quote_is_send_ready(quote):
     return not quote_missing_send_fields(quote)
 
 
+def quote_is_effectively_expired(quote, *, at=None):
+    """Whether an active proposal has passed its stated expiration time.
+
+    Executed quotes remain valid evidence even after their former proposal
+    deadline, so only sent/countered versions are considered here.
+    """
+    return bool(
+        quote.status in EXPIRABLE_FROM
+        and quote.expires_at is not None
+        and quote.expires_at <= (at or timezone.now())
+    )
+
+
 def apply_calculated_quote_fields(quote):
     loan_amount = _decimal_or_none(quote.loan_amount)
     fee_pct = _decimal_or_none(quote.origination_fee_pct)
@@ -307,13 +320,20 @@ def update_draft_quote(quote, *, performed_by=None, **fields):
         locked_deal = _lock_deal_for_quote(quote.deal_id)
         locked = Quote.objects.select_for_update().get(pk=quote.pk)
         _require_current_draft(locked)
-        changed = sorted(fields.keys())
-        for field_name, value in fields.items():
+        changed = sorted(
+            field_name
+            for field_name, value in fields.items()
+            if getattr(locked, field_name) != value
+        )
+        if not changed:
+            return locked
+        for field_name in changed:
+            value = fields[field_name]
             setattr(locked, field_name, value)
         apply_calculated_quote_fields(locked)
         locked.full_clean()
         locked.save(update_fields=[
-            *fields.keys(),
+            *changed,
             'origination_fee_amount',
             'initial_funding_amount',
             'updated_at',
@@ -366,19 +386,20 @@ def send_quote(quote, *, expires_at=None, performed_by=None):
 
 def counter_quote(*, quote, created_by=None):
     with transaction.atomic():
-        locked = Quote.objects.select_for_update().select_related('deal').get(pk=quote.pk)
-        _lock_deal_for_quote(locked.deal_id)
+        locked_deal = _lock_deal_for_quote(quote.deal_id)
+        locked = Quote.objects.select_for_update().get(pk=quote.pk)
         _require_current(locked)
         if locked.status not in COUNTERABLE_FROM:
             raise ValidationError({
                 'status': 'Only the current sent or countered quote can be countered.',
             })
+        _require_not_effectively_expired(locked)
         copied = {
             field_name: getattr(locked, field_name)
             for field_name in COPY_ON_COUNTER_FIELDS
         }
         return create_next_quote(
-            deal=locked.deal,
+            deal=locked_deal,
             created_by=created_by,
             seed_from_screening=False,
             is_counter=True,
@@ -399,6 +420,7 @@ def execute_quote(quote, *, signed_at=None, performed_by=None):
             raise ValidationError({
                 'status': 'Only the current sent or countered quote can be executed.',
             })
+        _require_not_effectively_expired(locked)
         ready = list(quote_execution_evidence_queryset(locked))
         if not ready:
             raise ValidationError({
@@ -461,6 +483,10 @@ def expire_quote(quote, *, performed_by=None):
         _require_current(locked)
         if locked.status not in EXPIRABLE_FROM:
             raise ValidationError({'status': 'Only sent or countered quotes can be expired.'})
+        if not quote_is_effectively_expired(locked):
+            raise ValidationError({
+                'expires_at': 'This quote has not reached its expiration time.',
+            })
         old_status = locked.status
         locked.status = Quote.Status.EXPIRED
         locked.full_clean()
@@ -528,8 +554,10 @@ def set_quote_attachments(quote, document_ids, *, user=None):
         final_docs = {document.pk: document for document in documents}
         for document in invisible:
             final_docs[document.pk] = document
-        locked.attachments.set(list(final_docs.values()))
         after_ids = {str(doc_id) for doc_id in final_docs}
+        if after_ids == before_ids:
+            return locked
+        locked.attachments.set(list(final_docs.values()))
         _log_quote(
             locked_deal,
             ActivityActionType.QUOTE_ATTACHMENTS_UPDATED,
@@ -574,6 +602,11 @@ def _require_current_draft(quote):
     if quote.status != Quote.Status.DRAFT:
         raise ValidationError({'status': 'Only draft quotes can be changed.'})
     _require_current(quote)
+
+
+def _require_not_effectively_expired(quote):
+    if quote_is_effectively_expired(quote):
+        raise ValidationError({'expires_at': 'This quote has expired.'})
 
 
 def _reject_unknown_create_fields(fields):

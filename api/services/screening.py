@@ -6,8 +6,10 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from api.models import ActivityActionType
 from api.models.deal import Deal
 from api.models.screening import ScreeningAssessment
+from api.services.audit import create_activity_log
 from api.services.money import decimal_or_none as _decimal_or_none
 
 
@@ -146,7 +148,7 @@ def apply_calculated_metrics(assessment):
     return assessment
 
 
-def create_next_assessment(*, deal, **fields):
+def create_next_assessment(*, deal, performed_by=None, **fields):
     """Create the next immutable-history version for ``deal``.
 
     Locking the Deal row serializes competing version allocation requests; the
@@ -171,24 +173,56 @@ def create_next_assessment(*, deal, **fields):
         apply_calculated_metrics(assessment)
         assessment.full_clean()
         assessment.save()
+        create_activity_log(
+            deal=locked_deal,
+            action_type=ActivityActionType.SCREENING_CREATED,
+            performed_by=performed_by,
+            description=f'Screening assessment v{assessment.version} created',
+            new_value=assessment.status,
+            metadata={
+                'assessment_id': str(assessment.pk),
+                'version': assessment.version,
+                'status': assessment.status,
+            },
+        )
         return assessment
 
 
-def update_draft_assessment(*, assessment, **fields):
+def update_draft_assessment(*, assessment, performed_by=None, **fields):
     """Update a draft under a row lock and recalculate its deterministic outputs."""
     _reject_protected_fields(fields)
     if 'deal' in fields:
         raise ValidationError({'deal': 'An assessment cannot be moved to another deal.'})
 
     with transaction.atomic():
+        locked_deal = Deal.objects.select_for_update().get(pk=assessment.deal_id)
+        _require_screening_stage(locked_deal)
         locked_assessment = ScreeningAssessment.objects.select_for_update().get(pk=assessment.pk)
         _require_current_draft(locked_assessment)
-        _require_screening_stage(locked_assessment.deal)
-        for field_name, value in fields.items():
+        changed = sorted(
+            field_name
+            for field_name, value in fields.items()
+            if getattr(locked_assessment, field_name) != value
+        )
+        if not changed:
+            return locked_assessment
+        for field_name in changed:
+            value = fields[field_name]
             setattr(locked_assessment, field_name, value)
         apply_calculated_metrics(locked_assessment)
         locked_assessment.full_clean()
-        locked_assessment.save(update_fields=[*fields.keys(), *CALCULATED_FIELDS, 'updated_at'])
+        locked_assessment.save(update_fields=[*changed, *CALCULATED_FIELDS, 'updated_at'])
+        create_activity_log(
+            deal=locked_deal,
+            action_type=ActivityActionType.SCREENING_UPDATED,
+            performed_by=performed_by,
+            description=f'Screening assessment v{locked_assessment.version} updated',
+            metadata={
+                'assessment_id': str(locked_assessment.pk),
+                'version': locked_assessment.version,
+                'fields': changed,
+            },
+        )
         return locked_assessment
 
 
@@ -200,9 +234,10 @@ def finalize_assessment(*, assessment, reviewer, decision, notes=None):
         raise ValidationError({'decision': 'Select a supported screening decision.'})
 
     with transaction.atomic():
+        locked_deal = Deal.objects.select_for_update().get(pk=assessment.deal_id)
+        _require_screening_stage(locked_deal)
         locked_assessment = ScreeningAssessment.objects.select_for_update().get(pk=assessment.pk)
         _require_current_draft(locked_assessment)
-        _require_screening_stage(locked_assessment.deal)
         if decision == ScreeningAssessment.Decision.ADVANCE:
             advance_errors = screening_advance_errors(locked_assessment)
             if advance_errors:
@@ -225,6 +260,22 @@ def finalize_assessment(*, assessment, reviewer, decision, notes=None):
                 *CALCULATED_FIELDS,
                 'updated_at',
             ]
+        )
+        create_activity_log(
+            deal=locked_deal,
+            action_type=ActivityActionType.SCREENING_FINALIZED,
+            performed_by=reviewer,
+            description=(
+                f'Screening assessment v{locked_assessment.version} finalized: '
+                f'{locked_assessment.get_decision_display()}'
+            ),
+            old_value=ScreeningAssessment.Status.DRAFT,
+            new_value=locked_assessment.status,
+            metadata={
+                'assessment_id': str(locked_assessment.pk),
+                'version': locked_assessment.version,
+                'decision': locked_assessment.decision,
+            },
         )
         return locked_assessment
 

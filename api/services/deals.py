@@ -11,6 +11,7 @@ from api.models import (
     ClosingPackage,
     ConditionPrecedent,
     DDChecklistItem,
+    DDTemplateItem,
     Deal,
     DealStageEvent,
     PipelineStatus,
@@ -180,7 +181,12 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
 
     if deal.pipeline_status == PipelineStatus.QUOTING and to_status == PipelineStatus.NEGOTIATING:
         quote = Quote.objects.filter(deal=deal).order_by('-version').first()
-        if quote is None or quote.status not in _QUOTE_ACTIVE_FOR_NEGOTIATING:
+        from api.services.quotes import quote_is_effectively_expired
+        if (
+            quote is None
+            or quote.status not in _QUOTE_ACTIVE_FOR_NEGOTIATING
+            or quote_is_effectively_expired(quote)
+        ):
             blockers.append(QUOTE_REQUIRED_FOR_NEGOTIATING)
 
     if deal.pipeline_status == PipelineStatus.NEGOTIATING and to_status == PipelineStatus.SIGNED:
@@ -205,7 +211,17 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
                 'title_company',
                 'final_loan_amount',
             )
-            if any(getattr(package, field, None) in (None, '') for field in required_funding_fields):
+            funding_details_incomplete = any(
+                getattr(package, field, None) in (None, '')
+                for field in required_funding_fields
+            )
+            today = timezone.localdate()
+            funding_details_incomplete = funding_details_incomplete or any(
+                getattr(package, field, None) is not None
+                and getattr(package, field) > today
+                for field in ('actual_close_date', 'funds_wired_date')
+            )
+            if funding_details_incomplete:
                 blockers.append(CLOSING_FUNDING_DETAILS_INCOMPLETE)
             generation = ClosingChecklistGeneration.objects.filter(
                 package=package,
@@ -214,13 +230,30 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
             if generation is None:
                 blockers.append(CLOSING_CHECKLIST_REQUIRED)
             else:
-                if generation.dd_items.exclude(
+                expected_dd_ids = set(DDTemplateItem.objects.filter(
+                    template_id=generation.template_id,
+                    kind=DDTemplateItem.Kind.DD,
+                ).values_list('pk', flat=True)) if generation.template_id else set()
+                present_dd_ids = set(generation.dd_items.filter(
+                    source_template_item_id__in=expected_dd_ids,
+                ).values_list('source_template_item_id', flat=True))
+                dd_incomplete = bool(expected_dd_ids - present_dd_ids) or generation.dd_items.exclude(
                     status__in=[DDChecklistItem.Status.COMPLETE, DDChecklistItem.Status.WAIVED],
-                ).exists():
+                ).exists()
+                if dd_incomplete:
                     blockers.append(CLOSING_DD_INCOMPLETE)
-                if generation.conditions_precedent.exclude(
+
+                expected_cp_ids = set(DDTemplateItem.objects.filter(
+                    template_id=generation.template_id,
+                    kind=DDTemplateItem.Kind.CP,
+                ).values_list('pk', flat=True)) if generation.template_id else set()
+                present_cp_ids = set(generation.conditions_precedent.filter(
+                    source_template_item_id__in=expected_cp_ids,
+                ).values_list('source_template_item_id', flat=True))
+                cp_incomplete = bool(expected_cp_ids - present_cp_ids) or generation.conditions_precedent.exclude(
                     status__in=[ConditionPrecedent.Status.SATISFIED, ConditionPrecedent.Status.WAIVED],
-                ).exists():
+                ).exists()
+                if cp_incomplete:
                     blockers.append(CLOSING_CP_INCOMPLETE)
 
     if to_status == PipelineStatus.EXITED and deal.syndication_status in SYNDICATION_ACTIVE_STATUSES:

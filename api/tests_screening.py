@@ -11,6 +11,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from api.models.deal import Deal
+from api.models import ActivityActionType, ActivityLog
 from api.models.screening import ScreeningAssessment
 from api.services.screening import (
     calculate_screening_metrics,
@@ -248,6 +249,67 @@ class ScreeningServiceTests(TestCase):
         self.assertIsNone(draft.reviewer)
         self.assertIsNone(draft.finalized_at)
         self.assertEqual(draft.decision, '')
+
+    def test_finalize_writes_atomic_decision_evidence(self):
+        draft = self._create_draft()
+
+        finalized = finalize_assessment(
+            assessment=draft,
+            reviewer=self.analyst,
+            decision=ScreeningAssessment.Decision.DECLINE,
+            notes='Outside current credit box.',
+        )
+
+        event = ActivityLog.objects.get(
+            deal=self.deal,
+            action_type=ActivityActionType.SCREENING_FINALIZED,
+            metadata__assessment_id=str(finalized.pk),
+        )
+        self.assertEqual(event.performed_by, self.analyst)
+        self.assertEqual(event.metadata['version'], 1)
+        self.assertEqual(event.metadata['decision'], ScreeningAssessment.Decision.DECLINE)
+
+    def test_finalize_rolls_back_when_decision_evidence_fails(self):
+        draft = self._create_draft()
+
+        with patch(
+            'api.services.screening.create_activity_log',
+            side_effect=IntegrityError('audit failed'),
+        ):
+            with self.assertRaises(IntegrityError):
+                finalize_assessment(
+                    assessment=draft,
+                    reviewer=self.analyst,
+                    decision=ScreeningAssessment.Decision.DECLINE,
+                )
+
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, ScreeningAssessment.Status.DRAFT)
+        self.assertEqual(draft.decision, '')
+
+    def test_create_and_update_write_actor_and_changed_fields(self):
+        draft = create_next_assessment(
+            deal=self.deal,
+            performed_by=self.analyst,
+            loan_amount=Decimal('750000.00'),
+        )
+        update_draft_assessment(
+            assessment=draft,
+            performed_by=self.analyst,
+            loan_amount=Decimal('700000.00'),
+        )
+
+        created = ActivityLog.objects.get(
+            action_type=ActivityActionType.SCREENING_CREATED,
+            metadata__assessment_id=str(draft.pk),
+        )
+        updated = ActivityLog.objects.get(
+            action_type=ActivityActionType.SCREENING_UPDATED,
+            metadata__assessment_id=str(draft.pk),
+        )
+        self.assertEqual(created.performed_by, self.analyst)
+        self.assertEqual(updated.performed_by, self.analyst)
+        self.assertEqual(updated.metadata['fields'], ['loan_amount'])
 
 
 class ScreeningAssessmentApiTests(APITestCase):

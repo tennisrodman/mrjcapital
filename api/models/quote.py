@@ -150,7 +150,11 @@ class Quote(models.Model):
         default='',
     )
     recourse_carveouts = models.TextField(blank=True)
-    interest_reserve_months = models.PositiveIntegerField(null=True, blank=True)
+    interest_reserve_months = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+    )
     interest_reserve_amount = models.DecimalField(
         max_digits=16,
         decimal_places=2,
@@ -245,6 +249,13 @@ class Quote(models.Model):
             models.CheckConstraint(
                 condition=models.Q(version__gt=0),
                 name='quote_version_positive',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(interest_reserve_months__isnull=True)
+                    | models.Q(interest_reserve_months__gt=0)
+                ),
+                name='quote_interest_reserve_positive',
             ),
             models.CheckConstraint(
                 condition=(

@@ -46,6 +46,8 @@ CLOSING_PACKAGE_EDITABLE_FIELDS = (
     'notes',
 )
 
+ACTUAL_DATE_FIELDS = ('actual_close_date', 'funds_wired_date')
+
 
 def _lock_deal_for_closing(deal_id) -> Deal:
     deal = Deal.objects.select_for_update().filter(pk=deal_id).first()
@@ -206,6 +208,7 @@ def upsert_closing_package(deal, *, performed_by=None, fields_present=None, **kw
                 if field_name in fields_present:
                     value = kwargs.get(field_name)
                     setattr(package, field_name, value if value is not None or field_name not in {'notes', 'sources_and_uses_notes', 'closing_attorney', 'title_company'} else '')
+            _validate_actual_dates(package)
             package.full_clean()
             package.save()
             _log(
@@ -216,12 +219,7 @@ def upsert_closing_package(deal, *, performed_by=None, fields_present=None, **kw
             )
             return package, created
 
-        old_values = {
-            field_name: getattr(package, field_name)
-            for field_name in CLOSING_PACKAGE_EDITABLE_FIELDS
-            if field_name in fields_present
-        }
-        changed = False
+        old_values = {}
         for field_name in CLOSING_PACKAGE_EDITABLE_FIELDS:
             if field_name not in fields_present:
                 continue
@@ -229,11 +227,12 @@ def upsert_closing_package(deal, *, performed_by=None, fields_present=None, **kw
             if field_name in {'notes', 'sources_and_uses_notes', 'closing_attorney', 'title_company'}:
                 value = value or ''
             if getattr(package, field_name) != value:
+                old_values[field_name] = getattr(package, field_name)
                 setattr(package, field_name, value)
-                changed = True
-        if changed:
+        if old_values:
+            _validate_actual_dates(package)
             package.full_clean()
-            package.save()
+            package.save(update_fields=[*old_values, 'updated_at'])
             _log(
                 locked,
                 ActivityActionType.CLOSING_PACKAGE_UPDATED,
@@ -243,6 +242,17 @@ def upsert_closing_package(deal, *, performed_by=None, fields_present=None, **kw
                 metadata={'event': 'updated', 'package_id': str(package.pk), 'fields': sorted(old_values)},
             )
         return package, created
+
+
+def _validate_actual_dates(package):
+    today = timezone.localdate()
+    errors = {
+        field_name: 'Date cannot be in the future.'
+        for field_name in ACTUAL_DATE_FIELDS
+        if getattr(package, field_name) is not None and getattr(package, field_name) > today
+    }
+    if errors:
+        raise ValidationError(errors)
 
 
 def generate_closing_checklist(
@@ -470,6 +480,8 @@ def update_dd_item(item, *, performed_by=None, **fields):
         if item.is_terminal:
             raise ValidationError({'status': 'Terminal DD items are immutable.'})
 
+        before = _dd_item_state(item)
+
         if 'owner' in fields:
             item.owner = _validate_owner(locked, fields['owner'])
         if 'title' in fields:
@@ -508,12 +520,23 @@ def update_dd_item(item, *, performed_by=None, **fields):
                 item.completed_at = None
                 item.completed_by = None
 
+        after = _dd_item_state(item)
+        changed_fields = sorted(field for field in before if before[field] != after[field])
+        if not changed_fields:
+            return item
         item.save()
         _log(
             locked,
             ActivityActionType.CLOSING_ITEM_UPDATED,
             performed_by,
-            metadata={'event': 'dd_updated', 'item_id': str(item.pk), 'status': item.status},
+            old_value=str({field: before[field] for field in changed_fields}),
+            new_value=str({field: after[field] for field in changed_fields}),
+            metadata={
+                'event': 'dd_updated',
+                'item_id': str(item.pk),
+                'status': item.status,
+                'fields': changed_fields,
+            },
         )
         return item
 
@@ -525,6 +548,8 @@ def update_cp_item(item, *, performed_by=None, **fields):
         _require_current_item(item)
         if item.is_terminal:
             raise ValidationError({'status': 'Terminal conditions precedent are immutable.'})
+
+        before = _cp_item_state(item)
 
         if 'owner' in fields:
             item.owner = _validate_owner(locked, fields['owner'])
@@ -564,12 +589,23 @@ def update_cp_item(item, *, performed_by=None, **fields):
                 item.satisfied_at = None
                 item.satisfied_by = None
 
+        after = _cp_item_state(item)
+        changed_fields = sorted(field for field in before if before[field] != after[field])
+        if not changed_fields:
+            return item
         item.save()
         _log(
             locked,
             ActivityActionType.CLOSING_ITEM_UPDATED,
             performed_by,
-            metadata={'event': 'cp_updated', 'item_id': str(item.pk), 'status': item.status},
+            old_value=str({field: before[field] for field in changed_fields}),
+            new_value=str({field: after[field] for field in changed_fields}),
+            metadata={
+                'event': 'cp_updated',
+                'item_id': str(item.pk),
+                'status': item.status,
+                'fields': changed_fields,
+            },
         )
         return item
 
@@ -579,6 +615,36 @@ def _service_delete_queryset(queryset):
     return QuerySet.delete(queryset)
 
 
+def _dd_item_state(item):
+    return {
+        'title': item.title,
+        'description': item.description,
+        'owner': item.owner_id,
+        'due_date': item.due_date,
+        'status': item.status,
+        'waiver_reason': item.waiver_reason,
+        'completed_at': item.completed_at,
+        'completed_by': item.completed_by_id,
+        'waived_at': item.waived_at,
+        'waived_by': item.waived_by_id,
+    }
+
+
+def _cp_item_state(item):
+    return {
+        'title': item.title,
+        'description': item.description,
+        'owner': item.owner_id,
+        'due_date': item.due_date,
+        'status': item.status,
+        'waiver_reason': item.waiver_reason,
+        'satisfied_at': item.satisfied_at,
+        'satisfied_by': item.satisfied_by_id,
+        'waived_at': item.waived_at,
+        'waived_by': item.waived_by_id,
+    }
+
+
 def delete_dd_item(item, *, performed_by=None):
     with transaction.atomic():
         locked = _lock_deal_for_closing(item.generation.package.deal_id)
@@ -586,6 +652,8 @@ def delete_dd_item(item, *, performed_by=None):
         _require_current_item(item)
         if item.status != DDChecklistItem.Status.PENDING:
             raise ValidationError({'status': 'Only pending DD items can be deleted.'})
+        if item.source_template_item_id is not None:
+            raise ValidationError({'detail': 'Template-derived DD items cannot be deleted.'})
         item_id = str(item.pk)
         title = item.title
         detached_ids = [str(doc_id) for doc_id in item.documents.values_list('pk', flat=True)]
@@ -611,6 +679,8 @@ def delete_cp_item(item, *, performed_by=None):
         _require_current_item(item)
         if item.status != ConditionPrecedent.Status.OPEN:
             raise ValidationError({'status': 'Only open conditions precedent can be deleted.'})
+        if item.source_template_item_id is not None:
+            raise ValidationError({'detail': 'Template-derived conditions precedent cannot be deleted.'})
         item_id = str(item.pk)
         title = item.title
         detached_ids = [str(doc_id) for doc_id in item.documents.values_list('pk', flat=True)]

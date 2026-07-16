@@ -15,8 +15,9 @@ from api.models import (
     DealStageEvent,
     Document,
     DocumentCategory,
+    DocumentStorageStatus,
     Fund,
-    InvestmentType,
+    SUPPORTED_DEBT_INVESTMENT_TYPES,
     Property,
     Sponsor,
 )
@@ -32,12 +33,6 @@ from api.services.deal_properties import replace_deal_properties
 
 
 ALLOWED_DOCUMENT_VISIBILITY_ROLES = {'internal', 'investor', 'borrower', 'counsel'}
-SUPPORTED_DEBT_INVESTMENT_TYPES = {
-    InvestmentType.WHOLE_LOAN_BRIDGE,
-    InvestmentType.WHOLE_LOAN_PERMANENT,
-}
-
-
 def _validate_supported_investment_type(value):
     if value not in SUPPORTED_DEBT_INVESTMENT_TYPES:
         raise serializers.ValidationError(
@@ -160,11 +155,19 @@ class BrokerSerializer(serializers.ModelSerializer):
             'details',
         ]
 
+    def validate_details(self, value):
+        _reject_sensitive_details(value)
+        return value
+
 
 class FundSerializer(serializers.ModelSerializer):
     class Meta:
         model = Fund
         fields = ['id', 'name', 'status', 'details']
+
+    def validate_details(self, value):
+        _reject_sensitive_details(value)
+        return value
 
 
 class PropertySerializer(serializers.ModelSerializer):
@@ -229,6 +232,10 @@ class PropertySerializer(serializers.ModelSerializer):
                     detail['existing_property'] = str(match.pk)
                 raise serializers.ValidationError(detail)
         return attrs
+
+    def validate_details(self, value):
+        _reject_sensitive_details(value)
+        return value
 
 
 class DealPropertySerializer(serializers.ModelSerializer):
@@ -409,28 +416,7 @@ class DealSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if self.instance:
-            request = self.context.get('request')
-            user = getattr(request, 'user', None) if request else None
-            if 'assigned_analyst' in attrs and not _is_staff_user(user):
-                raise serializers.ValidationError({
-                    'assigned_analyst': 'Only staff may reassign a deal.',
-                })
-            for field_name in ['sponsor', 'broker', 'fund']:
-                if field_name not in attrs:
-                    continue
-                current_id = getattr(self.instance, f'{field_name}_id')
-                incoming_obj = attrs[field_name]
-                incoming_id = incoming_obj.pk if incoming_obj else None
-                if current_id and incoming_id != current_id and not _is_staff_user(user):
-                    raise serializers.ValidationError({
-                        field_name: 'Only staff may change an existing relationship.',
-                    })
-                # Empty → set must use the same visibility rules as deal create.
-                if not current_id and incoming_obj is not None:
-                    if not _can_attach_related_entity(user, incoming_obj):
-                        raise serializers.ValidationError({
-                            field_name: 'Selected record is not available.',
-                        })
+            self._validate_update_access(self.instance, attrs)
         return attrs
 
     def create(self, validated_data):
@@ -448,24 +434,66 @@ class DealSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         with transaction.atomic():
-            previous_values = capture_deal_field_values(instance, validated_data)
+            # Validation happens before this transaction and may have used a row
+            # that has since changed. Reload under a lock so a PATCH cannot write
+            # stale pipeline, relationship, or lifecycle values back to the row.
+            locked_deal = Deal.objects.select_for_update().get(pk=instance.pk)
+            self._validate_update_access(locked_deal, validated_data)
             has_property_ids = 'property_ids' in validated_data
             property_ids = validated_data.pop('property_ids', [])
-            deal = super().update(instance, validated_data)
+            if has_property_ids:
+                user = self._request_user()
+                if any(not _can_attach_property(user, property_obj) for property_obj in property_ids):
+                    raise serializers.ValidationError({
+                        'property_ids': 'One or more selected properties are not available.',
+                    })
+            changed_fields = [
+                field_name
+                for field_name, value in validated_data.items()
+                if getattr(locked_deal, field_name) != value
+            ]
+            previous_values = capture_deal_field_values(locked_deal, changed_fields)
+            for field_name in changed_fields:
+                setattr(locked_deal, field_name, validated_data[field_name])
+            if changed_fields:
+                locked_deal.save(update_fields=[*changed_fields, 'updated_at'])
             if has_property_ids:
                 replace_deal_properties(
-                    deal,
+                    locked_deal,
                     property_ids,
                     performed_by=self._request_user(),
                     ip_address=self.context.get('audit_ip_address'),
                 )
             log_deal_field_updates(
-                deal,
+                locked_deal,
                 previous_values,
                 performed_by=self._request_user(),
                 ip_address=self.context.get('audit_ip_address'),
             )
-            return deal
+            return locked_deal
+
+    def _validate_update_access(self, instance, attrs):
+        user = self._request_user()
+        if 'assigned_analyst' in attrs and not _is_staff_user(user):
+            raise serializers.ValidationError({
+                'assigned_analyst': 'Only staff may reassign a deal.',
+            })
+        for field_name in ['sponsor', 'broker', 'fund']:
+            if field_name not in attrs:
+                continue
+            current_id = getattr(instance, f'{field_name}_id')
+            incoming_obj = attrs[field_name]
+            incoming_id = incoming_obj.pk if incoming_obj else None
+            if current_id and incoming_id != current_id and not _is_staff_user(user):
+                raise serializers.ValidationError({
+                    field_name: 'Only staff may change an existing relationship.',
+                })
+            # Empty → set must use the same visibility rules as deal create.
+            if not current_id and incoming_obj is not None:
+                if not _can_attach_related_entity(user, incoming_obj):
+                    raise serializers.ValidationError({
+                        field_name: 'Selected record is not available.',
+                    })
 
     def _request_user(self):
         request = self.context.get('request')
@@ -845,6 +873,9 @@ class DocumentUploadIntentSerializer(serializers.Serializer):
     expiry_date = serializers.DateField(required=False, allow_null=True, default=None)
     checksum_sha256 = serializers.CharField(required=False, allow_blank=True, default='')
 
+    def validate_checksum_sha256(self, value):
+        return _validate_sha256(value)
+
     def validate_visibility_roles(self, value):
         return _validate_visibility_roles(value)
 
@@ -871,6 +902,16 @@ class DocumentUploadIntentSerializer(serializers.Serializer):
 
 class DocumentUploadCompleteSerializer(serializers.Serializer):
     checksum_sha256 = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_checksum_sha256(self, value):
+        return _validate_sha256(value)
+
+
+def _validate_sha256(value):
+    normalized = (value or '').strip().lower()
+    if normalized and not re.fullmatch(r'[0-9a-f]{64}', normalized):
+        raise serializers.ValidationError('Enter a valid 64-character hexadecimal SHA-256 checksum.')
+    return normalized
 
 
 class DocumentDownloadSerializer(serializers.Serializer):
@@ -964,12 +1005,46 @@ class DealNoteSerializer(serializers.ModelSerializer):
         deal = attrs.get('deal') or getattr(self.instance, 'deal', None)
         attachments = attrs.get('attachments')
         if attachments and deal is not None:
-            wrong = [str(doc.id) for doc in attachments if doc.deal_id != deal.id]
-            if wrong:
+            from api.policies import is_staff_user
+
+            request = self.context.get('request')
+            user = getattr(request, 'user', None)
+            unavailable = [
+                str(doc.id)
+                for doc in attachments
+                if (
+                    doc.deal_id != deal.id
+                    or doc.storage_status != DocumentStorageStatus.READY
+                    or (
+                        not is_staff_user(user)
+                        and 'internal' not in (doc.visibility_roles or [])
+                    )
+                )
+            ]
+            if unavailable:
                 raise serializers.ValidationError(
-                    {'attachments': f'Documents must belong to the same deal: {", ".join(wrong)}'}
+                    {'attachments': 'One or more documents are not available.'}
                 )
         return attrs
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        from api.policies import is_staff_user
+
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        representation['attachments'] = [
+            str(document.pk)
+            for document in instance.attachments.all()
+            if (
+                document.storage_status == DocumentStorageStatus.READY
+                and (
+                    is_staff_user(user)
+                    or 'internal' in (document.visibility_roles or [])
+                )
+            )
+        ]
+        return representation
 
 
 def _validate_decimal_string(value, field_name):

@@ -15,6 +15,7 @@ from .choices import (
     PropertyEnvironmentalStatus,
     RelationshipRating,
     SourceChannel,
+    SUPPORTED_DEBT_INVESTMENT_TYPES,
     SponsorEntityType,
     SponsorConnectionSource,
     SyndicationStatus,
@@ -30,7 +31,7 @@ from .closing import (
 )
 from .contact import Contact, DealContact, DealContactRole
 from .deal import Deal
-from .document import Document
+from .document import Document, DocumentBlobDeletion
 from .fund import Fund
 from .note import DealNote
 from .parties import Broker, Sponsor
@@ -61,6 +62,7 @@ __all__ = [
     'DealProperty',
     'DealStageEvent',
     'Document',
+    'DocumentBlobDeletion',
     'DocumentCategory',
     'DocumentStorageStatus',
     'DepositStatus',
@@ -76,6 +78,7 @@ __all__ = [
     'RelationshipRating',
     'ScreeningAssessment',
     'SourceChannel',
+    'SUPPORTED_DEBT_INVESTMENT_TYPES',
     'Sponsor',
     'SponsorConnectionSource',
     'SponsorEntityType',

@@ -24,7 +24,12 @@ from .deals import (
     transition_syndication_status,
 )
 from .notes import create_note, log_note_added
-from .entity_facts import update_property_facts, update_sponsor_facts
+from .entity_facts import (
+    update_broker_facts,
+    update_fund_facts,
+    update_property_facts,
+    update_sponsor_facts,
+)
 from .documents import document_action_capabilities, locked_metadata_errors
 from .quotes import (
     counter_quote,
@@ -77,6 +82,8 @@ __all__ = [
     'update_draft_quote',
     'update_property_facts',
     'update_sponsor_facts',
+    'update_broker_facts',
+    'update_fund_facts',
     'upsert_closing_package',
     'withdraw_quote',
 ]

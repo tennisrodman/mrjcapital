@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from django.contrib.auth import get_user_model
@@ -90,16 +91,21 @@ class PromotedEntityFactPermissionTests(APITestCase):
             deal=self.deal,
             action_type=ActivityActionType.FIELD_UPDATED,
         )
-        self.assertEqual(logs.count(), 6)
-        sponsor_log = logs.get(metadata__subject_model='Sponsor', metadata__field='website')
-        self.assertEqual(sponsor_log.old_value, 'https://old.example.com')
-        self.assertEqual(sponsor_log.new_value, 'https://new.example.com')
+        self.assertEqual(logs.count(), 2)
+        sponsor_log = logs.get(metadata__subject_model='Sponsor')
+        self.assertEqual(
+            sponsor_log.metadata['fields'],
+            ['bankruptcy_history', 'website', 'years_experience'],
+        )
+        self.assertEqual(json.loads(sponsor_log.old_value)['website'], 'https://old.example.com')
+        self.assertEqual(json.loads(sponsor_log.new_value)['website'], 'https://new.example.com')
         self.assertEqual(sponsor_log.metadata['subject_id'], str(self.sponsor.pk))
         self.assertEqual(sponsor_log.performed_by, self.analyst)
         self.assertEqual(sponsor_log.ip_address, '203.0.113.12')
-        property_log = logs.get(metadata__subject_model='Property', metadata__field='units')
-        self.assertEqual(property_log.old_value, '24')
-        self.assertEqual(property_log.new_value, '0')
+        property_log = logs.get(metadata__subject_model='Property')
+        self.assertEqual(property_log.metadata['fields'], ['county', 'subtype', 'units'])
+        self.assertEqual(json.loads(property_log.old_value)['units'], 24)
+        self.assertEqual(json.loads(property_log.new_value)['units'], 0)
 
     def test_nonstaff_cannot_mix_identity_or_sensitive_fields_into_fact_patch(self):
         sponsor_response = self.client.patch(
@@ -155,7 +161,7 @@ class PromotedEntityFactPermissionTests(APITestCase):
         self.assertEqual(self.property.rentable_square_feet, 18000)
         self.assertFalse(ActivityLog.objects.filter(deal__in=[self.deal, other_deal]).exists())
 
-    def test_staff_retains_identity_updates_and_fact_audit_covers_every_linked_deal(self):
+    def test_staff_identity_and_fact_updates_are_audited_once_for_every_linked_deal(self):
         other_deal = self._deal(
             'Staff Shared Deal',
             self.other_analyst,
@@ -181,18 +187,125 @@ class PromotedEntityFactPermissionTests(APITestCase):
         self.property.refresh_from_db()
         self.assertEqual(self.sponsor.primary_contact_email, 'staff-changed@example.com')
         self.assertEqual(self.property.property_type, 'office')
-        sponsor_logs = ActivityLog.objects.filter(
-            metadata__subject_model='Sponsor',
-            metadata__field='completed_projects',
-        )
-        property_logs = ActivityLog.objects.filter(
-            metadata__subject_model='Property',
-            metadata__field='county',
-        )
+        sponsor_logs = ActivityLog.objects.filter(metadata__subject_model='Sponsor')
+        property_logs = ActivityLog.objects.filter(metadata__subject_model='Property')
         self.assertEqual(set(sponsor_logs.values_list('deal_id', flat=True)), {self.deal.pk, other_deal.pk})
         self.assertEqual(set(property_logs.values_list('deal_id', flat=True)), {self.deal.pk, other_deal.pk})
-        self.assertFalse(ActivityLog.objects.filter(metadata__field='primary_contact_email').exists())
-        self.assertFalse(ActivityLog.objects.filter(metadata__field='property_type').exists())
+        self.assertEqual(sponsor_logs.count(), 2)
+        self.assertEqual(property_logs.count(), 2)
+        self.assertEqual(
+            sponsor_logs.first().metadata['fields'],
+            ['completed_projects', 'primary_contact_email'],
+        )
+        self.assertEqual(
+            property_logs.first().metadata['fields'],
+            ['county', 'property_type'],
+        )
+
+    def test_sensitive_sponsor_updates_are_redacted_and_no_op_patch_is_not_logged(self):
+        self.client.force_authenticate(self.staff)
+        secret = '98-7654321'
+
+        changed = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {'ein': secret, 'guarantor_credit_score': '775'},
+            format='json',
+        )
+        no_op = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/',
+            {'ein': secret, 'guarantor_credit_score': '775'},
+            format='json',
+        )
+
+        self.assertEqual(changed.status_code, status.HTTP_200_OK)
+        self.assertEqual(no_op.status_code, status.HTTP_200_OK)
+        logs = ActivityLog.objects.filter(metadata__subject_model='Sponsor')
+        self.assertEqual(logs.count(), 1)
+        log = logs.get()
+        self.assertEqual(log.metadata['fields'], ['ein', 'guarantor_credit_score'])
+        self.assertEqual(set(json.loads(log.old_value).values()), {'<redacted>'})
+        self.assertEqual(set(json.loads(log.new_value).values()), {'<redacted>'})
+        self.assertNotIn(secret, str(log.__dict__))
+
+    def test_staff_update_audits_all_actual_sponsor_and_property_fields(self):
+        self.client.force_authenticate(self.staff)
+        sponsor_payload = {
+            'entity_name': 'Renamed Sponsor LLC',
+            'entity_type': 'lp',
+            'primary_contact_name': 'Avery Updated',
+            'primary_contact_phone': '555-0101',
+            'relationship_rating': 'strategic',
+            'business_address': '10 Main Plaza',
+            'total_units_owned': 1200,
+            'total_sf_managed': 500000,
+            'assets_under_management': '250000000.00',
+            'track_record': [{'name': 'Completed Project'}],
+            'connection_source': 'repeat',
+            'details': {'segment': 'repeat borrower'},
+        }
+        property_payload = {
+            'address': '101 Main St',
+            'city': 'Santa Monica',
+            'state': 'ca',
+            'zip': '90401',
+            'property_type': 'mixed_use',
+            'msa': 'Los Angeles-Long Beach',
+            'number_of_buildings': 2,
+            'number_of_stories': 4,
+            'parking_spaces': 80,
+            'lot_size_acres': '1.2345',
+            'flood_zone': 'X',
+            'zoning_designation': 'MU-2',
+            'environmental_status': 'phase_1_clean',
+            'details': {'source': 'sponsor'},
+        }
+
+        sponsor_response = self.client.patch(
+            f'/api/sponsors/{self.sponsor.pk}/', sponsor_payload, format='json'
+        )
+        property_response = self.client.patch(
+            f'/api/properties/{self.property.pk}/', property_payload, format='json'
+        )
+
+        self.assertEqual(sponsor_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(property_response.status_code, status.HTTP_200_OK)
+        sponsor_log = ActivityLog.objects.get(metadata__subject_model='Sponsor')
+        property_log = ActivityLog.objects.get(metadata__subject_model='Property')
+        self.assertEqual(set(sponsor_log.metadata['fields']), set(sponsor_payload))
+        self.assertEqual(
+            set(property_log.metadata['fields']),
+            {*(property_payload.keys() - {'state'}), 'address_normalized'},
+        )
+        self.assertEqual(json.loads(sponsor_log.old_value)['details'], '<redacted>')
+        self.assertEqual(json.loads(sponsor_log.new_value)['details'], '<redacted>')
+        self.assertEqual(json.loads(property_log.old_value)['details'], '<redacted>')
+        self.assertEqual(json.loads(property_log.new_value)['details'], '<redacted>')
+
+    def test_flexible_master_details_reject_sensitive_values(self):
+        broker = Broker.objects.create(
+            company_name='Sensitive Broker',
+            contact_name='Broker Contact',
+            email='broker-sensitive@example.com',
+            status='active',
+        )
+        fund = Fund.objects.create(name='Sensitive Fund', status='forming')
+        self.deal.broker = broker
+        self.deal.fund = fund
+        self.deal.save(update_fields=['broker', 'fund'])
+        self.client.force_authenticate(self.staff)
+
+        for endpoint, object_id in (
+            ('properties', self.property.pk),
+            ('brokers', broker.pk),
+            ('funds', fund.pk),
+        ):
+            with self.subTest(endpoint=endpoint):
+                response = self.client.patch(
+                    f'/api/{endpoint}/{object_id}/',
+                    {'details': {'tax_id': '12-3456789'}},
+                    format='json',
+                )
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_nonstaff_cannot_delete_sponsor_or_property_through_generic_endpoints(self):
         sponsor_response = self.client.delete(f'/api/sponsors/{self.sponsor.pk}/')
@@ -466,6 +579,25 @@ class BrokerFundAuthorizationTests(APITestCase):
         self.assertEqual(self.broker.contact_name, 'Blair Updated')
         self.assertEqual(self.fund.name, 'Exclusive Fund Renamed')
         self.assertEqual(self.fund.status, 'open')
+        broker_log = ActivityLog.objects.get(metadata__subject_model='Broker')
+        fund_log = ActivityLog.objects.get(metadata__subject_model='Fund')
+        self.assertEqual(broker_log.deal, self.deal)
+        self.assertEqual(broker_log.metadata['fields'], ['contact_name', 'phone'])
+        self.assertEqual(fund_log.deal, self.deal)
+        self.assertEqual(fund_log.metadata['fields'], ['name', 'status'])
+
+        self.client.patch(
+            f'/api/brokers/{self.broker.pk}/',
+            {'phone': '555-0199', 'contact_name': 'Blair Updated'},
+            format='json',
+        )
+        self.client.patch(
+            f'/api/funds/{self.fund.pk}/',
+            {'name': 'Exclusive Fund Renamed', 'status': 'open'},
+            format='json',
+        )
+        self.assertEqual(ActivityLog.objects.filter(metadata__subject_model='Broker').count(), 1)
+        self.assertEqual(ActivityLog.objects.filter(metadata__subject_model='Fund').count(), 1)
 
     def test_shared_broker_and_fund_cannot_be_updated_by_nonstaff(self):
         Deal.objects.create(
@@ -525,6 +657,18 @@ class BrokerFundAuthorizationTests(APITestCase):
         self.fund.refresh_from_db()
         self.assertEqual(self.broker.status, 'inactive')
         self.assertEqual(self.fund.status, 'closed')
+        self.assertEqual(
+            set(ActivityLog.objects.filter(
+                metadata__subject_model='Broker',
+            ).values_list('deal_id', flat=True)),
+            {self.deal.pk, Deal.objects.get(name='Staff Shared Deal').pk},
+        )
+        self.assertEqual(
+            set(ActivityLog.objects.filter(
+                metadata__subject_model='Fund',
+            ).values_list('deal_id', flat=True)),
+            {self.deal.pk, Deal.objects.get(name='Staff Shared Deal').pk},
+        )
 
     def test_nonstaff_cannot_delete_broker_or_fund(self):
         broker_response = self.client.delete(f'/api/brokers/{self.broker.pk}/')

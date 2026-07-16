@@ -26,6 +26,7 @@ from api.models import (
     Deal,
     DealNote,
     Document,
+    DocumentBlobDeletion,
     DocumentStorageStatus,
     Fund,
     PipelineStatus,
@@ -87,6 +88,43 @@ class AuthFlowTests(APITestCase):
         self.assertEqual(resp.data['username'], self.username)
         self.assertEqual(resp.data['email'], 'tester@example.com')
         self.assertIn('is_staff', resp.data)
+
+    def test_logout_revokes_refresh_without_access_authentication(self):
+        login = self.client.post(
+            reverse('login'),
+            {'username': self.username, 'password': self.password},
+            format='json',
+        )
+        refresh = login.data['tokens']['refresh']
+
+        logout = self.client.post(reverse('logout'), {'refresh': refresh}, format='json')
+
+        self.assertEqual(logout.status_code, status.HTTP_200_OK)
+        refreshed = self.client.post(reverse('token_refresh'), {'refresh': refresh}, format='json')
+        self.assertEqual(refreshed.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_ignores_a_stale_access_header_and_revokes_refresh(self):
+        login = self.client.post(
+            reverse('login'),
+            {'username': self.username, 'password': self.password},
+            format='json',
+        )
+        refresh = login.data['tokens']['refresh']
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer stale-or-malformed-access')
+
+        logout = self.client.post(reverse('logout'), {'refresh': refresh}, format='json')
+
+        self.assertEqual(logout.status_code, status.HTTP_200_OK)
+        self.client.credentials()
+        refreshed = self.client.post(reverse('token_refresh'), {'refresh': refresh}, format='json')
+        self.assertEqual(refreshed.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_requires_a_valid_refresh_token(self):
+        missing = self.client.post(reverse('logout'), {}, format='json')
+        invalid = self.client.post(reverse('logout'), {'refresh': 'not-a-token'}, format='json')
+
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_unknown_api_route_returns_json_404(self):
         resp = self.client.get('/api/does-not-exist/')
@@ -1541,6 +1579,10 @@ class DealSpineApiTests(APITestCase):
         document = intent.data['document']
         self.assertEqual(document['storage_status'], 'pending')
         self.assertTrue(document['file_url'].startswith(f'deals/{deal.pk}/'))
+        self.assertEqual(
+            intent.data['upload_url'],
+            f'/api/documents/{document["id"]}/blob/',
+        )
 
         upload = self.client.put(
             f'/api/documents/{document["id"]}/blob/',
@@ -1579,7 +1621,10 @@ class DealSpineApiTests(APITestCase):
 
         download = self.client.get(f'/api/documents/{document["id"]}/download/')
         self.assertEqual(download.status_code, status.HTTP_200_OK)
-        self.assertIn('/blob/', download.data['download_url'])
+        self.assertEqual(
+            download.data['download_url'],
+            f'/api/documents/{document["id"]}/blob/',
+        )
 
         blob = self.client.get(f'/api/documents/{document["id"]}/blob/')
         self.assertEqual(blob.status_code, status.HTTP_200_OK)
@@ -1626,6 +1671,98 @@ class DealSpineApiTests(APITestCase):
             content_type='application/pdf',
         )
         self.assertEqual(accepted.status_code, status.HTTP_200_OK)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='r2')
+    def test_r2_upload_intent_requires_a_valid_sha256(self):
+        deal = self.create_deal()
+
+        missing = self._upload_intent(deal, 'Missing checksum', 'legal')
+        malformed = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Malformed checksum',
+                'category': 'legal',
+                'file_type': 'pdf',
+                'file_size_bytes': 12,
+                'checksum_sha256': 'not-a-digest',
+            },
+            format='json',
+        )
+
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('checksum_sha256', missing.data)
+        self.assertEqual(malformed.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('checksum_sha256', malformed.data)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='r2')
+    def test_complete_rejects_blob_with_unverified_checksum(self):
+        from api.services.storage import ObjectMeta
+
+        deal = self.create_deal()
+        expected = hashlib.sha256(b'expected').hexdigest()
+        document = Document.objects.create(
+            deal=deal,
+            document_name='R2 integrity',
+            category='legal',
+            file_url=f'deals/{deal.pk}/{uuid.uuid4()}/v1/integrity.pdf',
+            file_type='pdf',
+            content_type='application/pdf',
+            file_size_bytes=8,
+            checksum_sha256=expected,
+            storage_status=DocumentStorageStatus.PENDING,
+            uploaded_by=self.user,
+            visibility_roles=['internal'],
+        )
+        fake_storage = type('FakeStorage', (), {
+            'inspect_object': lambda _self, _key, _expected_size=None: ObjectMeta(
+                size=8,
+                content_type='application/pdf',
+                etag='fake',
+                checksum_sha256=hashlib.sha256(b'tampered').hexdigest(),
+            ),
+        })()
+
+        with patch('api.viewsets.get_document_storage', return_value=fake_storage):
+            response = self.client.post(
+                f'/api/documents/{document.pk}/complete/',
+                {},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        document.refresh_from_db()
+        self.assertEqual(document.storage_status, DocumentStorageStatus.PENDING)
+
+    def test_r2_presign_binds_exact_size_checksum_and_single_write(self):
+        from api.services.storage import R2DocumentStorage
+
+        captured = {}
+
+        class FakeClient:
+            def generate_presigned_url(self, operation, *, Params, ExpiresIn):
+                captured.update(operation=operation, params=Params, expires=ExpiresIn)
+                return 'https://r2.example/upload'
+
+        storage = R2DocumentStorage.__new__(R2DocumentStorage)
+        storage.bucket = 'documents'
+        storage.client = FakeClient()
+        checksum = hashlib.sha256(b'hello world').hexdigest()
+
+        target = storage.presign_upload('deal/key', 'application/pdf', 11, checksum)
+
+        self.assertEqual(captured['operation'], 'put_object')
+        self.assertEqual(captured['params']['ContentLength'], 11)
+        self.assertEqual(captured['params']['IfNoneMatch'], '*')
+        self.assertEqual(
+            captured['params']['ChecksumSHA256'],
+            base64.b64encode(bytes.fromhex(checksum)).decode('ascii'),
+        )
+        self.assertEqual(target.headers['If-None-Match'], '*')
+        self.assertEqual(
+            target.headers['x-amz-checksum-sha256'],
+            captured['params']['ChecksumSHA256'],
+        )
 
     @override_settings(DOCUMENT_STORAGE_BACKEND='local')
     def test_document_upload_intent_rejects_oversized_file(self):
@@ -1763,14 +1900,61 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(deleted, 1)
         self.assertFalse(Document.objects.filter(pk=stale.pk).exists())
         self.assertTrue(Document.objects.filter(pk=fresh.pk).exists())
-        self.assertIsNone(storage.head_object(stale.file_url))
+        self.assertIsNotNone(storage.head_object(stale.file_url))
         self.assertIsNotNone(storage.head_object(fresh.file_url))
+        deletion = DocumentBlobDeletion.objects.get(document_id=stale.pk)
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.PENDING)
+        from api.tasks import process_document_blob_deletions
+        result = process_document_blob_deletions()
+        self.assertEqual(result, {'completed': 1, 'failed': 0})
+        self.assertIsNone(storage.head_object(stale.file_url))
         abandoned = ActivityLog.objects.get(
             action_type=ActivityActionType.DOCUMENT_UPLOAD_ABANDONED,
             metadata__document_id=str(stale.pk),
         )
         self.assertIn('expired', abandoned.description)
         self.assertIsNone(abandoned.performed_by)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_failed_blob_delete_is_persisted_and_retried(self):
+        from api.services.documents import process_pending_blob_deletions
+        from api.services.storage import get_document_storage
+
+        deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Durable delete', 'legal')
+        storage = get_document_storage()
+        storage.write_object(document.file_url, b'durable', 'application/pdf')
+
+        response = self.client.delete(f'/api/documents/{document.pk}/')
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Document.objects.filter(pk=document.pk).exists())
+        deletion = DocumentBlobDeletion.objects.get(document_id=document.pk)
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.PENDING)
+        self.assertTrue(ActivityLog.objects.filter(
+            action_type=ActivityActionType.DOCUMENT_DELETE_PENDING,
+            metadata__document_id=str(document.pk),
+        ).exists())
+
+        with patch.object(storage, 'delete_object', side_effect=RuntimeError('R2 unavailable')):
+            failed = process_pending_blob_deletions(storage=storage)
+        self.assertEqual(failed, {'completed': 0, 'failed': 1})
+        deletion.refresh_from_db()
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.PENDING)
+        self.assertEqual(deletion.attempt_count, 1)
+        self.assertIn('R2 unavailable', deletion.last_error)
+
+        deletion.next_attempt_at = timezone.now()
+        deletion.save(update_fields=['next_attempt_at'])
+        completed = process_pending_blob_deletions(storage=storage)
+        self.assertEqual(completed, {'completed': 1, 'failed': 0})
+        deletion.refresh_from_db()
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.COMPLETED)
+        self.assertIsNone(storage.head_object(document.file_url))
+        self.assertTrue(ActivityLog.objects.filter(
+            action_type=ActivityActionType.DOCUMENT_DELETED,
+            metadata__document_id=str(document.pk),
+        ).exists())
 
     def test_document_default_order_is_stable_for_pagination(self):
         self.assertEqual(Document._meta.ordering, ['deal', 'category', '-version', 'id'])

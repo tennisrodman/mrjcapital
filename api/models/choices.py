@@ -10,6 +10,12 @@ class InvestmentType(models.TextChoices):
     LP_EQUITY = 'lp_equity', 'LP equity'
 
 
+SUPPORTED_DEBT_INVESTMENT_TYPES = frozenset({
+    InvestmentType.WHOLE_LOAN_BRIDGE,
+    InvestmentType.WHOLE_LOAN_PERMANENT,
+})
+
+
 class DealPurpose(models.TextChoices):
     ACQUISITION = 'acquisition', 'Acquisition'
     REFINANCE = 'refinance', 'Refinance'
@@ -156,6 +162,8 @@ class ActivityActionType(models.TextChoices):
     DOCUMENT_UPLOAD_STARTED = 'document_upload_started', 'Document upload started'
     DOCUMENT_UPLOAD = 'document_upload', 'Document upload'
     DOCUMENT_UPLOAD_ABANDONED = 'document_upload_abandoned', 'Document upload abandoned'
+    DOCUMENT_DELETE_PENDING = 'document_delete_pending', 'Document deletion pending'
+    DOCUMENT_DELETED = 'document_deleted', 'Document deleted'
     NOTE_ADDED = 'note_added', 'Note added'
     NOTE_UPDATED = 'note_updated', 'Note updated'
     NOTE_DELETED = 'note_deleted', 'Note deleted'
@@ -175,3 +183,9 @@ class ActivityActionType(models.TextChoices):
     QUOTE_EXPIRED = 'quote_expired', 'Quote expired'
     QUOTE_WITHDRAWN = 'quote_withdrawn', 'Quote withdrawn'
     QUOTE_ATTACHMENTS_UPDATED = 'quote_attachments_updated', 'Quote attachments updated'
+    SCREENING_CREATED = 'screening_created', 'Screening created'
+    SCREENING_UPDATED = 'screening_updated', 'Screening updated'
+    SCREENING_FINALIZED = 'screening_finalized', 'Screening finalized'
+    DEAL_CONTACT_ADDED = 'deal_contact_added', 'Deal contact added'
+    DEAL_CONTACT_UPDATED = 'deal_contact_updated', 'Deal contact updated'
+    DEAL_CONTACT_DELETED = 'deal_contact_deleted', 'Deal contact deleted'

@@ -28,6 +28,7 @@ from api.services.quotes import (
     counter_quote,
     create_next_quote,
     execute_quote,
+    expire_quote,
     send_quote,
     set_quote_attachments,
     update_draft_quote,
@@ -200,6 +201,26 @@ class QuoteServiceTests(APITestCase):
         v3 = counter_quote(quote=v2_sent, created_by=self.user)
         self.assertEqual(v3.version, 3)
 
+    def test_expired_quote_cannot_be_countered_or_executed_and_cannot_expire_early(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.user)
+        sent = send_quote(make_sendable(quote))
+
+        with self.assertRaises(ValidationError) as early:
+            expire_quote(sent)
+        self.assertIn('expires_at', early.exception.message_dict)
+
+        Quote.objects.filter(pk=sent.pk).update(expires_at=timezone.now() - timedelta(minutes=1))
+        sent.refresh_from_db()
+        with self.assertRaises(ValidationError) as countered:
+            counter_quote(quote=sent, created_by=self.user)
+        self.assertIn('expires_at', countered.exception.message_dict)
+        with self.assertRaises(ValidationError) as executed:
+            execute_quote(sent)
+        self.assertIn('expires_at', executed.exception.message_dict)
+
+        expired = expire_quote(sent)
+        self.assertEqual(expired.status, Quote.Status.EXPIRED)
+
     def test_withdraw_current_draft(self):
         quote = create_next_quote(deal=self.deal, created_by=self.user)
         withdrawn = withdraw_quote(quote)
@@ -294,6 +315,19 @@ class QuoteApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(response.data, missing.data)
 
+    def test_interest_reserve_months_must_be_at_least_one(self):
+        response = self.client.post(
+            '/api/quotes/',
+            {
+                'deal': str(self.deal.pk),
+                'seed_from_screening': False,
+                'interest_reserve_months': 0,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('interest_reserve_months', response.data)
+
 
 class QuoteReadinessTests(APITestCase):
     def setUp(self):
@@ -347,6 +381,46 @@ class QuoteReadinessTests(APITestCase):
         self.assertFalse(signed_readiness['ready'])
         self.assertEqual(signed_readiness['code'], QUOTE_READINESS_REQUIRED)
         self.assertIn(QUOTE_EXECUTION_REQUIRED, signed_readiness['blockers'])
+
+    def test_past_due_active_quote_blocks_negotiating_but_executed_quote_remains_valid(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        sent = send_quote(make_sendable(quote), performed_by=self.analyst)
+        Quote.objects.filter(pk=sent.pk).update(expires_at=timezone.now() - timedelta(minutes=1))
+        sent.refresh_from_db()
+
+        expired_readiness = pipeline_transition_readiness(
+            self.deal,
+            PipelineStatus.NEGOTIATING,
+            self.analyst,
+        )
+        self.assertFalse(expired_readiness['ready'])
+        self.assertIn(QUOTE_REQUIRED_FOR_NEGOTIATING, expired_readiness['blockers'])
+
+        Quote.objects.filter(pk=sent.pk).update(expires_at=timezone.now() + timedelta(days=1))
+        sent.refresh_from_db()
+        document = Document.objects.create(
+            deal=self.deal,
+            document_name='Executed TS',
+            category=DocumentCategory.LEGAL,
+            subcategory='term_sheet',
+            file_url=f'deals/{self.deal.pk}/{uuid.uuid4()}/v1/ts.pdf',
+            file_type='pdf',
+            content_type='application/pdf',
+            file_size_bytes=10,
+            storage_status=DocumentStorageStatus.READY,
+            visibility_roles=['internal'],
+            uploaded_by=self.analyst,
+        )
+        set_quote_attachments(sent, [document.pk], user=self.analyst)
+        executed = execute_quote(sent, performed_by=self.analyst)
+        Quote.objects.filter(pk=executed.pk).update(expires_at=timezone.now() - timedelta(days=1))
+
+        executed_readiness = pipeline_transition_readiness(
+            self.deal,
+            PipelineStatus.NEGOTIATING,
+            self.analyst,
+        )
+        self.assertTrue(executed_readiness['ready'])
 
     def test_staff_override_records_quote_readiness_code(self):
         transitioned = transition_pipeline_status(
@@ -494,6 +568,36 @@ class QuoteIntegrityTests(APITestCase):
                 action_type=ActivityActionType.QUOTE_CREATED,
             ).exists()
         )
+
+    def test_identical_draft_patch_creates_no_activity(self):
+        from api.models import ActivityActionType, ActivityLog
+
+        quote = create_next_quote(
+            deal=self.deal,
+            created_by=self.analyst,
+            seed_from_screening=False,
+            notes='No change',
+        )
+        before_updated_at = quote.updated_at
+        before_count = ActivityLog.objects.filter(
+            deal=self.deal,
+            action_type=ActivityActionType.QUOTE_UPDATED,
+        ).count()
+
+        unchanged = update_draft_quote(
+            quote,
+            performed_by=self.analyst,
+            notes='No change',
+        )
+
+        self.assertEqual(unchanged.updated_at, before_updated_at)
+        self.assertEqual(
+            ActivityLog.objects.filter(
+                deal=self.deal,
+                action_type=ActivityActionType.QUOTE_UPDATED,
+            ).count(),
+            before_count,
+        )
         send_quote(make_sendable(quote), performed_by=self.analyst)
         self.assertTrue(
             ActivityLog.objects.filter(
@@ -501,6 +605,28 @@ class QuoteIntegrityTests(APITestCase):
                 action_type=ActivityActionType.QUOTE_SENT,
                 performed_by=self.analyst,
             ).exists()
+        )
+
+    def test_identical_attachment_update_creates_no_activity(self):
+        from api.models import ActivityActionType, ActivityLog
+
+        quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
+        document = self._ready_term_sheet()
+        set_quote_attachments(quote, [document.pk], user=self.analyst)
+        before_count = ActivityLog.objects.filter(
+            deal=self.deal,
+            action_type=ActivityActionType.QUOTE_ATTACHMENTS_UPDATED,
+        ).count()
+
+        unchanged = set_quote_attachments(quote, [document.pk], user=self.analyst)
+
+        self.assertEqual(set(unchanged.attachments.values_list('pk', flat=True)), {document.pk})
+        self.assertEqual(
+            ActivityLog.objects.filter(
+                deal=self.deal,
+                action_type=ActivityActionType.QUOTE_ATTACHMENTS_UPDATED,
+            ).count(),
+            before_count,
         )
 
     def test_holdback_cannot_exceed_loan_amount(self):

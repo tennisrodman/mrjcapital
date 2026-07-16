@@ -17,6 +17,7 @@ from api.models import (
     DealProperty,
     DealStageEvent,
     Document,
+    DocumentBlobDeletion,
     Fund,
     Property,
     Quote,
@@ -28,6 +29,21 @@ from api.models import (
 class DealPropertyInline(admin.TabularInline):
     model = DealProperty
     extra = 0
+
+
+class CreateOrReadOnlyAdmin(admin.ModelAdmin):
+    """Allow prototype seeding, but route every later mutation through audited APIs."""
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class FullyReadOnlyAdmin(CreateOrReadOnlyAdmin):
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(Deal)
@@ -57,14 +73,14 @@ class DealAdmin(admin.ModelAdmin):
 
 
 @admin.register(Property)
-class PropertyAdmin(admin.ModelAdmin):
+class PropertyAdmin(CreateOrReadOnlyAdmin):
     list_display = ['address', 'city', 'state', 'property_type', 'msa']
     list_filter = ['state', 'property_type']
     search_fields = ['address', 'address_normalized', 'city', 'msa']
 
 
 @admin.register(Sponsor)
-class SponsorAdmin(admin.ModelAdmin):
+class SponsorAdmin(CreateOrReadOnlyAdmin):
     list_display = ['entity_name', 'entity_type', 'primary_contact_name', 'primary_contact_email', 'relationship_rating']
     list_filter = ['entity_type', 'relationship_rating']
     search_fields = ['entity_name', 'primary_contact_name', 'primary_contact_email']
@@ -72,24 +88,64 @@ class SponsorAdmin(admin.ModelAdmin):
 
 
 @admin.register(Broker)
-class BrokerAdmin(admin.ModelAdmin):
+class BrokerAdmin(CreateOrReadOnlyAdmin):
     list_display = ['company_name', 'contact_name', 'email', 'status']
     list_filter = ['status']
     search_fields = ['company_name', 'contact_name', 'email']
 
 
 @admin.register(Fund)
-class FundAdmin(admin.ModelAdmin):
+class FundAdmin(CreateOrReadOnlyAdmin):
     list_display = ['name', 'status']
     list_filter = ['status']
     search_fields = ['name']
 
 
 @admin.register(Document)
-class DocumentAdmin(admin.ModelAdmin):
+class DocumentAdmin(FullyReadOnlyAdmin):
     list_display = ['document_name', 'deal', 'category', 'version', 'storage_status', 'uploaded_date', 'is_executed', 'expiry_date']
     list_filter = ['category', 'storage_status', 'is_executed']
     search_fields = ['document_name', 'deal__name']
+
+
+@admin.register(DocumentBlobDeletion)
+class DocumentBlobDeletionAdmin(admin.ModelAdmin):
+    list_display = [
+        'document_name',
+        'deal',
+        'reason',
+        'status',
+        'attempt_count',
+        'requested_at',
+        'completed_at',
+    ]
+    list_filter = ['status', 'reason', 'requested_at']
+    search_fields = ['document_name', 'storage_key', 'deal__name']
+    readonly_fields = [
+        'deal',
+        'document_id',
+        'document_name',
+        'storage_key',
+        'reason',
+        'status',
+        'requested_by',
+        'requested_ip',
+        'requested_at',
+        'completed_at',
+        'attempt_count',
+        'last_attempt_at',
+        'next_attempt_at',
+        'last_error',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ActivityLog)
@@ -133,7 +189,7 @@ class ActivityLogAdmin(admin.ModelAdmin):
 
 
 @admin.register(DealNote)
-class DealNoteAdmin(admin.ModelAdmin):
+class DealNoteAdmin(FullyReadOnlyAdmin):
     list_display = ['deal', 'author', 'created_at', 'updated_at']
     search_fields = ['deal__name', 'body']
     filter_horizontal = ['attachments']
@@ -141,13 +197,13 @@ class DealNoteAdmin(admin.ModelAdmin):
 
 
 @admin.register(Contact)
-class ContactAdmin(admin.ModelAdmin):
+class ContactAdmin(CreateOrReadOnlyAdmin):
     list_display = ['full_name', 'company_name', 'email', 'phone', 'created_by', 'updated_at']
     search_fields = ['full_name', 'company_name', 'email', 'phone']
 
 
 @admin.register(DealContact)
-class DealContactAdmin(admin.ModelAdmin):
+class DealContactAdmin(FullyReadOnlyAdmin):
     list_display = ['deal', 'contact', 'role', 'is_primary', 'updated_at']
     list_filter = ['role', 'is_primary']
     search_fields = ['deal__name', 'contact__full_name', 'contact__company_name']

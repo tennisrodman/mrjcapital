@@ -112,14 +112,24 @@ class ScreeningAssessmentSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         deal = validated_data.pop('deal')
+        request = self.context.get('request')
         try:
-            return create_next_assessment(deal=deal, **validated_data)
+            return create_next_assessment(
+                deal=deal,
+                performed_by=getattr(request, 'user', None),
+                **validated_data,
+            )
         except DjangoValidationError as exc:
             _raise_django_validation(exc)
 
     def update(self, instance, validated_data):
+        request = self.context.get('request')
         try:
-            return update_draft_assessment(assessment=instance, **validated_data)
+            return update_draft_assessment(
+                assessment=instance,
+                performed_by=getattr(request, 'user', None),
+                **validated_data,
+            )
         except DjangoValidationError as exc:
             _raise_django_validation(exc)
 

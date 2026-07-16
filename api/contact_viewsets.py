@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.db.models.deletion import ProtectedError
@@ -10,6 +11,11 @@ from api.drf import uuid_filter_value as _uuid_filter_value
 from api.models.contact import Contact, DealContact
 from api.models.deal import Deal
 from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
+from api.services.contacts import (
+    create_deal_contact,
+    delete_deal_contact,
+    update_deal_contact,
+)
 
 
 class ContactViewSet(viewsets.ModelViewSet):
@@ -106,43 +112,44 @@ class DealContactViewSet(viewsets.ModelViewSet):
             contact,
         ):
             raise NotFound()
-        self._save_with_deal_lock(serializer)
+        try:
+            serializer.instance = create_deal_contact(
+                deal=deal,
+                contact=contact,
+                role=serializer.validated_data['role'],
+                is_primary=serializer.validated_data.get('is_primary', False),
+                notes=serializer.validated_data.get('notes', ''),
+                performed_by=self.request.user,
+            )
+        except DjangoValidationError as exc:
+            _raise_service_validation(exc)
 
     def perform_update(self, serializer):
-        self._save_with_deal_lock(serializer)
-
-    def _save_with_deal_lock(self, serializer):
-        deal = serializer.validated_data.get('deal') or serializer.instance.deal
-        contact = serializer.validated_data.get('contact') or serializer.instance.contact
-        role = serializer.validated_data.get('role') or serializer.instance.role
-        is_primary = serializer.validated_data.get(
-            'is_primary',
-            getattr(serializer.instance, 'is_primary', False),
-        )
+        mutable_fields = {
+            field: value
+            for field, value in serializer.validated_data.items()
+            if field in {'is_primary', 'notes'}
+        }
         try:
-            with transaction.atomic():
-                Deal.objects.select_for_update().get(pk=deal.pk)
-                duplicate = DealContact.objects.filter(deal=deal, contact=contact, role=role)
-                primary = DealContact.objects.filter(deal=deal, role=role, is_primary=True)
-                if serializer.instance:
-                    duplicate = duplicate.exclude(pk=serializer.instance.pk)
-                    primary = primary.exclude(pk=serializer.instance.pk)
-                if duplicate.exists():
-                    raise ValidationError({
-                        'non_field_errors': 'This contact already has that role on the deal.',
-                    })
-                if is_primary and primary.exists():
-                    raise ValidationError({
-                        'is_primary': 'This deal already has a primary contact for that role.',
-                    })
-                serializer.save()
-        except IntegrityError as exc:
-            raise ValidationError({
-                'detail': 'The contact link conflicts with an existing deal contact.',
-            }) from exc
+            serializer.instance = update_deal_contact(
+                serializer.instance,
+                performed_by=self.request.user,
+                **mutable_fields,
+            )
+        except DjangoValidationError as exc:
+            _raise_service_validation(exc)
+
+    def perform_destroy(self, instance):
+        delete_deal_contact(instance, performed_by=self.request.user)
 def _can_access_contact(user, contact):
     if not getattr(user, 'is_authenticated', False):
         return False
     if _is_staff_user(user) or contact.created_by_id == user.id:
         return True
     return contact.deal_links.filter(deal__assigned_analyst=user).exists()
+
+
+def _raise_service_validation(exc):
+    if hasattr(exc, 'message_dict'):
+        raise ValidationError(exc.message_dict) from exc
+    raise ValidationError({'detail': exc.messages}) from exc

@@ -153,6 +153,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'api.tasks.cleanup_stale_pending_documents',
         'schedule': 3600.0,
     },
+    'process-document-blob-deletions': {
+        'task': 'api.tasks.process_document_blob_deletions',
+        'schedule': 60.0,
+    },
 }
 
 DOCUMENT_STORAGE_BACKEND = os.environ.get('DOCUMENT_STORAGE_BACKEND', 'local')
@@ -169,4 +173,7 @@ R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY', '')
 R2_BUCKET_NAME = os.environ.get('R2_BUCKET_NAME', '')
 R2_PRESIGN_UPLOAD_EXPIRY = int(os.environ.get('R2_PRESIGN_UPLOAD_EXPIRY', '3600'))
 R2_PRESIGN_DOWNLOAD_EXPIRY = int(os.environ.get('R2_PRESIGN_DOWNLOAD_EXPIRY', '900'))
+R2_PRESIGN_DELETE_SAFETY_SKEW = int(
+    os.environ.get('R2_PRESIGN_DELETE_SAFETY_SKEW', '60')
+)
 DOCUMENT_PENDING_MAX_AGE_HOURS = int(os.environ.get('DOCUMENT_PENDING_MAX_AGE_HOURS', '24'))

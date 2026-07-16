@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.db import models
+from django.utils import timezone
 
 from .choices import DocumentCategory, DocumentStorageStatus, PipelineStatus
 
@@ -65,3 +66,60 @@ class Document(models.Model):
 
     def __str__(self):
         return f'{self.document_name} v{self.version}'
+
+
+class DocumentBlobDeletion(models.Model):
+    """Durable outbox entry for deleting a document's external storage object."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        COMPLETED = 'completed', 'Completed'
+
+    class Reason(models.TextChoices):
+        USER_DELETE = 'user_delete', 'User deleted document'
+        STALE_UPLOAD = 'stale_upload', 'Stale pending upload'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    deal = models.ForeignKey(
+        'Deal',
+        on_delete=models.SET_NULL,
+        related_name='document_blob_deletions',
+        null=True,
+        blank=True,
+    )
+    document_id = models.UUIDField()
+    document_name = models.CharField(max_length=255)
+    storage_key = models.CharField(max_length=1024, unique=True)
+    reason = models.CharField(max_length=24, choices=Reason.choices)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='requested_document_blob_deletions',
+        null=True,
+        blank=True,
+    )
+    requested_ip = models.GenericIPAddressField(null=True, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['requested_at', 'id']
+        indexes = [
+            models.Index(
+                fields=['status', 'next_attempt_at'],
+                name='doc_blob_del_status_next_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.document_name}: {self.status}'
