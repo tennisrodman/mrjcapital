@@ -953,6 +953,73 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(log.new_value, 'raising')
         self.assertEqual(log.metadata['field'], 'syndication_status')
 
+    def test_dead_pipeline_transition_cancels_active_syndication_atomically(self):
+        deal = self.create_deal()
+        Deal.objects.filter(pk=deal.pk).update(
+            pipeline_status=PipelineStatus.QUOTING,
+            syndication_status='raising',
+        )
+
+        response = self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {'to_status': 'dead', 'reason': 'Sponsor withdrew'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['pipeline_status'], 'dead')
+        self.assertEqual(response.data['syndication_status'], 'cancelled')
+        cancellation = ActivityLog.objects.get(
+            deal=deal,
+            action_type=ActivityActionType.STATUS_CHANGE,
+            old_value='raising',
+            new_value='cancelled',
+        )
+        self.assertTrue(cancellation.metadata['automatic'])
+        self.assertEqual(cancellation.metadata['trigger_pipeline_status'], 'dead')
+
+    def test_exited_requires_active_syndication_to_be_resolved_without_override(self):
+        deal = self.create_deal()
+        Deal.objects.filter(pk=deal.pk).update(
+            pipeline_status=PipelineStatus.SERVICING,
+            syndication_status='raising',
+        )
+        self.client.force_authenticate(self.staff_user)
+
+        blocked = self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {
+                'to_status': 'exited',
+                'reason': 'Asset sold',
+                'override_readiness': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(blocked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            blocked.data['readiness']['blockers'],
+            ['syndication_resolution_required'],
+        )
+        self.assertFalse(blocked.data['readiness']['can_override'])
+        deal.refresh_from_db()
+        self.assertEqual(deal.pipeline_status, PipelineStatus.SERVICING)
+
+        cancelled = self.client.post(
+            f'/api/deals/{deal.pk}/transition-syndication/',
+            {'to_status': 'cancelled', 'reason': 'Fundraising ended before exit'},
+            format='json',
+        )
+        self.assertEqual(cancelled.status_code, status.HTTP_200_OK)
+
+        exited = self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {'to_status': 'exited', 'reason': 'Asset sold'},
+            format='json',
+        )
+        self.assertEqual(exited.status_code, status.HTTP_200_OK)
+        self.assertEqual(exited.data['syndication_status'], 'cancelled')
+
     def test_syndication_cannot_start_after_pipeline_status_closes(self):
         deal = self.create_deal()
         self.approve_for_quoting(deal)

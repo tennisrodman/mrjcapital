@@ -47,9 +47,16 @@ PIPELINE_TRANSITIONS = {
 
 SYNDICATION_TRANSITIONS = {
     SyndicationStatus.NOT_STARTED: {SyndicationStatus.RAISING},
-    SyndicationStatus.RAISING: {SyndicationStatus.FULLY_SUBSCRIBED},
-    SyndicationStatus.FULLY_SUBSCRIBED: {SyndicationStatus.CLOSED},
+    SyndicationStatus.RAISING: {
+        SyndicationStatus.FULLY_SUBSCRIBED,
+        SyndicationStatus.CANCELLED,
+    },
+    SyndicationStatus.FULLY_SUBSCRIBED: {
+        SyndicationStatus.CLOSED,
+        SyndicationStatus.CANCELLED,
+    },
     SyndicationStatus.CLOSED: set(),
+    SyndicationStatus.CANCELLED: set(),
 }
 
 SYNDICATION_START_PIPELINE_STATUSES = {
@@ -59,6 +66,10 @@ SYNDICATION_START_PIPELINE_STATUSES = {
     PipelineStatus.CLOSING,
 }
 SYNDICATION_TERMINAL_PIPELINE_STATUSES = {PipelineStatus.DEAD, PipelineStatus.EXITED}
+SYNDICATION_ACTIVE_STATUSES = {
+    SyndicationStatus.RAISING,
+    SyndicationStatus.FULLY_SUBSCRIBED,
+}
 
 # `details` is deliberately absent: it is flexible JSON and may contain data
 # that should never be copied into the immutable audit log. Pipeline and
@@ -103,6 +114,7 @@ CLOSING_FUNDING_DETAILS_INCOMPLETE = 'closing_funding_details_incomplete'
 CLOSING_CHECKLIST_REQUIRED = 'closing_checklist_required'
 CLOSING_DD_INCOMPLETE = 'closing_dd_incomplete'
 CLOSING_CP_INCOMPLETE = 'closing_cp_incomplete'
+SYNDICATION_RESOLUTION_REQUIRED = 'syndication_resolution_required'
 
 _QUOTE_ACTIVE_FOR_NEGOTIATING = frozenset({
     Quote.Status.SENT,
@@ -204,6 +216,9 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
                 ).exists():
                     blockers.append(CLOSING_CP_INCOMPLETE)
 
+    if to_status == PipelineStatus.EXITED and deal.syndication_status in SYNDICATION_ACTIVE_STATUSES:
+        blockers.append(SYNDICATION_RESOLUTION_REQUIRED)
+
     ready = not blockers
     if ready:
         code = READINESS_READY
@@ -211,6 +226,8 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
         code = QUOTE_READINESS_REQUIRED
     elif any(blocker in _CLOSING_BLOCKERS for blocker in blockers):
         code = CLOSING_READINESS_REQUIRED
+    elif SYNDICATION_RESOLUTION_REQUIRED in blockers:
+        code = SYNDICATION_RESOLUTION_REQUIRED
     else:
         code = SCREENING_APPROVAL_REQUIRED
 
@@ -218,7 +235,11 @@ def pipeline_transition_readiness(deal, to_status, performed_by=None):
         'ready': ready,
         'code': code,
         'blockers': blockers,
-        'can_override': bool(blockers and _can_override_readiness(performed_by)),
+        'can_override': bool(
+            blockers
+            and SYNDICATION_RESOLUTION_REQUIRED not in blockers
+            and _can_override_readiness(performed_by)
+        ),
     }
 
 
@@ -357,6 +378,8 @@ def transition_pipeline_status(
             })
 
         readiness = pipeline_transition_readiness(locked_deal, to_status, performed_by)
+        if not readiness['ready'] and override_readiness and not readiness['can_override']:
+            raise PipelineReadinessError(readiness)
         is_override = bool(not readiness['ready'] and override_readiness)
         if not readiness['ready'] and not is_override:
             raise PipelineReadinessError(readiness)
@@ -368,10 +391,18 @@ def transition_pipeline_status(
         })
 
         transition_at = timezone.now()
+        syndication_from_status = None
+        if (
+            to_status == PipelineStatus.DEAD
+            and locked_deal.syndication_status in SYNDICATION_ACTIVE_STATUSES
+        ):
+            syndication_from_status = locked_deal.syndication_status
+            locked_deal.syndication_status = SyndicationStatus.CANCELLED
         locked_deal.pipeline_status = to_status
         locked_deal.current_stage_entered_at = transition_at
         locked_deal.save(update_fields=[
             'pipeline_status',
+            'syndication_status',
             'paused_from_status',
             'current_stage_entered_at',
             'updated_at',
@@ -395,6 +426,22 @@ def transition_pipeline_status(
             new_value=to_status,
             metadata=metadata,
         )
+        if syndication_from_status is not None:
+            _write_status_log(
+                locked_deal,
+                performed_by,
+                ip_address,
+                reason,
+                old_value=syndication_from_status,
+                new_value=SyndicationStatus.CANCELLED,
+                metadata={
+                    'field': 'syndication_status',
+                    'from': syndication_from_status,
+                    'to': SyndicationStatus.CANCELLED,
+                    'automatic': True,
+                    'trigger_pipeline_status': PipelineStatus.DEAD,
+                },
+            )
         return locked_deal
 
 

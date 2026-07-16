@@ -29,6 +29,7 @@ const READINESS_BLOCKER_LABELS: Record<string, string> = {
   closing_checklist_required: 'Generate a current closing checklist before marking the deal Closed.',
   closing_dd_incomplete: 'Complete or waive every current due-diligence item.',
   closing_cp_incomplete: 'Satisfy or waive every current condition precedent.',
+  syndication_resolution_required: 'Close or cancel active syndication before exiting the deal.',
 };
 
 interface TransitionDialogProps {

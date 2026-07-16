@@ -31,7 +31,8 @@ export type SyndicationStatus =
   | 'not_started'
   | 'raising'
   | 'fully_subscribed'
-  | 'closed';
+  | 'closed'
+  | 'cancelled';
 
 export type SourceChannel =
   | 'broker'

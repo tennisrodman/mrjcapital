@@ -196,9 +196,10 @@ const stageEvents: DealStageEvent[] = deals.flatMap((deal) => {
 
 const SYNDICATION_TRANSITIONS: Record<SyndicationStatus, SyndicationStatus[]> = {
   not_started: ['raising'],
-  raising: ['fully_subscribed'],
-  fully_subscribed: ['closed'],
+  raising: ['fully_subscribed', 'cancelled'],
+  fully_subscribed: ['closed', 'cancelled'],
   closed: [],
+  cancelled: [],
 };
 
 const SYNDICATION_START_STAGES: PipelineStatus[] = ['quoting', 'negotiating', 'signed', 'closing'];
@@ -1177,7 +1178,9 @@ function transitionPipeline(
     }
   }
   const readiness = pipelineTransitionReadiness(deal, to);
-  const isReadinessOverride = Boolean(!readiness.ready && overrideReadiness && MOCK_USER.is_staff);
+  const isReadinessOverride = Boolean(
+    !readiness.ready && overrideReadiness && readiness.can_override && MOCK_USER.is_staff,
+  );
   if (!readiness.ready && !isReadinessOverride) {
     const message = 'This pipeline transition is blocked by readiness requirements.';
     throw new ApiError(message, 400, {
@@ -1201,6 +1204,18 @@ function transitionPipeline(
     is_override: isReadinessOverride,
   });
   deal.pipeline_status = to;
+  if (to === 'dead' && ['raising', 'fully_subscribed'].includes(deal.syndication_status)) {
+    const priorSyndication = deal.syndication_status;
+    deal.syndication_status = 'cancelled';
+    logTransition(
+      deal,
+      'syndication_status',
+      priorSyndication,
+      'cancelled',
+      reason,
+      { automatic: true, trigger_pipeline_status: 'dead' },
+    );
+  }
   deal.current_stage_entered_at = transitionedAt;
   deal.days_in_current_stage = 0;
   deal.updated_at = nowIso();
@@ -1645,6 +1660,15 @@ function pipelineTransitionReadiness(deal: Deal, to: PipelineStatus) {
         can_override: MOCK_USER.is_staff,
       };
     }
+  }
+
+  if (to === 'exited' && ['raising', 'fully_subscribed'].includes(deal.syndication_status)) {
+    return {
+      ready: false,
+      code: 'syndication_resolution_required',
+      blockers: ['syndication_resolution_required'],
+      can_override: false,
+    };
   }
 
   return { ready: true, code: 'ready', blockers: [], can_override: false };

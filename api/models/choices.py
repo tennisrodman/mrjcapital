@@ -49,6 +49,7 @@ class SyndicationStatus(models.TextChoices):
     RAISING = 'raising', 'Raising'
     FULLY_SUBSCRIBED = 'fully_subscribed', 'Fully subscribed'
     CLOSED = 'closed', 'Closed'
+    CANCELLED = 'cancelled', 'Cancelled'
 
 
 class SourceChannel(models.TextChoices):

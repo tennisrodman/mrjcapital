@@ -291,3 +291,93 @@ describe('quoting-to-signed mock readiness', () => {
     });
   });
 });
+
+describe('pipeline and syndication lifecycle consistency', () => {
+  beforeEach(() => {
+    setDemoIsStaffForTests(true);
+  });
+
+  async function moveToQuoting(name: string): Promise<Deal> {
+    const deal = await createScreeningDeal(name);
+    await finalizeDecision(deal.id, 'advance');
+    return mockApiRequest<Deal>(`api/deals/${deal.id}/transition/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'quoting', reason: 'Screening approved.' }),
+    });
+  }
+
+  it('automatically cancels active syndication when a deal dies', async () => {
+    const deal = await moveToQuoting('Demo Dead Syndication');
+    await mockApiRequest(`api/deals/${deal.id}/transition-syndication/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'raising', reason: 'Start raise.' }),
+    });
+
+    const dead = await mockApiRequest<Deal>(`api/deals/${deal.id}/transition/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'dead', reason: 'Sponsor withdrew.' }),
+    });
+
+    expect(dead.pipeline_status).toBe('dead');
+    expect(dead.syndication_status).toBe('cancelled');
+    const activity = await mockApiRequest<Paginated<ActivityLogEntry>>(
+      `api/activity-logs/?deal=${deal.id}`,
+    );
+    expect(activity.results).toContainEqual(expect.objectContaining({
+      old_value: 'raising',
+      new_value: 'cancelled',
+      metadata: expect.objectContaining({
+        automatic: true,
+        trigger_pipeline_status: 'dead',
+      }),
+    }));
+  });
+
+  it('does not let a staff override exit with active syndication', async () => {
+    const deal = await moveToQuoting('Demo Exit Syndication');
+    await mockApiRequest(`api/deals/${deal.id}/transition-syndication/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'raising', reason: 'Start raise.' }),
+    });
+    for (const toStatus of ['negotiating', 'signed', 'closing', 'closed', 'servicing']) {
+      await mockApiRequest(`api/deals/${deal.id}/transition/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          to_status: toStatus,
+          reason: `Advance to ${toStatus}.`,
+          override_readiness: true,
+        }),
+      });
+    }
+
+    const readiness = await mockApiRequest<ReadinessResponse>(
+      `api/deals/${deal.id}/allowed-transitions/`,
+    );
+    expect(readiness.readiness.exited).toEqual({
+      ready: false,
+      code: 'syndication_resolution_required',
+      blockers: ['syndication_resolution_required'],
+      can_override: false,
+    });
+
+    await expect(mockApiRequest(`api/deals/${deal.id}/transition/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        to_status: 'exited',
+        reason: 'Asset sold.',
+        override_readiness: true,
+      }),
+    })).rejects.toMatchObject({ status: 400 });
+
+    await mockApiRequest(`api/deals/${deal.id}/transition-syndication/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'cancelled', reason: 'Raise ended.' }),
+    });
+    const exited = await mockApiRequest<Deal>(`api/deals/${deal.id}/transition/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'exited', reason: 'Asset sold.' }),
+    });
+    expect(exited.pipeline_status).toBe('exited');
+    expect(exited.syndication_status).toBe('cancelled');
+  });
+});

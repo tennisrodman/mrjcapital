@@ -49,6 +49,7 @@ export const SYNDICATION_STATUS_LABELS: Record<SyndicationStatus, string> = {
   raising: 'Raising',
   fully_subscribed: 'Fully subscribed',
   closed: 'Syndication closed',
+  cancelled: 'Syndication cancelled',
 };
 
 export const SOURCE_CHANNEL_LABELS: Record<SourceChannel, string> = {
@@ -204,6 +205,7 @@ const SYNDICATION_BADGE_CLASS: Record<SyndicationStatus, string> = {
   raising: 'border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]',
   fully_subscribed: 'border-transparent bg-[var(--brass)]/85 text-white',
   closed: 'border-[var(--ink)]/20 bg-[var(--ink)]/8 text-[var(--ink-muted)]',
+  cancelled: 'border-[var(--border)] bg-[var(--ink)]/5 text-[var(--slate)]',
 };
 
 export function syndicationBadgeClass(status: SyndicationStatus): string {
