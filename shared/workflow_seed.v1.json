@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "dataset_key": "mrj-development-lifecycle",
+  "masters": {
+    "sponsor": {
+      "key": "lifecycle-sponsor",
+      "entity_name": "Lifecycle Scenario Sponsor LLC",
+      "entity_type": "llc",
+      "primary_contact_name": "Scenario Sponsor",
+      "primary_contact_email": "sponsor@example.invalid",
+      "primary_contact_phone": "+1-555-0100",
+      "relationship_rating": "established",
+      "website": "https://example.invalid",
+      "years_experience": 14,
+      "completed_projects": 23,
+      "bankruptcy_history": false,
+      "business_address": "100 Test Avenue, Los Angeles, CA 90001",
+      "total_units_owned": 860,
+      "assets_under_management": "175000000.00",
+      "connection_source": "repeat"
+    },
+    "broker": {
+      "key": "lifecycle-broker",
+      "company_name": "Lifecycle Scenario Capital Markets",
+      "contact_name": "Scenario Broker",
+      "email": "broker@example.invalid",
+      "phone": "+1-555-0101",
+      "status": "active",
+      "default_commission_rate": "1.0000",
+      "commission_type": "percent_of_loan",
+      "preferred_deal_types": ["whole_loan_bridge"],
+      "geographic_focus": ["Southern California"]
+    },
+    "fund": {
+      "key": "lifecycle-credit-fund",
+      "name": "Lifecycle Scenario Credit Fund",
+      "status": "open"
+    },
+    "property": {
+      "key": "lifecycle-multifamily-property",
+      "address": "100 Test Avenue",
+      "city": "Los Angeles",
+      "state": "CA",
+      "zip": "90001",
+      "property_type": "multifamily",
+      "subtype": "garden apartments",
+      "units": 120,
+      "rentable_square_feet": 108000,
+      "year_built": 1988,
+      "year_renovated": 2018,
+      "county": "Los Angeles",
+      "msa": "Los Angeles-Long Beach-Anaheim",
+      "number_of_buildings": 8,
+      "number_of_stories": 2,
+      "parking_spaces": 190,
+      "lot_size_acres": "6.2500",
+      "flood_zone": "X",
+      "zoning_designation": "R3",
+      "environmental_status": "phase_1_clean"
+    }
+  },
+  "inputs": {
+    "deal": {
+      "sponsor_key": "lifecycle-sponsor",
+      "broker_key": "lifecycle-broker",
+      "fund_key": "lifecycle-credit-fund",
+      "property_key": "lifecycle-multifamily-property",
+      "name_template": "Lifecycle Scenario — {target_title}",
+      "investment_type": "whole_loan_bridge",
+      "source_channel": "repeat_sponsor",
+      "source_date_days_ago": 0,
+      "requested_amount": "9000000.00",
+      "purpose": "acquisition",
+      "profile": "value_add",
+      "estimated_value": "13500000.00",
+      "renovation_budget": "750000.00",
+      "description": "Service-driven development scenario for a 120-unit bridge loan.",
+      "deposit_status": "received",
+      "deposit_received_days_ago": 0,
+      "deposit_account_label": "Scenario escrow",
+      "deposit_refund_conditions": "Refundable only if lender diligence identifies a material issue.",
+      "exclusivity_granted": true,
+      "exclusivity_expiry_in_days": 45
+    },
+    "screening": {
+      "loan_amount": "9000000.00",
+      "as_is_value": "13500000.00",
+      "stabilized_value": "15500000.00",
+      "project_cost": "12000000.00",
+      "noi": "1050000.00",
+      "stabilized_noi": "1250000.00",
+      "annual_debt_service": "780000.00",
+      "occupancy": "91.50",
+      "proposed_rate": "8.2500",
+      "proposed_term_months": 24,
+      "current_average_rent": "1850.00",
+      "market_rent": "2050.00",
+      "condition_rating": "good",
+      "unit_mix": "60 one-bedroom and 60 two-bedroom units.",
+      "exit_strategy": "Renovate, stabilize, and refinance into permanent debt.",
+      "exit_cap_rate": "5.5000",
+      "decision": "advance",
+      "decision_notes": "Scenario advance approved after first-pass underwriting."
+    },
+    "quote": {
+      "initial": {
+        "rate_type": "fixed",
+        "interest_rate": "8.2500",
+        "amortization_type": "interest_only",
+        "recourse_type": "limited",
+        "origination_fee_pct": "1.0000",
+        "good_faith_deposit": "50000.00",
+        "expires_in_days": 30
+      },
+      "counter": {
+        "interest_rate": "8.1250",
+        "expires_in_days": 30
+      }
+    },
+    "evidence": {
+      "key": "executed-term-sheet",
+      "filename": "executed-term-sheet.txt",
+      "content_type": "text/plain",
+      "category": "legal",
+      "subcategory": "term_sheet",
+      "body_template": "MRJ development lifecycle scenario term sheet\nscenario={scenario_key}\ndeal={deal_id}\n"
+    },
+    "closing": {
+      "template_key": "debt_acquisition",
+      "initial_target_close_in_days": 21,
+      "evidence": {
+        "key": "closing-diligence-binder",
+        "filename": "closing-diligence-binder.txt",
+        "content_type": "text/plain",
+        "category": "closing_docs",
+        "subcategory": "closing_statement",
+        "body_template": "MRJ development closing diligence binder\nscenario={scenario_key}\ndeal={deal_id}\nAll current due-diligence and conditions-precedent items were reviewed before funding.\n"
+      },
+      "package": {
+        "actual_close_days_ago": 0,
+        "funds_wired_days_ago": 0,
+        "funds_wired_amount": "9000000.00",
+        "closing_attorney": "Scenario Legal LLP",
+        "title_company": "Scenario Title Company",
+        "final_loan_amount": "9000000.00",
+        "purchase_price": "12000000.00",
+        "appraised_value": "13500000.00",
+        "closing_costs": "180000.00",
+        "sources_and_uses_notes": "Loan proceeds, sponsor equity, acquisition, renovation, and closing costs reconcile."
+      }
+    }
+  },
+  "scenarios": [
+    {"key": "development-lifecycle-v1-sourced", "target": "sourced"},
+    {"key": "development-lifecycle-v1-screening", "target": "screening"},
+    {"key": "development-lifecycle-v1-quoting", "target": "quoting"},
+    {"key": "development-lifecycle-v1-negotiating", "target": "negotiating"},
+    {"key": "development-lifecycle-v1-signed", "target": "signed"},
+    {"key": "development-lifecycle-v1-closing", "target": "closing"},
+    {"key": "development-lifecycle-v1-closed", "target": "closed"},
+    {"key": "development-lifecycle-v1-servicing", "target": "servicing"},
+    {"key": "development-lifecycle-v1-exited", "target": "exited"}
+  ]
+}
