@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CreateScreeningAssessmentPayload } from '@/types/screening';
-import { calculateDebtMetrics, toDecimalString, toPositiveInteger } from './calculations';
+import {
+  calculateDebtMetrics,
+  screeningIsComplete,
+  toDecimalString,
+  toPositiveInteger,
+} from './calculations';
 
 const COMPLETE_INPUTS: CreateScreeningAssessmentPayload = {
   deal: 'deal-1',
@@ -55,6 +60,18 @@ describe('debt screening calculations', () => {
     expect(metrics.ltc).toBeNull();
     expect(metrics.dscr).toBeNull();
     expect(metrics.quick_score).toBe(0);
+  });
+
+  it('does not mark zero economic denominators as complete', () => {
+    expect(screeningIsComplete(COMPLETE_INPUTS)).toBe(true);
+    expect(screeningIsComplete({ ...COMPLETE_INPUTS, loan_amount: '0' })).toBe(false);
+    expect(screeningIsComplete({
+      ...COMPLETE_INPUTS,
+      as_is_value: '0',
+      stabilized_value: null,
+    })).toBe(false);
+    expect(screeningIsComplete({ ...COMPLETE_INPUTS, project_cost: '0' })).toBe(false);
+    expect(screeningIsComplete({ ...COMPLETE_INPUTS, annual_debt_service: '0' })).toBe(false);
   });
 
   it('canonicalizes user formatting before values cross the API boundary', () => {

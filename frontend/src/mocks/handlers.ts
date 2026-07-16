@@ -1688,8 +1688,16 @@ function screeningMissingFields(input: CreateScreeningAssessmentPayload): string
     'exit_cap_rate',
   ];
   const missing = required.filter((field) => input[field] === null || input[field] === '');
-  if (!input.as_is_value && !input.stabilized_value) missing.push('as_is_value');
-  return missing;
+  for (const field of ['loan_amount', 'project_cost', 'annual_debt_service'] as const) {
+    if (input[field] !== null && Number(input[field]) <= 0) missing.push(field);
+  }
+  const valuationFields = ['as_is_value', 'stabilized_value'] as const;
+  const providedValuations = valuationFields.filter((field) => input[field] !== null && input[field] !== '');
+  if (!providedValuations.length) missing.push('as_is_value');
+  for (const field of providedValuations) {
+    if (Number(input[field]) <= 0) missing.push(field);
+  }
+  return Array.from(new Set(missing));
 }
 
 function allowedSyndicationTransitions(deal: Deal): SyndicationStatus[] {

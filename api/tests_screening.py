@@ -209,6 +209,28 @@ class ScreeningServiceTests(TestCase):
         draft.refresh_from_db()
         self.assertEqual(draft.status, ScreeningAssessment.Status.DRAFT)
 
+    def test_advance_rejects_zero_economic_denominators(self):
+        draft = self._create_draft(
+            loan_amount=Decimal('0'),
+            as_is_value=Decimal('0'),
+            project_cost=Decimal('0'),
+            annual_debt_service=Decimal('0'),
+        )
+
+        with self.assertRaises(ValidationError) as caught:
+            finalize_assessment(
+                assessment=draft,
+                reviewer=self.analyst,
+                decision=ScreeningAssessment.Decision.ADVANCE,
+            )
+
+        self.assertEqual(
+            set(caught.exception.message_dict),
+            {'loan_amount', 'as_is_value', 'project_cost', 'annual_debt_service'},
+        )
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, ScreeningAssessment.Status.DRAFT)
+
     def test_finalize_transaction_leaves_draft_unchanged_when_save_fails(self):
         draft = self._create_draft()
 

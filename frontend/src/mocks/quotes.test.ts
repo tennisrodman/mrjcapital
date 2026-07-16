@@ -175,6 +175,34 @@ describe('quote mock API', () => {
     expect(listed.results[0].sent_at).toBeNull();
   });
 
+  it('rejects zero-dollar and incomplete amortizing quotes', async () => {
+    const deal = await createQuotingDeal('Quote Invalid Economics');
+    const created = await mockApiRequest<Quote>('api/quotes/', {
+      method: 'POST',
+      body: JSON.stringify({
+        deal: deal.id,
+        seed_from_screening: false,
+        loan_amount: '0',
+        rate_type: 'fixed',
+        interest_rate: '8.2500',
+        term_months: 24,
+        amortization_type: 'full_amort',
+        recourse_type: 'limited',
+        expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      }),
+    });
+
+    expect(created.is_send_ready).toBe(false);
+    expect(created.missing_send_fields).toEqual(expect.arrayContaining([
+      'loan_amount',
+      'amortization_months',
+    ]));
+    await expect(mockApiRequest(`api/quotes/${created.id}/send/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })).rejects.toMatchObject({ status: 400 });
+  });
+
   it('locks executed quote evidence subcategory metadata', async () => {
     const deal = await createQuotingDeal('Quote Evidence Metadata Lock');
     const created = await mockApiRequest<Quote>('api/quotes/', {

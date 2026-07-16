@@ -99,6 +99,46 @@ describe('screening mock API', () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it('does not treat zero economic denominators as Advance-ready', async () => {
+    const deal = await mockApiRequest<{ id: string }>('api/deals/', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Zero Economics Screening',
+        investment_type: 'whole_loan_bridge',
+        requested_amount: '1000000.00',
+        source_channel: 'direct',
+      }),
+    });
+    await mockApiRequest(`api/deals/${deal.id}/transition/`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status: 'screening', reason: 'Begin review.' }),
+    });
+    const created = await mockApiRequest<ScreeningAssessment>('api/screening-assessments/', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        deal: deal.id,
+        loan_amount: '0',
+        as_is_value: '0',
+        stabilized_value: null,
+        project_cost: '0',
+        annual_debt_service: '0',
+      }),
+    });
+
+    expect(created.is_complete).toBe(false);
+    expect(created.missing_fields).toEqual(expect.arrayContaining([
+      'loan_amount',
+      'as_is_value',
+      'project_cost',
+      'annual_debt_service',
+    ]));
+    await expect(mockApiRequest(`api/screening-assessments/${created.id}/finalize/`, {
+      method: 'POST',
+      body: JSON.stringify({ decision: 'advance' }),
+    })).rejects.toMatchObject({ status: 400 });
+  });
+
   it('keeps version history while exposing only the latest assessment as current', async () => {
     const next = await mockApiRequest<ScreeningAssessment>('api/screening-assessments/', {
       method: 'POST',

@@ -203,12 +203,9 @@ def finalize_assessment(*, assessment, reviewer, decision, notes=None):
         _require_current_draft(locked_assessment)
         _require_screening_stage(locked_assessment.deal)
         if decision == ScreeningAssessment.Decision.ADVANCE:
-            missing_fields = screening_missing_fields(locked_assessment)
-            if missing_fields:
-                raise ValidationError({
-                    field_name: 'Required before an assessment can advance.'
-                    for field_name in missing_fields
-                })
+            advance_errors = screening_advance_errors(locked_assessment)
+            if advance_errors:
+                raise ValidationError(advance_errors)
         locked_assessment.decision = decision
         if notes is not None:
             locked_assessment.notes = notes
@@ -237,15 +234,35 @@ def get_current_assessment(deal):
 
 
 def screening_missing_fields(assessment):
-    """Return concrete missing inputs required for an Advance decision."""
-    missing = [
-        field_name
+    """Return fields that are absent or unusable for an Advance decision."""
+    return list(screening_advance_errors(assessment))
+
+
+def screening_advance_errors(assessment):
+    errors = {
+        field_name: 'Required before an assessment can advance.'
         for field_name in SCREENING_REQUIRED_FOR_ADVANCE
         if getattr(assessment, field_name, None) in (None, '')
+    }
+    for field_name in ('loan_amount', 'project_cost', 'annual_debt_service'):
+        value = getattr(assessment, field_name, None)
+        if value not in (None, '') and value <= 0:
+            errors[field_name] = 'Must be greater than zero before an assessment can advance.'
+
+    valuation_fields = ('as_is_value', 'stabilized_value')
+    provided_valuations = [
+        getattr(assessment, field_name, None)
+        for field_name in valuation_fields
+        if getattr(assessment, field_name, None) not in (None, '')
     ]
-    if assessment.as_is_value in (None, '') and assessment.stabilized_value in (None, ''):
-        missing.append('as_is_value')
-    return missing
+    if not provided_valuations:
+        errors['as_is_value'] = 'Provide an as-is or stabilized value before advancing.'
+    else:
+        for field_name in valuation_fields:
+            value = getattr(assessment, field_name, None)
+            if value not in (None, '') and value <= 0:
+                errors[field_name] = 'Must be greater than zero before an assessment can advance.'
+    return errors
 
 
 def screening_is_complete(assessment):

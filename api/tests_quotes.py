@@ -139,6 +139,29 @@ class QuoteServiceTests(APITestCase):
         quote.refresh_from_db()
         self.assertEqual(quote.status, Quote.Status.DRAFT)
 
+    def test_zero_loan_and_missing_amortization_period_cannot_be_sent(self):
+        quote = create_next_quote(deal=self.deal, created_by=self.user, seed_from_screening=False)
+        quote = update_draft_quote(
+            quote,
+            loan_amount=Decimal('0'),
+            rate_type=Quote.RateType.FIXED,
+            interest_rate=Decimal('8.0000'),
+            term_months=24,
+            amortization_type=Quote.AmortizationType.FULL_AMORT,
+            recourse_type=Quote.RecourseType.LIMITED,
+            expires_at=timezone.now() + timedelta(days=30),
+        )
+
+        with self.assertRaises(ValidationError) as caught:
+            send_quote(quote)
+
+        self.assertEqual(
+            set(caught.exception.message_dict),
+            {'loan_amount', 'amortization_months'},
+        )
+        quote.refresh_from_db()
+        self.assertEqual(quote.status, Quote.Status.DRAFT)
+
     def test_send_counter_execute_and_attachment_rules(self):
         quote = create_next_quote(deal=self.deal, created_by=self.user)
         sent = send_quote(make_sendable(quote))

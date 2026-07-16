@@ -173,13 +173,15 @@ export function assessmentToFormValues(
 }
 
 export function screeningIsComplete(payload: CreateScreeningAssessmentPayload): boolean {
+  const isPositive = (value: string | number | null | undefined) =>
+    value !== null && value !== undefined && value !== '' && Number(value) > 0;
   return Boolean(
-    payload.loan_amount
-      && (payload.as_is_value || payload.stabilized_value)
-      && payload.project_cost
+    isPositive(payload.loan_amount)
+      && (isPositive(payload.as_is_value) || isPositive(payload.stabilized_value))
+      && isPositive(payload.project_cost)
       && payload.noi
       && payload.stabilized_noi
-      && payload.annual_debt_service
+      && isPositive(payload.annual_debt_service)
       && payload.occupancy
       && payload.proposed_rate
       && payload.proposed_term_months

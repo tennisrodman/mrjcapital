@@ -450,12 +450,19 @@ function refreshSendReadiness(quote: Quote): void {
     'expires_at',
   ];
   const missing = required.filter((field) => quote[field] === null || quote[field] === '');
+  if (quote.loan_amount !== null && Number(quote.loan_amount) <= 0) missing.push('loan_amount');
   if (quote.rate_type === 'fixed' && quote.interest_rate === null) missing.push('interest_rate');
   if (quote.rate_type === 'floating' || quote.rate_type === 'hybrid') {
     if (!quote.index_name.trim()) missing.push('index_name');
     if (quote.spread === null) missing.push('spread');
   }
-  quote.missing_send_fields = missing;
+  if (
+    (quote.amortization_type === 'partial_amort' || quote.amortization_type === 'full_amort')
+    && quote.amortization_months === null
+  ) {
+    missing.push('amortization_months');
+  }
+  quote.missing_send_fields = Array.from(new Set(missing));
   quote.is_send_ready = missing.length === 0;
 }
 

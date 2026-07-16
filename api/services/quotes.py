@@ -131,16 +131,34 @@ def get_current_quote(deal):
 
 def quote_missing_send_fields(quote):
     """Return fields that make a debt quote nonsensical or unusable to send."""
+    return list(quote_send_errors(quote))
+
+
+def quote_send_errors(quote):
     required = ('loan_amount', 'rate_type', 'term_months', 'amortization_type', 'recourse_type', 'expires_at')
-    missing = [field for field in required if getattr(quote, field, None) in (None, '')]
+    errors = {
+        field: 'Required before a quote can be sent.'
+        for field in required
+        if getattr(quote, field, None) in (None, '')
+    }
+    if quote.loan_amount not in (None, '') and quote.loan_amount <= 0:
+        errors['loan_amount'] = 'Loan amount must be greater than zero before a quote can be sent.'
     if quote.rate_type == Quote.RateType.FIXED and quote.interest_rate in (None, ''):
-        missing.append('interest_rate')
+        errors['interest_rate'] = 'Required before a quote can be sent.'
     if quote.rate_type in {Quote.RateType.FLOATING, Quote.RateType.HYBRID}:
         if not quote.index_name.strip():
-            missing.append('index_name')
+            errors['index_name'] = 'Required before a quote can be sent.'
         if quote.spread in (None, ''):
-            missing.append('spread')
-    return missing
+            errors['spread'] = 'Required before a quote can be sent.'
+    if (
+        quote.amortization_type in {
+            Quote.AmortizationType.PARTIAL_AMORT,
+            Quote.AmortizationType.FULL_AMORT,
+        }
+        and quote.amortization_months in (None, '')
+    ):
+        errors['amortization_months'] = 'Required for an amortizing quote.'
+    return errors
 
 
 def quote_is_send_ready(quote):
@@ -326,12 +344,9 @@ def send_quote(quote, *, expires_at=None, performed_by=None):
             raise ValidationError({'status': 'Only draft quotes can be sent.'})
         if expires_at is not None:
             locked.expires_at = expires_at
-        missing_fields = quote_missing_send_fields(locked)
-        if missing_fields:
-            raise ValidationError({
-                field_name: 'Required before a quote can be sent.'
-                for field_name in missing_fields
-            })
+        send_errors = quote_send_errors(locked)
+        if send_errors:
+            raise ValidationError(send_errors)
         if locked.expires_at <= timezone.now():
             raise ValidationError({'expires_at': 'Expiration must be in the future.'})
         old_status = locked.status
