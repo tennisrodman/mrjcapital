@@ -1,7 +1,8 @@
-"""Document action policy shared by serializers, viewsets, and API clients."""
+"""Document policies and audit events shared by API and background workflows."""
 
-from api.models import Quote
+from api.models import ActivityActionType, Quote
 from api.policies import is_staff_user
+from api.services.audit import create_activity_log
 
 
 CLOSING_LINKED_DELETE_REASON = (
@@ -14,6 +15,53 @@ EXECUTED_DOCUMENT_DELETE_REASON = 'Only staff may delete executed documents.'
 EXECUTED_METADATA_EDIT_REASON = 'Executed document metadata cannot be changed.'
 
 LOCKED_METADATA_FIELDS = frozenset({'subcategory', 'expiry_date', 'notes', 'details'})
+
+
+def _document_activity_metadata(document) -> dict[str, object]:
+    return {
+        'document_id': str(document.pk),
+        'category': document.category,
+        'version': document.version,
+        'file_size_bytes': document.file_size_bytes,
+        'storage_key': document.file_url,
+    }
+
+
+def log_document_upload_started(document, *, performed_by=None, ip_address=None):
+    """Record creation of a pending upload before any blob transfer occurs."""
+    return create_activity_log(
+        deal=document.deal,
+        action_type=ActivityActionType.DOCUMENT_UPLOAD_STARTED,
+        performed_by=performed_by,
+        ip_address=ip_address,
+        description=f'Document upload started: {document.document_name} v{document.version}',
+        metadata=_document_activity_metadata(document),
+    )
+
+
+def log_document_upload_completed(document, *, performed_by=None, ip_address=None):
+    """Record the point at which a verified upload becomes visible and usable."""
+    return create_activity_log(
+        deal=document.deal,
+        action_type=ActivityActionType.DOCUMENT_UPLOAD,
+        performed_by=performed_by,
+        ip_address=ip_address,
+        description=f'Document uploaded: {document.document_name} v{document.version}',
+        metadata=_document_activity_metadata(document),
+    )
+
+
+def log_document_upload_abandoned(document):
+    """Record system cleanup of an upload that never reached completion."""
+    metadata = _document_activity_metadata(document)
+    metadata['uploaded_by_id'] = document.uploaded_by_id
+    return create_activity_log(
+        deal=document.deal,
+        action_type=ActivityActionType.DOCUMENT_UPLOAD_ABANDONED,
+        description=f'Pending document upload expired: {document.document_name} v{document.version}',
+        reason='Upload did not complete before the pending-upload retention deadline.',
+        metadata=metadata,
+    )
 
 
 def _prefetched_related(document, relation_name):

@@ -153,7 +153,9 @@ class DocumentCategory(models.TextChoices):
 class ActivityActionType(models.TextChoices):
     STATUS_CHANGE = 'status_change', 'Status change'
     FIELD_UPDATED = 'field_updated', 'Field updated'
+    DOCUMENT_UPLOAD_STARTED = 'document_upload_started', 'Document upload started'
     DOCUMENT_UPLOAD = 'document_upload', 'Document upload'
+    DOCUMENT_UPLOAD_ABANDONED = 'document_upload_abandoned', 'Document upload abandoned'
     NOTE_ADDED = 'note_added', 'Note added'
     SENSITIVE_FIELD_READ = 'sensitive_field_read', 'Sensitive field read'
     CLOSING_GENERATED = 'closing_generated', 'Closing checklist generated'

@@ -1368,6 +1368,25 @@ function createUploadIntent(body: Record<string, unknown>): unknown {
     delete_block_reason: '',
   };
   documents.push(document);
+  activity.unshift({
+    id: newId('act'),
+    deal: dealId,
+    action_type: 'document_upload_started',
+    performed_by: MOCK_USER_ID,
+    performed_at: nowIso(),
+    ip_address: null,
+    description: `Document upload started: ${document.document_name} v${document.version}`,
+    old_value: '',
+    new_value: '',
+    reason: '',
+    metadata: {
+      document_id: document.id,
+      category: document.category,
+      version: document.version,
+      file_size_bytes: document.file_size_bytes,
+      storage_key: document.file_url,
+    },
+  });
   return {
     document: withDocumentCapabilities(document),
     upload_url: `/api/documents/${id}/blob/`,
@@ -1385,6 +1404,25 @@ function completeUpload(documentId: string): DealDocument {
     });
   }
   document.storage_status = 'ready';
+  activity.unshift({
+    id: newId('act'),
+    deal: document.deal,
+    action_type: 'document_upload',
+    performed_by: MOCK_USER_ID,
+    performed_at: nowIso(),
+    ip_address: null,
+    description: `Document uploaded: ${document.document_name} v${document.version}`,
+    old_value: '',
+    new_value: '',
+    reason: '',
+    metadata: {
+      document_id: document.id,
+      category: document.category,
+      version: document.version,
+      file_size_bytes: document.file_size_bytes,
+      storage_key: document.file_url,
+    },
+  });
   return withDocumentCapabilities(document);
 }
 

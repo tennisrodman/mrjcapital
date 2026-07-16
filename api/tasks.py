@@ -18,6 +18,7 @@ def cleanup_stale_pending_documents():
     from django.db import transaction
 
     from api.models import Deal, Document, DocumentStorageStatus
+    from api.services.documents import log_document_upload_abandoned
     from api.services.storage import get_document_storage
 
     logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ def cleanup_stale_pending_documents():
                 if locked.uploaded_date >= cutoff:
                     continue
                 storage_key = locked.file_url
+                log_document_upload_abandoned(locked)
                 locked.delete()
             if storage_key:
                 try:

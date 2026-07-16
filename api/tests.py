@@ -1397,6 +1397,12 @@ class DealSpineApiTests(APITestCase):
         first = self._upload_intent(deal, 'Offering memo', 'offering_memo')
         self.assertEqual(first.status_code, status.HTTP_201_CREATED)
         self.assertEqual(first.data['document']['version'], 1)
+        started = ActivityLog.objects.get(
+            action_type=ActivityActionType.DOCUMENT_UPLOAD_STARTED,
+            metadata__document_id=first.data['document']['id'],
+        )
+        self.assertIn('Document upload started', started.description)
+        self.assertEqual(started.metadata['version'], 1)
 
         second = self._upload_intent(deal, 'Offering memo', 'offering_memo')
         self.assertEqual(second.status_code, status.HTTP_201_CREATED)
@@ -1405,6 +1411,16 @@ class DealSpineApiTests(APITestCase):
         # A different (category, name) starts its own version sequence.
         other = self._upload_intent(deal, 'Loan agreement', 'legal')
         self.assertEqual(other.data['document']['version'], 1)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_rolls_back_if_audit_log_write_fails(self):
+        deal = self.create_deal()
+
+        with patch('api.services.audit.ActivityLog.objects.create', side_effect=IntegrityError('audit failed')):
+            with self.assertRaises(IntegrityError):
+                self._upload_intent(deal, 'Untracked document', 'legal')
+
+        self.assertFalse(Document.objects.filter(document_name='Untracked document').exists())
 
     def test_document_identity_fields_are_immutable_on_update(self):
         deal = self.create_deal()
@@ -1458,7 +1474,7 @@ class DealSpineApiTests(APITestCase):
             content_type='application/pdf',
         )
 
-        with patch('api.viewsets.ActivityLog.objects.create', side_effect=IntegrityError('audit failed')):
+        with patch('api.services.audit.ActivityLog.objects.create', side_effect=IntegrityError('audit failed')):
             with self.assertRaises(IntegrityError):
                 self.client.post(f'/api/documents/{doc_id}/complete/', {}, format='json')
 
@@ -1549,6 +1565,13 @@ class DealSpineApiTests(APITestCase):
             metadata__document_id=document['id'],
         )
         self.assertEqual(log.count(), 1)
+        self.assertEqual(
+            ActivityLog.objects.filter(
+                action_type=ActivityActionType.DOCUMENT_UPLOAD_STARTED,
+                metadata__document_id=document['id'],
+            ).count(),
+            1,
+        )
 
         listed = self.client.get(f'/api/documents/?deal={deal.pk}')
         self.assertEqual(listed.status_code, status.HTTP_200_OK)
@@ -1742,6 +1765,15 @@ class DealSpineApiTests(APITestCase):
         self.assertTrue(Document.objects.filter(pk=fresh.pk).exists())
         self.assertIsNone(storage.head_object(stale.file_url))
         self.assertIsNotNone(storage.head_object(fresh.file_url))
+        abandoned = ActivityLog.objects.get(
+            action_type=ActivityActionType.DOCUMENT_UPLOAD_ABANDONED,
+            metadata__document_id=str(stale.pk),
+        )
+        self.assertIn('expired', abandoned.description)
+        self.assertIsNone(abandoned.performed_by)
+
+    def test_document_default_order_is_stable_for_pagination(self):
+        self.assertEqual(Document._meta.ordering, ['deal', 'category', '-version', 'id'])
 
     def test_activity_logs_are_read_only_via_api(self):
         ActivityLog.objects.create(

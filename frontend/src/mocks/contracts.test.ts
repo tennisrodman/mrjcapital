@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import contractsJson from '@shared/workflow_contracts.json';
-import type { Deal, DocumentUploadIntentResponse } from '@/types/deal';
+import type { ActivityLogEntry, Deal, DocumentUploadIntentResponse, Paginated } from '@/types/deal';
 import { mockApiRequest } from './handlers';
 import { PIPELINE_TRANSITIONS } from './pipeline';
 import { DEMO_SYNDICATION_TRANSITIONS } from './workflowContracts';
@@ -119,10 +119,28 @@ describe('shared Demo/Live workflow contracts', () => {
         }),
       },
     );
+    const startedActivity = await mockApiRequest<Paginated<ActivityLogEntry>>(
+      `api/activity-logs/?deal=${deal.id}`,
+    );
+    expect(startedActivity.results).toContainEqual(
+      expect.objectContaining({
+        action_type: 'document_upload_started',
+        metadata: expect.objectContaining({ document_id: intent.document.id }),
+      }),
+    );
     await mockApiRequest(`api/documents/${intent.document.id}/complete/`, {
       method: 'POST',
       body: JSON.stringify({}),
     });
+    const completedActivity = await mockApiRequest<Paginated<ActivityLogEntry>>(
+      `api/activity-logs/?deal=${deal.id}`,
+    );
+    expect(completedActivity.results).toContainEqual(
+      expect.objectContaining({
+        action_type: 'document_upload',
+        metadata: expect.objectContaining({ document_id: intent.document.id }),
+      }),
+    );
     await expect(
       mockApiRequest(`api/documents/${intent.document.id}/complete/`, {
         method: 'POST',

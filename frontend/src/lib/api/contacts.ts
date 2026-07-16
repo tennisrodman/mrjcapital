@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiRequest } from '@/config/api';
-import type { Paginated } from '@/types/deal';
+import { fetchAllPages } from '@/lib/api/pagination';
 import type {
   Contact,
   CreateAndLinkContactPayload,
@@ -33,10 +33,10 @@ function writeLinkToCache(
 }
 
 export async function listDealContacts(dealId: string): Promise<DealContact[]> {
-  const page = await apiRequest<Paginated<DealContact>>(
+  const links = await fetchAllPages<DealContact>(
     `api/deal-contacts/?deal=${encodeURIComponent(dealId)}`,
   );
-  return ordered(page.results);
+  return ordered(links);
 }
 
 export function createContact(payload: CreateContactPayload): Promise<Contact> {

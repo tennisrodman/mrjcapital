@@ -18,7 +18,6 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from api.models import (
-    ActivityActionType,
     ActivityLog,
     Broker,
     Deal,
@@ -54,6 +53,7 @@ from api.serializers import (
 )
 from api.services.money import format_money_aggregate
 from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
+from api.services.documents import log_document_upload_completed, log_document_upload_started
 from api.services.deal_properties import (
     capture_deal_property_snapshot,
     log_deal_property_change,
@@ -649,6 +649,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 expiry_date=data.get('expiry_date'),
                 visibility_roles=visibility_roles,
             )
+            log_document_upload_started(
+                document,
+                performed_by=uploaded_by,
+                ip_address=_client_ip(request),
+            )
         return self._upload_intent_response(request, document)
 
     def _upload_intent_response(self, request, document):
@@ -713,7 +718,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
             if declared_checksum and not locked.checksum_sha256:
                 locked.checksum_sha256 = declared_checksum
             locked.save(update_fields=['storage_status', 'checksum_sha256'])
-            _log_document_upload(request, locked)
+            log_document_upload_completed(
+                locked,
+                performed_by=request.user,
+                ip_address=_client_ip(request),
+            )
             document = locked
             _ = deal
 
@@ -961,23 +970,6 @@ def _next_document_version(deal, category, document_name):
             document_name=document_name,
         ).aggregate(max_version=Max('version'))['max_version'] or 0
     ) + 1
-
-
-def _log_document_upload(request, document):
-    performed_by = request.user if getattr(request.user, 'is_authenticated', False) else document.uploaded_by
-    ActivityLog.objects.create(
-        deal=document.deal,
-        action_type=ActivityActionType.DOCUMENT_UPLOAD,
-        performed_by=performed_by,
-        ip_address=_client_ip(request),
-        description=f'Document uploaded: {document.document_name} v{document.version}',
-        metadata={
-            'document_id': str(document.pk),
-            'category': document.category,
-            'file_size_bytes': document.file_size_bytes,
-            'storage_key': document.file_url,
-        },
-    )
 
 
 def _build_upload_target(request, document) -> PresignedUpload:

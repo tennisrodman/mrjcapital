@@ -46,7 +46,9 @@ class Document(models.Model):
     details = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        ordering = ['deal', 'category', '-version']
+        # `id` makes the default order deterministic across paginated queries,
+        # including documents with the same category and version.
+        ordering = ['deal', 'category', '-version', 'id']
         indexes = [
             models.Index(fields=['deal', 'category']),
             models.Index(fields=['deal', 'storage_status'], name='api_documen_deal_id_stor_idx'),

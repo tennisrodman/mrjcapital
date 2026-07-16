@@ -53,11 +53,25 @@ const payload: CreateAndLinkContactPayload = {
 describe('contact API contract', () => {
   beforeEach(() => api.request.mockReset());
 
-  it('lists a deal-filtered, paginated contact-link collection', async () => {
-    api.request.mockResolvedValue({ count: 1, next: null, previous: null, results: [link] });
+  it('loads every page of a deal-filtered contact-link collection', async () => {
+    const secondLink = {
+      ...link,
+      id: 'deal-contact-2',
+      role: 'broker_contact' as const,
+    };
+    api.request
+      .mockResolvedValueOnce({ count: 51, next: '?page=2', previous: null, results: [link] })
+      .mockResolvedValueOnce({ count: 51, next: null, previous: '?page=1', results: [secondLink] });
 
-    await expect(listDealContacts('deal / 1')).resolves.toEqual([link]);
-    expect(api.request).toHaveBeenCalledWith('api/deal-contacts/?deal=deal%20%2F%201');
+    await expect(listDealContacts('deal / 1')).resolves.toEqual([secondLink, link]);
+    expect(api.request).toHaveBeenNthCalledWith(
+      1,
+      'api/deal-contacts/?deal=deal%20%2F%201&page=1',
+    );
+    expect(api.request).toHaveBeenNthCalledWith(
+      2,
+      'api/deal-contacts/?deal=deal%20%2F%201&page=2',
+    );
   });
 
   it('creates the person before creating its deal-contact link', async () => {

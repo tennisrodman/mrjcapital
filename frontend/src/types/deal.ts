@@ -105,7 +105,9 @@ export type DocumentCategory =
 export type ActivityActionType =
   | 'status_change'
   | 'field_updated'
+  | 'document_upload_started'
   | 'document_upload'
+  | 'document_upload_abandoned'
   | 'note_added'
   | 'sensitive_field_read';
 
