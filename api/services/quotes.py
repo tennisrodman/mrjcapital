@@ -207,7 +207,9 @@ def quote_has_execution_evidence(quote) -> bool:
 
 def document_is_executed_quote_evidence(document) -> bool:
     """True when a document is attached to an executed quote (immutable evidence)."""
-    return document.quotes.filter(status=Quote.Status.EXECUTED).exists()
+    from api.services.documents import document_is_executed_quote_evidence as policy_check
+
+    return policy_check(document)
 
 
 def _authenticated_actor(user):

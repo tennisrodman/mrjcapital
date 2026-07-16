@@ -224,6 +224,45 @@ class DealSpineApiTests(APITestCase):
             visibility_roles=visibility_roles or ['internal'],
         )
 
+    def test_document_capabilities_match_execution_policy_for_analyst_and_staff(self):
+        deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Execution evidence', 'legal')
+
+        ordinary = self.client.get(f'/api/documents/{document.pk}/')
+        self.assertEqual(ordinary.status_code, status.HTTP_200_OK)
+        self.assertTrue(ordinary.data['can_edit'])
+        self.assertTrue(ordinary.data['can_delete'])
+        self.assertEqual(ordinary.data['edit_block_reason'], '')
+        self.assertEqual(ordinary.data['delete_block_reason'], '')
+
+        document.is_executed = True
+        document.save(update_fields=['is_executed'])
+        protected = self.client.get(f'/api/documents/{document.pk}/')
+        self.assertFalse(protected.data['can_edit'])
+        self.assertFalse(protected.data['can_delete'])
+        self.assertEqual(
+            protected.data['edit_block_reason'],
+            'Executed document metadata cannot be changed.',
+        )
+        self.assertEqual(
+            protected.data['delete_block_reason'],
+            'Only staff may delete executed documents.',
+        )
+
+        metadata_patch = self.client.patch(
+            f'/api/documents/{document.pk}/',
+            {'notes': 'Attempt to rewrite executed evidence'},
+            format='json',
+        )
+        self.assertEqual(metadata_patch.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('notes', metadata_patch.data)
+
+        self.client.force_authenticate(self.staff_user)
+        staff_view = self.client.get(f'/api/documents/{document.pk}/')
+        self.assertFalse(staff_view.data['can_edit'])
+        self.assertTrue(staff_view.data['can_delete'])
+        self.assertEqual(staff_view.data['delete_block_reason'], '')
+
     def test_non_staff_deal_access_is_scoped_to_assigned_analyst(self):
         own_deal = self.create_deal()
         other_deal = Deal.objects.create(

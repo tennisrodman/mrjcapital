@@ -213,6 +213,11 @@ export const DOCUMENTS: DealDocument[] = demoSeed.documents.map((row) => {
     notes: optional.notes ?? '',
     visibility_roles: ['internal'],
     details: {},
+    can_edit: !row.is_executed,
+    edit_block_reason: row.is_executed ? 'Executed document metadata cannot be changed.' : '',
+    can_delete: !row.is_executed || getDemoIsStaff(),
+    delete_block_reason:
+      row.is_executed && !getDemoIsStaff() ? 'Only staff may delete executed documents.' : '',
   };
 });
 

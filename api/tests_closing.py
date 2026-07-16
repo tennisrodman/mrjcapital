@@ -396,6 +396,13 @@ class ClosingServiceApiTests(APITestCase):
 
         delete_doc = self.client.delete(f'/api/documents/{doc.pk}/')
         self.assertEqual(delete_doc.status_code, status.HTTP_400_BAD_REQUEST)
+        detail = self.client.get(f'/api/documents/{doc.pk}/')
+        self.assertTrue(detail.data['can_edit'])
+        self.assertFalse(detail.data['can_delete'])
+        self.assertEqual(
+            detail.data['delete_block_reason'],
+            'Document is linked to a closing checklist item and cannot be deleted.',
+        )
 
     def test_put_is_method_not_allowed(self):
         generate_closing_checklist(self.deal, self.template, performed_by=self.analyst)

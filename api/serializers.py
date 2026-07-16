@@ -716,6 +716,10 @@ class SyndicationTransitionSerializer(serializers.Serializer):
 class DocumentSerializer(serializers.ModelSerializer):
     uploaded_by = serializers.PrimaryKeyRelatedField(read_only=True)
     uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+    can_edit = serializers.SerializerMethodField()
+    edit_block_reason = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
+    delete_block_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -741,6 +745,10 @@ class DocumentSerializer(serializers.ModelSerializer):
             'notes',
             'visibility_roles',
             'details',
+            'can_edit',
+            'edit_block_reason',
+            'can_delete',
+            'delete_block_reason',
         ]
         # file_type, content_type, and file_size_bytes are server-controlled
         # storage facts: keeping them read-only stops a client from PATCHing a
@@ -780,18 +788,36 @@ class DocumentSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {field_name: f'{field_name} cannot be changed after creation.'}
                     )
-            from api.services.quotes import document_is_executed_quote_evidence
+            from api.services.documents import locked_metadata_errors
 
-            evidence_locked = (
-                self.instance.is_executed
-                or document_is_executed_quote_evidence(self.instance)
-            )
-            if evidence_locked and 'subcategory' in attrs:
-                if attrs['subcategory'] != self.instance.subcategory:
-                    raise serializers.ValidationError({
-                        'subcategory': 'Executed document metadata cannot be changed.',
-                    })
+            errors = locked_metadata_errors(self.instance, attrs)
+            if errors:
+                raise serializers.ValidationError(errors)
         return attrs
+
+    def _action_capabilities(self, obj):
+        from api.services.documents import document_action_capabilities
+
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        cache = getattr(obj, '_document_capabilities_cache', {})
+        cache_key = bool(user and getattr(user, 'is_staff', False))
+        if cache_key not in cache:
+            cache[cache_key] = document_action_capabilities(obj, user)
+            obj._document_capabilities_cache = cache
+        return cache[cache_key]
+
+    def get_can_edit(self, obj):
+        return self._action_capabilities(obj)['can_edit']
+
+    def get_edit_block_reason(self, obj):
+        return self._action_capabilities(obj)['edit_block_reason']
+
+    def get_can_delete(self, obj):
+        return self._action_capabilities(obj)['can_delete']
+
+    def get_delete_block_reason(self, obj):
+        return self._action_capabilities(obj)['delete_block_reason']
 
     def validate_visibility_roles(self, value):
         return _validate_visibility_roles(value)

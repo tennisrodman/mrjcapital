@@ -756,7 +756,6 @@ def set_cp_documents(item, document_ids, *, performed_by, user):
 
 
 def document_is_closing_linked(document) -> bool:
-    return (
-        document.dd_checklist_items.exists()
-        or document.condition_precedents.exists()
-    )
+    from api.services.documents import document_is_closing_linked as policy_check
+
+    return policy_check(document)

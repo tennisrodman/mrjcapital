@@ -250,6 +250,10 @@ export interface DealDocument {
   notes: string;
   visibility_roles: string[];
   details: Record<string, unknown>;
+  can_edit: boolean;
+  edit_block_reason: string;
+  can_delete: boolean;
+  delete_block_reason: string;
 }
 
 export interface DocumentUploadIntentResponse {

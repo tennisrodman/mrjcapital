@@ -446,8 +446,15 @@ class QuoteIntegrityTests(APITestCase):
         response = self.client.delete(f'/api/documents/{doc.pk}/')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertTrue(Document.objects.filter(pk=doc.pk).exists())
+        detail = self.client.get(f'/api/documents/{doc.pk}/')
+        self.assertFalse(detail.data['can_edit'])
+        self.assertFalse(detail.data['can_delete'])
+        self.assertEqual(
+            detail.data['delete_block_reason'],
+            'Document is attached to an executed quote and cannot be deleted.',
+        )
 
-    def test_executed_attachment_subcategory_cannot_be_patched(self):
+    def test_executed_attachment_metadata_cannot_be_patched(self):
         quote = create_next_quote(deal=self.deal, created_by=self.analyst, seed_from_screening=False)
         sent = send_quote(make_sendable(quote), performed_by=self.analyst)
         doc = self._ready_term_sheet()
@@ -455,7 +462,11 @@ class QuoteIntegrityTests(APITestCase):
         execute_quote(sent, performed_by=self.analyst)
         response = self.client.patch(
             f'/api/documents/{doc.pk}/',
-            {'subcategory': 'loi'},
+            {
+                'subcategory': 'loi',
+                'notes': 'Rewritten evidence notes',
+                'details': {'replaced': True},
+            },
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

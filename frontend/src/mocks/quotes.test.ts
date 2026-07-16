@@ -203,7 +203,7 @@ describe('quote mock API', () => {
     })).rejects.toMatchObject({ status: 400 });
   });
 
-  it('locks executed quote evidence subcategory metadata', async () => {
+  it('locks executed quote evidence metadata and reports matching capabilities', async () => {
     const deal = await createQuotingDeal('Quote Evidence Metadata Lock');
     const created = await mockApiRequest<Quote>('api/quotes/', {
       method: 'POST',
@@ -254,11 +254,21 @@ describe('quote mock API', () => {
     await expect(
       mockApiRequest(`api/documents/${document.id}/`, {
         method: 'PATCH',
-        body: JSON.stringify({ subcategory: 'loi' }),
+        body: JSON.stringify({ notes: 'Attempt to rewrite evidence' }),
       }),
     ).rejects.toMatchObject({
       status: 400,
-      data: { subcategory: ['Executed document metadata cannot be changed.'] },
+      data: { notes: ['Executed document metadata cannot be changed.'] },
+    });
+
+    const protectedDocument = await mockApiRequest<DealDocument>(
+      `api/documents/${document.id}/`,
+    );
+    expect(protectedDocument).toMatchObject({
+      can_edit: false,
+      edit_block_reason: 'Executed document metadata cannot be changed.',
+      can_delete: false,
+      delete_block_reason: 'Document is attached to an executed quote and cannot be deleted.',
     });
   });
 });

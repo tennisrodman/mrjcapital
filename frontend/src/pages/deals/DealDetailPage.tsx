@@ -337,7 +337,7 @@ function PropertiesPanel({ deal }: { deal: Deal }) {
   );
 }
 
-function DocumentsPanel({
+export function DocumentsPanel({
   dealId,
   documents,
   isLoading,
@@ -411,6 +411,11 @@ function DocumentsPanel({
                         {doc.file_size_bytes ? ` · ${formatFileSize(doc.file_size_bytes)}` : ''}
                         {doc.expiry_date ? ` · expires ${formatDate(doc.expiry_date)}` : ''}
                       </p>
+                      {!doc.can_delete && doc.delete_block_reason ? (
+                        <p className="mt-0.5 text-xs text-[var(--slate)]">
+                          {doc.delete_block_reason}
+                        </p>
+                      ) : null}
                     </div>
                     <Button
                       type="button"
@@ -430,7 +435,7 @@ function DocumentsPanel({
                       <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
                       Download
                     </Button>
-                    {!doc.is_executed ? (
+                    {doc.can_edit ? (
                       <Button
                         type="button"
                         variant="ghost"
@@ -450,7 +455,8 @@ function DocumentsPanel({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={deleteDocument.isPending}
+                      disabled={deleteDocument.isPending || !doc.can_delete}
+                      title={doc.delete_block_reason || undefined}
                       onClick={() => {
                         if (!window.confirm(`Delete ${doc.document_name}? This cannot be undone.`)) return;
                         setDownloadError(null);
@@ -458,7 +464,11 @@ function DocumentsPanel({
                           onError: (error) => setDownloadError(apiErrorMessage(error, 'Could not delete document.')),
                         });
                       }}
-                      aria-label={`Delete ${doc.document_name}`}
+                      aria-label={
+                        doc.can_delete
+                          ? `Delete ${doc.document_name}`
+                          : `Cannot delete ${doc.document_name}: ${doc.delete_block_reason}`
+                      }
                     >
                       <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
                     </Button>

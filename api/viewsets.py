@@ -536,7 +536,11 @@ class DealPropertyViewSet(viewsets.ModelViewSet):
 class DocumentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = DocumentSerializer
-    queryset = Document.objects.select_related('deal', 'uploaded_by')
+    queryset = Document.objects.select_related('deal', 'uploaded_by').prefetch_related(
+        'quotes',
+        'dd_checklist_items',
+        'condition_precedents',
+    )
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -572,8 +576,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
-        from api.services.closing import document_is_closing_linked
-        from api.services.quotes import document_is_executed_quote_evidence
+        from api.services.documents import (
+            EXECUTED_DOCUMENT_DELETE_REASON,
+            document_action_capabilities,
+        )
         storage_key = instance.file_url
         storage = get_document_storage()
         with transaction.atomic():
@@ -581,16 +587,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
             document = Document.objects.select_for_update().filter(pk=instance.pk).first()
             if not document:
                 raise NotFound()
-            if document_is_closing_linked(document):
-                raise DRFValidationError({
-                    'detail': 'Document is linked to a closing checklist item and cannot be deleted.',
-                })
-            if document_is_executed_quote_evidence(document):
-                raise DRFValidationError({
-                    'detail': 'Document is attached to an executed quote and cannot be deleted.',
-                })
-            if document.is_executed and not _is_staff_user(self.request.user):
-                raise PermissionDenied('Only staff may delete executed documents.')
+            capabilities = document_action_capabilities(document, self.request.user)
+            if not capabilities['can_delete']:
+                reason = capabilities['delete_block_reason']
+                if reason == EXECUTED_DOCUMENT_DELETE_REASON:
+                    raise PermissionDenied(reason)
+                raise DRFValidationError({'detail': reason})
             document.delete()
         # Best-effort blob cleanup after commit. A storage failure must not
         # resurrect the row; log and continue so the API still reports success.
@@ -652,7 +654,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
         upload_target = _build_upload_target(request, document)
         return Response(
             {
-                'document': DocumentSerializer(document).data,
+                'document': DocumentSerializer(
+                    document,
+                    context=self.get_serializer_context(),
+                ).data,
                 'upload_url': upload_target.url,
                 'upload_method': upload_target.method,
                 'upload_headers': upload_target.headers,
@@ -711,7 +716,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
             document = locked
             _ = deal
 
-        return Response(DocumentSerializer(document).data)
+        return Response(
+            DocumentSerializer(document, context=self.get_serializer_context()).data
+        )
 
     @action(detail=True, methods=['get'], url_path='download')
     def download(self, request, pk=None):

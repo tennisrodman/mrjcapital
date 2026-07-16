@@ -1260,6 +1260,26 @@ function findDocument(id: string): DealDocument {
   return document;
 }
 
+function withDocumentCapabilities(document: DealDocument): DealDocument {
+  const closingLinked = documentIsClosingLinked(document.id);
+  const executedQuoteEvidence = documentIsExecutedQuoteEvidence(document.id);
+  const metadataLocked = document.is_executed || executedQuoteEvidence;
+  const deleteBlockReason = closingLinked
+    ? 'Document is linked to a closing checklist item and cannot be deleted.'
+    : executedQuoteEvidence
+      ? 'Document is attached to an executed quote and cannot be deleted.'
+      : document.is_executed && !MOCK_USER.is_staff
+        ? 'Only staff may delete executed documents.'
+        : '';
+  return {
+    ...document,
+    can_edit: !metadataLocked,
+    edit_block_reason: metadataLocked ? 'Executed document metadata cannot be changed.' : '',
+    can_delete: !deleteBlockReason,
+    delete_block_reason: deleteBlockReason,
+  };
+}
+
 function nextDocumentVersion(dealId: string, category: string, documentName: string): number {
   const maxVersion = documents
     .filter((d) => d.deal === dealId && d.category === category && d.document_name === documentName)
@@ -1297,10 +1317,14 @@ function createUploadIntent(body: Record<string, unknown>): unknown {
     notes: String(body.notes ?? ''),
     visibility_roles: (body.visibility_roles as string[]) ?? ['internal'],
     details: {},
+    can_edit: true,
+    edit_block_reason: '',
+    can_delete: true,
+    delete_block_reason: '',
   };
   documents.push(document);
   return {
-    document,
+    document: withDocumentCapabilities(document),
     upload_url: `/api/documents/${id}/blob/`,
     upload_method: 'PUT',
     upload_headers: { 'Content-Type': document.content_type || 'application/octet-stream' },
@@ -1311,7 +1335,7 @@ function createUploadIntent(body: Record<string, unknown>): unknown {
 function completeUpload(documentId: string): DealDocument {
   const document = findDocument(documentId);
   document.storage_status = 'ready';
-  return document;
+  return withDocumentCapabilities(document);
 }
 
 function downloadDocument(documentId: string) {
@@ -1808,16 +1832,24 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
     if (second && !third && (method === 'PATCH' || method === 'PUT')) {
       const document = findDocument(second);
       const evidenceLocked = document.is_executed || documentIsExecutedQuoteEvidence(document.id);
-      if (evidenceLocked && 'subcategory' in body) {
-        const next = String(body.subcategory ?? '');
-        if (next !== (document.subcategory ?? '')) {
-          badRequest('subcategory', 'Executed document metadata cannot be changed.');
+      if (evidenceLocked) {
+        const currentValues: Record<string, unknown> = {
+          subcategory: document.subcategory ?? '',
+          expiry_date: document.expiry_date,
+          notes: document.notes,
+          details: document.details,
+        };
+        for (const field of ['subcategory', 'expiry_date', 'notes', 'details']) {
+          if (field in body && JSON.stringify(body[field]) !== JSON.stringify(currentValues[field])) {
+            badRequest(field, 'Executed document metadata cannot be changed.');
+          }
         }
       }
       if ('subcategory' in body) document.subcategory = String(body.subcategory ?? '');
       if ('expiry_date' in body) document.expiry_date = body.expiry_date ? String(body.expiry_date) : null;
       if ('notes' in body) document.notes = String(body.notes ?? '');
-      return document;
+      if ('details' in body) document.details = (body.details as Record<string, unknown>) ?? {};
+      return withDocumentCapabilities(document);
     }
     if (second && !third && method === 'DELETE') {
       const document = findDocument(second);
@@ -1840,11 +1872,12 @@ function handle(route: string[], method: string, body: Record<string, unknown>, 
       if (idx >= 0) documents.splice(idx, 1);
       return {};
     }
+    if (second && !third) return withDocumentCapabilities(findDocument(second));
     const dealId = query.get('deal');
     const filtered = documents.filter(
       (d) => d.storage_status === 'ready' && (!dealId || d.deal === dealId),
     );
-    return paginate(filtered, query);
+    return paginate(filtered.map(withDocumentCapabilities), query);
   }
 
   if (resource === 'screening-assessments') {

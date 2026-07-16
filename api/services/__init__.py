@@ -25,6 +25,7 @@ from .deals import (
 )
 from .notes import create_note, log_note_added
 from .entity_facts import update_property_facts, update_sponsor_facts
+from .documents import document_action_capabilities, locked_metadata_errors
 from .quotes import (
     counter_quote,
     create_next_quote,
@@ -55,12 +56,14 @@ __all__ = [
     'delete_dd_item',
     'document_is_closing_linked',
     'document_is_executed_quote_evidence',
+    'document_action_capabilities',
     'execute_quote',
     'expire_quote',
     'generate_closing_checklist',
     'get_current_quote',
     'log_note_added',
     'log_sensitive_field_read',
+    'locked_metadata_errors',
     'normalize_address',
     'quote_has_execution_evidence',
     'send_quote',
