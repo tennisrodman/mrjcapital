@@ -21,6 +21,7 @@ from api.models import (
     Sponsor,
 )
 from api.services import normalize_address
+from api.policies import is_staff_user as _is_staff_user
 from api.services.deals import (
     capture_deal_field_values,
     initialize_deal_stage_event,
@@ -977,10 +978,6 @@ def _resolve_existing_uuid(model_cls, value, field_name):
     if not obj:
         raise serializers.ValidationError({field_name: 'Selected record does not exist.'})
     return obj
-
-
-def _is_staff_user(user):
-    return bool(user and (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)))
 
 
 def _can_attach_property(user, property_obj):

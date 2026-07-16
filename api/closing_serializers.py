@@ -13,13 +13,10 @@ from api.models import (
     Document,
 )
 from api.serializers import AnalystSummarySerializer
+from api.policies import is_staff_user as _is_staff_user
 
 
 User = get_user_model()
-
-
-def _is_staff_user(user):
-    return bool(user and (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)))
 
 
 def _document_visible_to_user(user, document):

@@ -4,6 +4,7 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 
 from api.models import ActivityActionType, ActivityLog, Deal, Property, Sponsor
+from api.policies import is_staff_user as _is_staff_user
 
 
 SPONSOR_PROMOTED_FACT_FIELDS = frozenset({
@@ -151,7 +152,3 @@ def _audit_value(value):
     if isinstance(value, bool):
         return str(value).lower()
     return str(value)
-
-
-def _is_staff_user(user):
-    return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))

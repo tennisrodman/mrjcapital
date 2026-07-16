@@ -3,6 +3,8 @@ import os
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
 
+from api.policies import is_staff_user as _is_staff_user
+
 
 class MCPAuthError(ImproperlyConfigured):
     """Raised when the local MCP user is missing or not allowed."""
@@ -48,7 +50,3 @@ def _resolve_by_username(username):
     except user_model.DoesNotExist as exc:
         raise MCPAuthError(f'MRJ MCP username {username!r} was not found.') from exc
     return require_staff_user(user)
-
-
-def _is_staff_user(user):
-    return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))

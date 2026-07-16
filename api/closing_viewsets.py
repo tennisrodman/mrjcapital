@@ -29,6 +29,7 @@ from api.models import (
     DDTemplate,
 )
 from api.models.deal import Deal
+from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
 from api.services.closing import (
     closing_assignees,
     create_cp_item,
@@ -45,16 +46,6 @@ from api.services.closing import (
 
 
 User = get_user_model()
-
-
-def _is_staff_user(user):
-    return bool(user and (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)))
-
-
-def _can_access_deal(user, deal):
-    if _is_staff_user(user):
-        return True
-    return bool(user and deal.assigned_analyst_id == getattr(user, 'id', None))
 
 
 def _uuid_filter_value(value, field_name):

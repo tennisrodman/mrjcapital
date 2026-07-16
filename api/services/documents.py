@@ -1,6 +1,7 @@
 """Document action policy shared by serializers, viewsets, and API clients."""
 
 from api.models import Quote
+from api.policies import is_staff_user
 
 
 CLOSING_LINKED_DELETE_REASON = (
@@ -13,14 +14,6 @@ EXECUTED_DOCUMENT_DELETE_REASON = 'Only staff may delete executed documents.'
 EXECUTED_METADATA_EDIT_REASON = 'Executed document metadata cannot be changed.'
 
 LOCKED_METADATA_FIELDS = frozenset({'subcategory', 'expiry_date', 'notes', 'details'})
-
-
-def _is_staff_user(user) -> bool:
-    return bool(
-        user
-        and getattr(user, 'is_authenticated', False)
-        and getattr(user, 'is_staff', False)
-    )
 
 
 def _prefetched_related(document, relation_name):
@@ -58,7 +51,7 @@ def document_action_capabilities(document, user) -> dict[str, object]:
         delete_reason = CLOSING_LINKED_DELETE_REASON
     elif executed_quote_evidence:
         delete_reason = EXECUTED_QUOTE_DELETE_REASON
-    elif document.is_executed and not _is_staff_user(user):
+    elif document.is_executed and not is_staff_user(user):
         delete_reason = EXECUTED_DOCUMENT_DELETE_REASON
 
     return {

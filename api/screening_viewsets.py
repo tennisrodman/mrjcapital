@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from api.models.deal import Deal
 from api.models.screening import ScreeningAssessment
+from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
 from api.screening_serializers import ScreeningAssessmentSerializer, ScreeningFinalizeSerializer
 from api.services.screening import finalize_assessment
 
@@ -82,16 +83,6 @@ class ScreeningAssessmentViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as exc:
             _raise_drf_validation(exc)
         return Response(self.get_serializer(finalized).data)
-
-
-def _is_staff_user(user):
-    return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))
-
-
-def _can_access_deal(user, deal):
-    if not getattr(user, 'is_authenticated', False):
-        return False
-    return _is_staff_user(user) or deal.assigned_analyst_id == user.id
 
 
 def _uuid_filter_value(value, field_name):

@@ -10,16 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from api.contact_serializers import ContactSerializer, DealContactSerializer
 from api.models.contact import Contact, DealContact
 from api.models.deal import Deal
-
-
-def _is_staff_user(user):
-    return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))
-
-
-def _can_access_deal(user, deal):
-    if not getattr(user, 'is_authenticated', False):
-        return False
-    return _is_staff_user(user) or deal.assigned_analyst_id == user.id
+from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
 
 
 class ContactViewSet(viewsets.ModelViewSet):

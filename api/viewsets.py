@@ -53,6 +53,7 @@ from api.serializers import (
     _can_attach_property,
 )
 from api.services.money import format_money_aggregate
+from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
 from api.services.deal_properties import (
     capture_deal_property_snapshot,
     log_deal_property_change,
@@ -935,10 +936,6 @@ def _int_filter_value(value, field_name):
         raise DRFValidationError({field_name: 'Invalid integer.'}) from exc
 
 
-def _is_staff_user(user):
-    return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))
-
-
 def _require_exclusive_supporting_entity_access(instance, *, performed_by, subject_label):
     """Block non-staff updates when another analyst's deal also uses the record."""
     if _is_staff_user(performed_by):
@@ -947,12 +944,6 @@ def _require_exclusive_supporting_entity_access(instance, *, performed_by, subje
         raise PermissionDenied(
             f'A shared {subject_label} can only be changed by staff.'
         )
-
-
-def _can_access_deal(user, deal):
-    if not getattr(user, 'is_authenticated', False):
-        return False
-    return _is_staff_user(user) or deal.assigned_analyst_id == user.id
 
 
 def _filter_visibility_role(queryset, visibility_role):

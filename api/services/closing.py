@@ -25,6 +25,7 @@ from api.models import (
     PipelineStatus,
 )
 from api.models.deal import Deal
+from api.policies import is_staff_user as _is_staff_user
 from api.services.audit import create_activity_log
 
 
@@ -44,10 +45,6 @@ CLOSING_PACKAGE_EDITABLE_FIELDS = (
     'sources_and_uses_notes',
     'notes',
 )
-
-
-def _is_staff_user(user):
-    return bool(user and (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)))
 
 
 def _lock_deal_for_closing(deal_id) -> Deal:
