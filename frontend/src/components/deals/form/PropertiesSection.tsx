@@ -1,6 +1,7 @@
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Plus, Star, Trash2 } from 'lucide-react';
 import { Panel } from '@/components/deals/Panel';
+import { InlineErrorState } from '@/components/deals/States';
 import { FormField } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { SelectNative } from '@/components/ui/select-native';
@@ -68,6 +69,15 @@ export function PropertiesSection() {
         duplicates, add a new one, or leave this empty for an early first look.
       </p>
 
+      {propertiesQuery.isError ? (
+        <div className="mb-4">
+          <InlineErrorState
+            message="Existing properties could not be loaded. Retry or register a new property."
+            onRetry={() => void propertiesQuery.refetch()}
+          />
+        </div>
+      ) : null}
+
       {fields.length === 0 ? (
         <div className="rounded-md border border-dashed border-[var(--border)] bg-[var(--paper)] px-4 py-5 text-sm text-[var(--slate)]">
           No property attached yet.
@@ -117,8 +127,15 @@ export function PropertiesSection() {
               {mode === 'existing' ? (
                 <FormField label="Property" error={rowErrors?.property_id?.message}>
                   <SelectNative
-                    placeholder={propertiesQuery.isLoading ? 'Loading…' : 'Select a property'}
+                    placeholder={
+                      propertiesQuery.isLoading
+                        ? 'Loading…'
+                        : propertiesQuery.isError
+                          ? 'Existing properties unavailable'
+                          : 'Select a property'
+                    }
                     options={propertyOptions}
+                    disabled={propertiesQuery.isError}
                     aria-invalid={Boolean(rowErrors?.property_id)}
                     {...register(`properties.${index}.property_id`)}
                   />

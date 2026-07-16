@@ -141,11 +141,15 @@ export default function DealDetailPage() {
                 dealId={deal.id}
                 notes={notesQuery.data ?? []}
                 isLoading={notesQuery.isLoading}
+                isError={notesQuery.isError}
+                onRetry={() => void notesQuery.refetch()}
                 documents={documentsQuery.data ?? []}
               />
               <ActivityPanel
                 entries={activityQuery.data ?? []}
                 isLoading={activityQuery.isLoading}
+                isError={activityQuery.isError}
+                onRetry={() => void activityQuery.refetch()}
               />
             </>
           ) : null}
@@ -643,14 +647,29 @@ function ContactRow({
 function ActivityPanel({
   entries,
   isLoading,
+  isError,
+  onRetry,
 }: {
   entries: ActivityLogEntry[];
   isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
 }) {
   if (isLoading) {
     return (
       <Panel title="Activity">
         <p className="text-sm text-[var(--slate)]">Loading activity…</p>
+      </Panel>
+    );
+  }
+  if (isError) {
+    return (
+      <Panel title="Activity">
+        <ErrorState
+          title="Activity unavailable"
+          message="The audit timeline could not be loaded."
+          onRetry={onRetry}
+        />
       </Panel>
     );
   }
@@ -693,11 +712,15 @@ function NotesPanel({
   dealId,
   notes,
   isLoading,
+  isError,
+  onRetry,
   documents,
 }: {
   dealId: string;
   notes: DealNote[];
   isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
   documents: DealDocument[];
 }) {
   const [body, setBody] = useState('');
@@ -789,6 +812,14 @@ function NotesPanel({
 
       {isLoading ? (
         <p className="mt-4 text-sm text-[var(--slate)]">Loading notes…</p>
+      ) : isError ? (
+        <div className="mt-4">
+          <ErrorState
+            title="Notes unavailable"
+            message="Notes could not be loaded."
+            onRetry={onRetry}
+          />
+        </div>
       ) : notes.length === 0 ? (
         <p className="mt-4 text-sm text-[var(--slate)]">No notes on this deal yet.</p>
       ) : (

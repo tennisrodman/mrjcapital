@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { SelectNative } from '@/components/ui/select-native';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { InlineErrorState } from '@/components/deals/States';
 import { ModeToggle } from '@/components/deals/form/ModeToggle';
 import { PropertiesSection } from '@/components/deals/form/PropertiesSection';
 import {
@@ -76,6 +77,16 @@ export default function DealCreatePage() {
     label: `${b.company_name} — ${b.contact_name}`,
   }));
   const fundOptions = (fundsQuery.data ?? []).map((f) => ({ value: f.id, label: f.name }));
+  const relationshipDataError =
+    sponsorsQuery.isError || brokersQuery.isError || fundsQuery.isError;
+
+  const retryRelationshipData = () => {
+    void Promise.all([
+      sponsorsQuery.refetch(),
+      brokersQuery.refetch(),
+      fundsQuery.refetch(),
+    ]);
+  };
 
   const onSubmit = (values: CreateDealForm) => {
     setBanner(null);
@@ -246,6 +257,13 @@ export default function DealCreatePage() {
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
             <p>{banner}</p>
           </div>
+        ) : null}
+
+        {relationshipDataError ? (
+          <InlineErrorState
+            message="Some existing sponsor, broker, or fund choices could not be loaded. Retry before selecting an existing relationship; creating a new record remains available."
+            onRetry={retryRelationshipData}
+          />
         ) : null}
 
         <div className="animate-fade-up stagger-1 space-y-6">

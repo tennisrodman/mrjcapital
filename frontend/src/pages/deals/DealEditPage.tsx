@@ -71,6 +71,29 @@ export default function DealEditPage() {
   const initializedDealId = useRef<string | null>(null);
 
   const deal = dealQuery.data;
+  const referenceDataLoading =
+    sponsorsQuery.isLoading ||
+    brokersQuery.isLoading ||
+    fundsQuery.isLoading ||
+    propertiesQuery.isLoading ||
+    (isStaff && assigneesQuery.isLoading);
+  const referenceDataError =
+    sponsorsQuery.isError ||
+    brokersQuery.isError ||
+    fundsQuery.isError ||
+    propertiesQuery.isError ||
+    (isStaff && assigneesQuery.isError);
+
+  const retryReferenceData = () => {
+    const retries: Promise<unknown>[] = [
+      sponsorsQuery.refetch(),
+      brokersQuery.refetch(),
+      fundsQuery.refetch(),
+      propertiesQuery.refetch(),
+    ];
+    if (isStaff) retries.push(assigneesQuery.refetch());
+    void Promise.all(retries);
+  };
 
   useEffect(() => {
     if (!deal || initializedDealId.current === deal.id) return;
@@ -110,6 +133,19 @@ export default function DealEditPage() {
       <div className="space-y-6">
         <BackLink id={id} />
         <ErrorState title="Deal unavailable" onRetry={() => void dealQuery.refetch()} />
+      </div>
+    );
+  }
+  if (referenceDataLoading) return <Spinner label="Loading deal relationships…" />;
+  if (referenceDataError) {
+    return (
+      <div className="space-y-6">
+        <BackLink id={id} />
+        <ErrorState
+          title="Deal relationships unavailable"
+          message="Sponsors, brokers, funds, properties, or assignees could not be loaded. The edit form is paused so existing relationships are not mistaken for empty data."
+          onRetry={retryReferenceData}
+        />
       </div>
     );
   }
