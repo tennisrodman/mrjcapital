@@ -157,7 +157,7 @@ export function useCounterQuote(dealId: string) {
 }
 
 export function useExecuteQuote(dealId: string) {
-  return useQuoteAction(dealId, executeQuote);
+  return useQuoteMutation(dealId, executeQuote, { invalidateDocuments: true });
 }
 
 export function useWithdrawQuote(dealId: string) {

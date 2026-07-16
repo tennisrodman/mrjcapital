@@ -123,19 +123,33 @@ const updatePayload: UpdateScreeningAssessmentPayload = {
 describe('screening assessment API contract', () => {
   beforeEach(() => api.request.mockReset());
 
-  it('filters assessments by an encoded deal id and normalizes a paginated response', async () => {
-    api.request.mockResolvedValue({
-      count: 2,
-      next: null,
-      previous: null,
-      results: [assessment(1), assessment(2)],
-    });
+  it('filters assessments by an encoded deal id and loads every paginated result', async () => {
+    api.request.mockImplementation((path?: string) => Promise.resolve(
+      path?.endsWith('page=1')
+        ? {
+            count: 51,
+            next: 'page=2',
+            previous: null,
+            results: [assessment(1)],
+          }
+        : path?.endsWith('page=2') ? {
+            count: 51,
+            next: null,
+            previous: 'page=1',
+            results: [assessment(2)],
+          } : { count: 0, next: null, previous: null, results: [] },
+    ));
 
     await expect(listScreeningAssessments('deal / 1')).resolves.toMatchObject([
       { id: 'assessment-2' },
       { id: 'assessment-1' },
     ]);
-    expect(api.request).toHaveBeenCalledWith('api/screening-assessments/?deal=deal%20%2F%201');
+    expect(api.request).toHaveBeenCalledWith(
+      'api/screening-assessments/?deal=deal%20%2F%201&page=1',
+    );
+    expect(api.request).toHaveBeenCalledWith(
+      'api/screening-assessments/?deal=deal%20%2F%201&page=2',
+    );
   });
 
   it('posts decimal-string inputs, patches drafts, and finalizes through the dedicated action', async () => {
@@ -185,5 +199,28 @@ describe('screening assessment API contract', () => {
     expect(invalidate).toHaveBeenNthCalledWith(1, { queryKey: ['deal-allowed-transitions', 'deal-1'] });
     expect(invalidate).toHaveBeenNthCalledWith(2, { queryKey: ['deal-allowed-transitions', 'deal-1'] });
     expect(invalidate).toHaveBeenNthCalledWith(3, { queryKey: ['deal-allowed-transitions', 'deal-1'] });
+  });
+
+  it('demotes an older cached current assessment when a new version arrives', async () => {
+    const current = { ...assessment(1), is_current: true };
+    const incoming = assessment(2);
+    api.request.mockResolvedValue(incoming);
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    queryClient.setQueryData(['screening-assessments', 'deal-1'], [current]);
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const created = renderHook(() => useCreateScreeningAssessment('deal-1'), { wrapper });
+
+    await act(async () => {
+      await created.result.current.mutateAsync(createPayload);
+    });
+
+    expect(queryClient.getQueryData<ScreeningAssessment[]>([
+      'screening-assessments',
+      'deal-1',
+    ])).toEqual([
+      expect.objectContaining({ id: 'assessment-2', is_current: true }),
+      expect.objectContaining({ id: 'assessment-1', is_current: false }),
+    ]);
   });
 });

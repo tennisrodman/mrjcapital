@@ -4,8 +4,6 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Building2, ChevronDown, FileText, LayoutDashboard, LogOut, Menu, Plus, Scale } from 'lucide-react';
 import { AuthContext } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
-import DataModeToggle from './DataModeToggle';
-import DemoStaffToggle from './DemoStaffToggle';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -141,9 +139,6 @@ const AppHeader = () => {
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
             New deal
           </NavLink>
-
-          <DataModeToggle />
-          <DemoStaffToggle />
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>

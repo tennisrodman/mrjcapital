@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { API_URL, apiRequest, getAuthHeaders } from '@/config/api';
-import { USE_MOCKS } from '@/config/flags';
 import type {
   DealDocument,
   DocumentDownloadResponse,
@@ -35,14 +34,17 @@ function isSameOriginUrl(url: string): boolean {
   }
 }
 
+async function sha256Hex(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function uploadFileToTarget(
   uploadUrl: string,
   file: File,
   headers: Record<string, string>,
   method: string,
 ): Promise<void> {
-  if (USE_MOCKS) return;
-
   const requestHeaders: HeadersInit = { ...headers };
   if (isSameOriginUrl(uploadUrl)) {
     Object.assign(requestHeaders, getAuthHeaders());
@@ -63,6 +65,7 @@ async function uploadFileToTarget(
 
 export async function uploadDocument(input: UploadDocumentInput): Promise<DealDocument> {
   const fileType = fileExtension(input.file);
+  const checksumSha256 = await sha256Hex(input.file);
   const intent = await apiRequest<DocumentUploadIntentResponse>('api/documents/upload-intent/', {
     method: 'POST',
     body: JSON.stringify({
@@ -73,6 +76,7 @@ export async function uploadDocument(input: UploadDocumentInput): Promise<DealDo
       file_type: fileType,
       content_type: input.file.type || undefined,
       file_size_bytes: input.file.size,
+      checksum_sha256: checksumSha256,
       visibility_roles: input.visibilityRoles ?? ['internal'],
       notes: input.notes ?? '',
     }),
@@ -95,15 +99,6 @@ export async function downloadDocument(doc: DealDocument): Promise<void> {
   const payload = await apiRequest<DocumentDownloadResponse>(
     `api/documents/${doc.id}/download/`,
   );
-
-  if (USE_MOCKS) {
-    const blob = new Blob(
-      [`Demo file placeholder for ${doc.document_name}`],
-      { type: payload.content_type || 'text/plain' },
-    );
-    triggerBrowserDownload(blob, payload.filename);
-    return;
-  }
 
   const headers: HeadersInit = {};
   if (isSameOriginUrl(payload.download_url)) {

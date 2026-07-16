@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 const api = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock('@/config/api', () => ({ apiRequest: api.request }));
 
-import { useUpdateProperty, useUpdateSponsor } from './deals';
+import { useUpdateDeal, useUpdateProperty, useUpdateSponsor } from './deals';
 
 describe('promoted intake fact mutations', () => {
   let queryClient: QueryClient;
@@ -62,5 +62,17 @@ describe('promoted intake fact mutations', () => {
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['properties'] });
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['deal'] });
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['deals'] });
+  });
+
+  it('invalidates deal summary metrics after a deal edit', async () => {
+    const deal = { id: 'deal-1', name: 'Updated deal' };
+    api.request.mockResolvedValue(deal);
+    const { result } = renderHook(() => useUpdateDeal('deal-1'), { wrapper });
+
+    await act(async () => { await result.current.mutateAsync({ name: 'Updated deal' }); });
+
+    expect(queryClient.getQueryData(['deal', 'deal-1'])).toEqual(deal);
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['deals'] });
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['deal-summary'] });
   });
 });

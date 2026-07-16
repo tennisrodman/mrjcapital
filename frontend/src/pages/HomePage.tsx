@@ -132,7 +132,7 @@ const HomePage = () => {
             <div className="px-5 py-10 text-center">
               <h3 className="font-medium text-[var(--ink)]">Could not load dashboard data</h3>
               <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--slate)]">
-                Check the selected data mode and backend connection, then refresh.
+                Check the backend connection, then refresh.
               </p>
             </div>
           ) : featuredDeals.length === 0 ? (
@@ -210,7 +210,7 @@ const HomePage = () => {
               Review the highest-priority quote packages and closing milestones.
             </p>
             <p className="mt-2 text-sm text-[var(--header-muted)]">
-              Demo mode uses the seeded portfolio; Live mode reads the Django API.
+              Deal activity and readiness are read directly from the shared Django workspace.
             </p>
           </section>
         </aside>

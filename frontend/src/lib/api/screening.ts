@@ -1,21 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiRequest } from '@/config/api';
+import { fetchAllPages } from '@/lib/api/pagination';
 import type {
   CreateScreeningAssessmentPayload,
   FinalizeScreeningAssessmentPayload,
   ScreeningAssessment,
   UpdateScreeningAssessmentPayload,
 } from '@/types/screening';
-import type { Paginated } from '@/types/deal';
-
-type ScreeningAssessmentListResponse = Paginated<ScreeningAssessment> | ScreeningAssessment[];
 
 const assessmentQueryKey = (dealId: string) => ['screening-assessments', dealId] as const;
-
-function listResults(response: ScreeningAssessmentListResponse): ScreeningAssessment[] {
-  return Array.isArray(response) ? response : response.results;
-}
 
 function sortMostRecent(assessments: ScreeningAssessment[]): ScreeningAssessment[] {
   return [...assessments].sort((a, b) => {
@@ -29,14 +23,19 @@ function replaceCachedAssessment(
   incoming: ScreeningAssessment,
 ): ScreeningAssessment[] {
   const withoutIncoming = (existing ?? []).filter((assessment) => assessment.id !== incoming.id);
-  return sortMostRecent([incoming, ...withoutIncoming]);
+  const withFlags = withoutIncoming.map((assessment) =>
+    assessment.deal === incoming.deal && incoming.is_current
+      ? { ...assessment, is_current: false }
+      : assessment,
+  );
+  return sortMostRecent([incoming, ...withFlags]);
 }
 
 export async function listScreeningAssessments(dealId: string): Promise<ScreeningAssessment[]> {
-  const response = await apiRequest<ScreeningAssessmentListResponse>(
+  const assessments = await fetchAllPages<ScreeningAssessment>(
     `api/screening-assessments/?deal=${encodeURIComponent(dealId)}`,
   );
-  return sortMostRecent(listResults(response));
+  return sortMostRecent(assessments);
 }
 
 export function createScreeningAssessment(
