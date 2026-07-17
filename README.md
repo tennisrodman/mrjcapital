@@ -61,6 +61,23 @@ python manage.py seed_development_scenarios --actor tchen --target screening --t
 
 The durable scenarios are declared in `shared/workflow_seed.v1.json`, start at Sourced, and use screening, quote, transition, syndication, document, and closing services. They create real local evidence with verified size and SHA-256 checksums. Scenario history is intentionally append-only; there is no rebuild command that bypasses protected screening, quote, or closing evidence.
 
+For the richer pipeline-board dataset used by the team, use the production-safe
+showcase command. It defaults to a transactional dry run and is safe to rerun:
+
+```bash
+# Preview all inserts and validations; no rows are committed.
+python manage.py seed_showcase_data --actor tchen --dry-run
+
+# Commit after reviewing the JSON summary.
+python manage.py seed_showcase_data --actor tchen --apply
+```
+
+The versioned source is `shared/showcase_seed.v1.json`. It contains 14 deals,
+15 properties, 6 sponsors, 4 brokers, and 2 funds, with deals distributed from
+Sourced through Exited plus On Hold and Dead. Deterministic identities make
+repeat applications no-ops. The command never updates or deletes existing
+business data; a conflicting identity aborts and rolls back the entire run.
+
 ## Local MCP server
 
 MRJ includes a read-only MCP server for local Codex/admin deal queries. It runs over stdio and requires an active staff or superuser account.
