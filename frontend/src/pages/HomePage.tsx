@@ -15,6 +15,11 @@ const EMPTY_DEALS: Deal[] = [];
 const REVIEW_STATUSES: PipelineStatus[] = ['screening', 'quoting', 'negotiating', 'signed'];
 const FUNDED_STATUSES: PipelineStatus[] = ['closed', 'servicing', 'exited'];
 
+function currentQuarterLabel(date = new Date()): string {
+  const quarter = Math.floor(date.getMonth() / 3) + 1;
+  return `Q${quarter} ${date.getFullYear()}`;
+}
+
 const pipelineStageGroups: { stage: string; statuses: PipelineStatus[]; tone: string }[] = [
   { stage: 'Origination', statuses: ['sourced', 'screening'], tone: 'bg-[var(--ink)]/20' },
   { stage: 'Underwriting', statuses: ['quoting', 'negotiating', 'signed'], tone: 'bg-[var(--brass)]/35' },
@@ -37,7 +42,9 @@ const HomePage = () => {
     [deals],
   );
   const featuredDeals = useMemo(
-    () => deals.filter((deal) => !['dead', 'exited'].includes(deal.pipeline_status)).slice(0, 5),
+    () => deals.filter(
+      (deal) => !['dead', 'closed', 'servicing', 'exited'].includes(deal.pipeline_status),
+    ).slice(0, 5),
     [deals],
   );
 
@@ -87,7 +94,7 @@ const HomePage = () => {
         </div>
         <div className="flex shrink-0 items-center gap-2 text-sm text-[var(--slate)]">
           <span className="rounded-sm border border-[var(--border)] bg-[var(--paper-elevated)] px-3 py-1.5">
-            Q2 2026
+            {currentQuarterLabel()}
           </span>
         </div>
       </header>
@@ -125,7 +132,7 @@ const HomePage = () => {
             <div className="px-5 py-10 text-center">
               <h3 className="font-medium text-[var(--ink)]">Could not load dashboard data</h3>
               <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--slate)]">
-                Check the selected data mode and backend connection, then refresh.
+                Check the backend connection, then refresh.
               </p>
             </div>
           ) : featuredDeals.length === 0 ? (
@@ -203,7 +210,7 @@ const HomePage = () => {
               Review the highest-priority quote packages and closing milestones.
             </p>
             <p className="mt-2 text-sm text-[var(--header-muted)]">
-              Demo mode uses the seeded portfolio; Live mode reads the Django API.
+              Deal activity and readiness are read directly from the shared Django workspace.
             </p>
           </section>
         </aside>

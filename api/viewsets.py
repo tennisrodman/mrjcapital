@@ -1,50 +1,93 @@
 from ipaddress import ip_address
-from uuid import UUID
+import logging
+import uuid
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection, IntegrityError, transaction
 from django.db.models import Count, Max, Sum
 from django.db.models.deletion import ProtectedError
+from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from api.models import (
-    ActivityActionType,
     ActivityLog,
     Broker,
     Deal,
+    DealNote,
     DealProperty,
+    DealStageEvent,
     Document,
+    DocumentStorageStatus,
     Fund,
     PipelineStatus,
     Property,
     Sponsor,
 )
+from api.drf import (
+    django_validation_response as _django_validation_response,
+    uuid_filter_value as _uuid_filter_value,
+)
 from api.serializers import (
     ActivityLogSerializer,
     BrokerSerializer,
+    DealCreateSerializer,
+    DealNoteSerializer,
     DealPropertySerializer,
     DealSerializer,
+    DealStageEventSerializer,
+    DocumentDownloadSerializer,
     DocumentSerializer,
+    DocumentUploadCompleteSerializer,
+    DocumentUploadIntentSerializer,
     FundSerializer,
     PipelineTransitionSerializer,
     PropertySerializer,
     SensitiveFieldReadSerializer,
     SponsorSerializer,
     SyndicationTransitionSerializer,
+    _can_attach_property,
+)
+from api.services.money import format_money_aggregate
+from api.policies import can_access_deal as _can_access_deal, is_staff_user as _is_staff_user
+from api.services.documents import log_document_upload_completed, log_document_upload_started
+from api.services.deal_properties import (
+    capture_deal_property_snapshot,
+    log_deal_property_change,
 )
 from api.services import (
+    allowed_pipeline_transition_readiness,
     allowed_pipeline_statuses,
     allowed_syndication_statuses,
+    create_note,
     log_sensitive_field_read,
     normalize_address,
     transition_pipeline_status,
     transition_syndication_status,
+    update_broker_facts,
+    update_fund_facts,
+    update_property_facts,
+    update_sponsor_facts,
 )
+from api.services.notes import can_manage_note, delete_note, update_note
+from api.services.storage import (
+    PresignedDownload,
+    PresignedUpload,
+    build_document_key,
+    get_document_storage,
+    max_upload_bytes,
+    sanitize_filename,
+    sha256_hex,
+)
+from api.services.deals import ACTIVE_PIPELINE_EXCLUDED_STATUSES
+
+logger = logging.getLogger(__name__)
 
 
 class SponsorViewSet(viewsets.ModelViewSet):
@@ -64,6 +107,22 @@ class SponsorViewSet(viewsets.ModelViewSet):
         if rating:
             queryset = queryset.filter(relationship_rating=rating)
         return queryset
+
+    def perform_update(self, serializer):
+        update_sponsor_facts(
+            serializer,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='sponsor',
+            relation_name='deals',
+        )
+        return super().perform_destroy(instance)
 
     @action(detail=True, methods=['post'], url_path='sensitive-fields')
     def sensitive_fields(self, request, pk=None):
@@ -103,6 +162,22 @@ class BrokerViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_param)
         return queryset
 
+    def perform_update(self, serializer):
+        update_broker_facts(
+            serializer,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='broker',
+            relation_name='deals',
+        )
+        return super().perform_destroy(instance)
+
 
 class FundViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -117,6 +192,22 @@ class FundViewSet(viewsets.ModelViewSet):
         if status_param:
             queryset = queryset.filter(status=status_param)
         return queryset
+
+    def perform_update(self, serializer):
+        update_fund_facts(
+            serializer,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='fund',
+            relation_name='deals',
+        )
+        return super().perform_destroy(instance)
 
 
 class PropertyViewSet(viewsets.ModelViewSet):
@@ -137,6 +228,23 @@ class PropertyViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(address__icontains=search)
         return queryset
 
+    def perform_update(self, serializer):
+        update_property_facts(
+            serializer,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        _require_staff_unlinked_delete(
+            instance,
+            user=self.request.user,
+            subject_label='property',
+            subject_plural='properties',
+            relation_name='deal_properties',
+        )
+        return super().perform_destroy(instance)
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -144,7 +252,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
             # If ATOMIC_REQUESTS is enabled later, keep this in an inner atomic savepoint.
             self.perform_create(serializer)
         except IntegrityError:
-            return _property_integrity_response(serializer.validated_data.get('address_normalized'))
+            return _property_integrity_response(
+                serializer.validated_data.get('address_normalized'),
+                user=request.user,
+            )
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
@@ -157,7 +268,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
             # If ATOMIC_REQUESTS is enabled later, keep this in an inner atomic savepoint.
             self.perform_update(serializer)
         except IntegrityError:
-            return _property_integrity_response(serializer.validated_data.get('address_normalized'))
+            return _property_integrity_response(
+                serializer.validated_data.get('address_normalized'),
+                user=request.user,
+            )
 
         if getattr(instance, '_prefetched_objects_cache', None):
             instance._prefetched_objects_cache = {}
@@ -201,6 +315,11 @@ class DealViewSet(viewsets.ModelViewSet):
         'deal_properties__property',
     )
 
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return DealCreateSerializer
+        return DealSerializer
+
     def get_queryset(self):
         queryset = super().get_queryset()
         if not _is_staff_user(self.request.user):
@@ -225,7 +344,23 @@ class DealViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        serializer.context['audit_ip_address'] = _client_ip(self.request)
         serializer.save(assigned_analyst=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.context['audit_ip_address'] = _client_ip(self.request)
+        serializer.save()
+
+    @action(detail=False, methods=['get'], url_path='assignees')
+    def assignees(self, request):
+        if not _is_staff_user(request.user):
+            raise PermissionDenied('Only staff may view deal assignment options.')
+        users = (
+            get_user_model().objects.filter(is_active=True)
+            .order_by('username')
+            .values('id', 'username')
+        )
+        return Response(list(users))
 
     @action(detail=True, methods=['post'], url_path='transition')
     def transition(self, request, pk=None):
@@ -239,6 +374,7 @@ class DealViewSet(viewsets.ModelViewSet):
                 request.user,
                 serializer.validated_data['reason'],
                 ip_address=_client_ip(request),
+                override_readiness=serializer.validated_data['override_readiness'],
             )
         except DjangoValidationError as exc:
             return _django_validation_response(exc)
@@ -267,21 +403,45 @@ class DealViewSet(viewsets.ModelViewSet):
         return Response({
             'pipeline_status': allowed_pipeline_statuses(deal),
             'syndication_status': allowed_syndication_statuses(deal),
+            'readiness': allowed_pipeline_transition_readiness(deal, request.user),
         })
+
+    @action(detail=True, methods=['get'], url_path='stage-history')
+    def stage_history(self, request, pk=None):
+        deal = self.get_object()
+        events = deal.stage_events.select_related('performed_by').order_by('-entered_at', '-id')
+        page = self.paginate_queryset(events)
+        if page is not None:
+            return self.get_paginated_response(DealStageEventSerializer(page, many=True).data)
+        return Response(DealStageEventSerializer(events, many=True).data)
 
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
         queryset = self.filter_queryset(self.get_queryset())
-        active_queryset = queryset.exclude(pipeline_status__in=[PipelineStatus.DEAD, PipelineStatus.EXITED])
-        status_counts = queryset.values('pipeline_status').annotate(count=Count('id')).order_by('pipeline_status')
+        active_queryset = queryset.exclude(
+            pipeline_status__in=ACTIVE_PIPELINE_EXCLUDED_STATUSES,
+        )
+        status_counts = list(
+            queryset.values('pipeline_status')
+            .annotate(count=Count('id'), requested_amount=Sum('requested_amount'))
+            .order_by('pipeline_status')
+        )
         active_requested = active_queryset.aggregate(total=Sum('requested_amount'))['total']
         gross_requested = queryset.aggregate(total=Sum('requested_amount'))['total']
         active_count = active_queryset.count()
+        timing_metrics = _stage_timing_metrics(
+            active_queryset,
+            status_counts,
+            history_queryset=queryset,
+        )
+        for row in status_counts:
+            row['requested_amount'] = format_money_aggregate(row.get('requested_amount'))
         return Response({
             'active_deals': active_count,
-            'pipeline_value': active_requested or 0,
-            'gross_pipeline_value': gross_requested or 0,
-            'by_pipeline_status': list(status_counts),
+            'pipeline_value': format_money_aggregate(active_requested),
+            'gross_pipeline_value': format_money_aggregate(gross_requested),
+            'by_pipeline_status': status_counts,
+            **timing_metrics,
         })
 
     def destroy(self, request, *args, **kwargs):
@@ -315,40 +475,93 @@ class DealPropertyViewSet(viewsets.ModelViewSet):
         deal = serializer.validated_data['deal']
         if not _can_access_deal(self.request.user, deal):
             raise PermissionDenied('You cannot attach properties to this deal.')
-        is_primary = serializer.validated_data.get('is_primary', False)
-        if not is_primary and not DealProperty.objects.filter(deal=deal).exists():
-            serializer.save(is_primary=True)
-            return
-        serializer.save()
+        with transaction.atomic():
+            locked_deal = Deal.objects.select_for_update().get(pk=deal.pk)
+            before = capture_deal_property_snapshot(locked_deal)
+            is_primary = serializer.validated_data.get('is_primary', False)
+            if not is_primary and not DealProperty.objects.filter(deal=locked_deal).exists():
+                serializer.save(deal=locked_deal, is_primary=True)
+            else:
+                serializer.save(deal=locked_deal)
+            log_deal_property_change(
+                locked_deal,
+                before,
+                performed_by=self.request.user,
+                ip_address=_client_ip(self.request),
+            )
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            locked_instance = (
+                DealProperty.objects
+                .select_for_update()
+                .select_related('deal', 'property')
+                .get(pk=serializer.instance.pk)
+            )
+            locked_deal = Deal.objects.select_for_update().get(pk=locked_instance.deal_id)
+            before = capture_deal_property_snapshot(locked_deal)
+            serializer.instance = locked_instance
+            serializer.save()
+            log_deal_property_change(
+                locked_deal,
+                before,
+                performed_by=self.request.user,
+                ip_address=_client_ip(self.request),
+            )
 
     def perform_destroy(self, instance):
-        if instance.is_primary:
-            replacement = (
+        with transaction.atomic():
+            locked_instance = (
                 DealProperty.objects
-                .filter(deal=instance.deal)
-                .exclude(pk=instance.pk)
-                .order_by('property__address_normalized')
-                .first()
+                .select_for_update()
+                .select_related('deal', 'property')
+                .get(pk=instance.pk)
             )
-            with transaction.atomic():
-                instance.delete()
+            locked_deal = Deal.objects.select_for_update().get(pk=locked_instance.deal_id)
+            before = capture_deal_property_snapshot(locked_deal)
+            if locked_instance.is_primary:
+                replacement = (
+                    DealProperty.objects
+                    .filter(deal=locked_deal)
+                    .exclude(pk=locked_instance.pk)
+                    .order_by('property__address_normalized')
+                    .first()
+                )
+                locked_instance.delete()
                 if replacement:
                     replacement.is_primary = True
                     replacement.save(update_fields=['is_primary'])
-            return
-        instance.delete()
+            else:
+                locked_instance.delete()
+            log_deal_property_change(
+                locked_deal,
+                before,
+                performed_by=self.request.user,
+                ip_address=_client_ip(self.request),
+            )
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = DocumentSerializer
-    queryset = Document.objects.select_related('deal', 'uploaded_by')
+    queryset = Document.objects.select_related('deal', 'uploaded_by').prefetch_related(
+        'quotes',
+        'dd_checklist_items',
+        'condition_precedents',
+    )
 
     def get_queryset(self):
         queryset = super().get_queryset()
         if not _is_staff_user(self.request.user):
             queryset = queryset.filter(deal__assigned_analyst=self.request.user)
             queryset = _filter_visibility_role(queryset, 'internal')
+        storage_status = self.request.query_params.get('storage_status')
+        if storage_status:
+            if not _is_staff_user(self.request.user):
+                raise PermissionDenied('Only staff may filter by storage_status.')
+            queryset = queryset.filter(storage_status=storage_status)
+        elif self.action == 'list':
+            queryset = queryset.filter(storage_status=DocumentStorageStatus.READY)
         deal_id = self.request.query_params.get('deal')
         if deal_id:
             queryset = queryset.filter(deal=_uuid_filter_value(deal_id, 'deal'))
@@ -362,30 +575,308 @@ class DocumentViewSet(viewsets.ModelViewSet):
             queryset = _filter_visibility_role(queryset, visibility_role)
         return queryset
 
-    def perform_create(self, serializer):
-        uploaded_by = self.request.user if getattr(self.request.user, 'is_authenticated', False) else None
-        deal = serializer.validated_data['deal']
-        if not _can_access_deal(self.request.user, deal):
-            raise PermissionDenied('You cannot add documents to this deal.')
+    def create(self, request, *args, **kwargs):
+        # Documents are created only through the upload-intent flow, which
+        # generates the storage key server-side. Direct POST is not supported.
+        return Response(
+            {'detail': 'Direct document creation is disabled. Use upload-intent.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    def perform_destroy(self, instance):
+        from api.services.documents import (
+            EXECUTED_DOCUMENT_DELETE_REASON,
+            document_action_capabilities,
+            enqueue_document_blob_deletion,
+        )
+        from api.models import DocumentBlobDeletion
+
         with transaction.atomic():
-            next_version = (
-                Document.objects
-                .filter(
-                    deal=deal,
-                    category=serializer.validated_data['category'],
-                    document_name=serializer.validated_data['document_name'],
-                )
-                .aggregate(max_version=Max('version'))['max_version'] or 0
-            ) + 1
-            document = serializer.save(uploaded_by=uploaded_by, version=next_version)
-            ActivityLog.objects.create(
-                deal=document.deal,
-                action_type=ActivityActionType.DOCUMENT_UPLOAD,
-                performed_by=uploaded_by,
+            Deal.objects.select_for_update().filter(pk=instance.deal_id).first()
+            document = Document.objects.select_for_update().filter(pk=instance.pk).first()
+            if not document:
+                raise NotFound()
+            capabilities = document_action_capabilities(document, self.request.user)
+            if not capabilities['can_delete']:
+                reason = capabilities['delete_block_reason']
+                if reason == EXECUTED_DOCUMENT_DELETE_REASON:
+                    raise PermissionDenied(reason)
+                raise DRFValidationError({'detail': reason})
+            enqueue_document_blob_deletion(
+                document,
+                reason=DocumentBlobDeletion.Reason.USER_DELETE,
+                requested_by=self.request.user,
                 ip_address=_client_ip(self.request),
-                description=f'Document uploaded: {document.document_name}',
-                metadata={'document_id': str(document.pk), 'category': document.category},
             )
+            document.delete()
+
+    @action(detail=False, methods=['post'], url_path='upload-intent')
+    def upload_intent(self, request):
+        serializer = DocumentUploadIntentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if (
+            getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'r2'
+            and not data.get('checksum_sha256')
+        ):
+            raise DRFValidationError({
+                'checksum_sha256': 'A SHA-256 checksum is required for R2 uploads.',
+            })
+        deal = data['deal']
+        # Match DealViewSet: inaccessible deals are indistinguishable from missing.
+        if not _can_access_deal(request.user, deal):
+            raise NotFound()
+
+        uploaded_by = request.user if getattr(request.user, 'is_authenticated', False) else None
+        visibility_roles = data.get('visibility_roles') or ['internal']
+        if not _is_staff_user(request.user) and 'internal' not in visibility_roles:
+            visibility_roles = [*visibility_roles, 'internal']
+
+        # Lock the deal row so concurrent uploads allocate distinct versions; the
+        # unique_document_version constraint is the database backstop.
+        with transaction.atomic():
+            Deal.objects.select_for_update().filter(pk=deal.pk).first()
+            next_version = _next_document_version(deal, data['category'], data['document_name'])
+            document_id = uuid.uuid4()
+            storage_key = build_document_key(deal.pk, document_id, next_version, data['document_name'])
+            document = Document.objects.create(
+                pk=document_id,
+                deal=deal,
+                document_name=data['document_name'],
+                category=data['category'],
+                subcategory=data.get('subcategory', ''),
+                version=next_version,
+                file_url=storage_key,
+                file_type=data['file_type'],
+                content_type=data['content_type'],
+                file_size_bytes=data['file_size_bytes'],
+                checksum_sha256=data.get('checksum_sha256', ''),
+                storage_status=DocumentStorageStatus.PENDING,
+                pipeline_stage_at_upload=deal.pipeline_status,
+                uploaded_by=uploaded_by,
+                notes=data.get('notes', ''),
+                expiry_date=data.get('expiry_date'),
+                visibility_roles=visibility_roles,
+            )
+            log_document_upload_started(
+                document,
+                performed_by=uploaded_by,
+                ip_address=_client_ip(request),
+            )
+        return self._upload_intent_response(request, document)
+
+    def _upload_intent_response(self, request, document):
+        upload_target = _build_upload_target(request, document)
+        return Response(
+            {
+                'document': DocumentSerializer(
+                    document,
+                    context=self.get_serializer_context(),
+                ).data,
+                'upload_url': upload_target.url,
+                'upload_method': upload_target.method,
+                'upload_headers': upload_target.headers,
+                'expires_in': upload_target.expires_in,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='complete')
+    def complete(self, request, pk=None):
+        document = self.get_object()
+        if document.storage_status != DocumentStorageStatus.PENDING:
+            return Response({'detail': 'Document upload is not pending.'}, status=status.HTTP_409_CONFLICT)
+        if not _can_access_deal(request.user, document.deal):
+            raise PermissionDenied('You cannot complete uploads for this deal.')
+
+        serializer = DocumentUploadCompleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        submitted_checksum = serializer.validated_data.get('checksum_sha256')
+        expected_checksum = document.checksum_sha256
+        if submitted_checksum and submitted_checksum != expected_checksum:
+            return Response(
+                {'detail': 'Checksum verification failed.'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        if (
+            getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'r2'
+            and not expected_checksum
+        ):
+            return Response(
+                {'detail': 'This R2 upload has no trusted checksum and cannot be completed.'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        # Inspect through trusted storage credentials. R2's presigned request
+        # signs exact length and checksum headers; this streaming verification is
+        # the independent completion-time backstop before evidence becomes ready.
+        storage = get_document_storage()
+        meta = storage.inspect_object(document.file_url, document.file_size_bytes)
+        if meta is None:
+            return Response({'detail': 'Uploaded file was not found in storage.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if document.file_size_bytes is not None and meta.size != document.file_size_bytes:
+            return Response(
+                {'detail': f'Uploaded size {meta.size} does not match expected {document.file_size_bytes}.'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        if expected_checksum and meta.checksum_sha256.lower() != expected_checksum.lower():
+            return Response({'detail': 'Checksum verification failed.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+        with transaction.atomic():
+            # Deal-first lock order matches destroy/cleanup to avoid races.
+            deal = Deal.objects.select_for_update().filter(pk=document.deal_id).first()
+            locked = Document.objects.select_for_update().filter(pk=document.pk).first()
+            if not locked:
+                raise NotFound()
+            if locked.storage_status != DocumentStorageStatus.PENDING:
+                return Response(
+                    {'detail': 'Document upload is not pending.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            locked.storage_status = DocumentStorageStatus.READY
+            if not locked.checksum_sha256:
+                locked.checksum_sha256 = meta.checksum_sha256
+            locked.save(update_fields=['storage_status', 'checksum_sha256'])
+            log_document_upload_completed(
+                locked,
+                performed_by=request.user,
+                ip_address=_client_ip(request),
+            )
+            document = locked
+            _ = deal
+
+        return Response(
+            DocumentSerializer(document, context=self.get_serializer_context()).data
+        )
+
+    @action(detail=True, methods=['get'], url_path='download')
+    def download(self, request, pk=None):
+        document = self.get_object()
+        if document.storage_status != DocumentStorageStatus.READY:
+            return Response({'detail': 'Document is not ready for download.'}, status=status.HTTP_409_CONFLICT)
+        if not _can_access_deal(request.user, document.deal):
+            raise PermissionDenied('You cannot download documents for this deal.')
+
+        download_target = _build_download_target(request, document)
+        payload = {
+            'download_url': download_target.url,
+            'expires_in': download_target.expires_in,
+            'document_name': document.document_name,
+            'filename': _download_filename(document),
+            'content_type': document.content_type or 'application/octet-stream',
+            'file_size_bytes': document.file_size_bytes,
+        }
+        return Response(DocumentDownloadSerializer(payload).data)
+
+    @action(detail=True, methods=['put', 'get'], url_path='blob')
+    def blob(self, request, pk=None):
+        if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') != 'local':
+            return Response({'detail': 'Direct blob access is only available for local storage.'}, status=status.HTTP_404_NOT_FOUND)
+
+        document = Document.objects.select_related('deal').filter(pk=pk).first()
+        if document is None:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        # Match DealViewSet: do not confirm deal/document existence to outsiders.
+        if not _can_access_deal(request.user, document.deal):
+            raise NotFound()
+
+        storage = get_document_storage()
+        if request.method == 'PUT':
+            if document.storage_status != DocumentStorageStatus.PENDING:
+                return Response({'detail': 'Document upload is not pending.'}, status=status.HTTP_409_CONFLICT)
+            body = request.body
+            if len(body) > max_upload_bytes():
+                return Response({'detail': 'File exceeds maximum upload size.'}, status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+            if document.file_size_bytes is not None and len(body) != document.file_size_bytes:
+                return Response(
+                    {'detail': f'Uploaded size {len(body)} does not match expected {document.file_size_bytes}.'},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            request_content_type = (request.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+            declared_content_type = (document.content_type or '').split(';', 1)[0].strip().lower()
+            if declared_content_type and request_content_type and request_content_type != declared_content_type:
+                return Response(
+                    {'detail': f'Content-Type {request_content_type} does not match expected {declared_content_type}.'},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            # If a checksum was declared at upload-intent, verify the received
+            # bytes against it before storing anything; otherwise record the
+            # computed digest so `complete` and downloads have it on file.
+            computed_checksum = sha256_hex(body)
+            if document.checksum_sha256 and computed_checksum.lower() != document.checksum_sha256.lower():
+                return Response(
+                    {'detail': 'Checksum verification failed.'},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            content_type = request_content_type or declared_content_type or 'application/octet-stream'
+            storage.write_object(document.file_url, body, content_type)
+            document.checksum_sha256 = computed_checksum
+            document.save(update_fields=['checksum_sha256'])
+            return Response({'detail': 'Upload received.'}, status=status.HTTP_200_OK)
+
+        if document.storage_status != DocumentStorageStatus.READY:
+            return Response({'detail': 'Document is not ready for download.'}, status=status.HTTP_409_CONFLICT)
+        if not _is_staff_user(request.user):
+            visible = _filter_visibility_role(Document.objects.filter(pk=document.pk), 'internal')
+            if not visible.exists():
+                raise PermissionDenied('You cannot download this document.')
+        try:
+            body, meta = storage.read_object(document.file_url)
+        except FileNotFoundError:
+            return Response({'detail': 'Stored file was not found.'}, status=status.HTTP_404_NOT_FOUND)
+        response = HttpResponse(body, content_type=document.content_type or meta.content_type)
+        response['Content-Disposition'] = f'attachment; filename="{_download_filename(document)}"'
+        return response
+
+
+class DealNoteViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = DealNoteSerializer
+    queryset = DealNote.objects.select_related('deal', 'author').prefetch_related('attachments')
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if not _is_staff_user(self.request.user):
+            queryset = queryset.filter(deal__assigned_analyst=self.request.user)
+        deal_id = self.request.query_params.get('deal')
+        if deal_id:
+            queryset = queryset.filter(deal=_uuid_filter_value(deal_id, 'deal'))
+        return queryset
+
+    def perform_create(self, serializer):
+        data = serializer.validated_data
+        if not _can_access_deal(self.request.user, data['deal']):
+            raise NotFound()
+        note = create_note(
+            deal=data['deal'],
+            author=self.request.user,
+            body=data['body'],
+            attachments=data.get('attachments') or [],
+            ip_address=_client_ip(self.request),
+        )
+        serializer.instance = note
+
+    def perform_update(self, serializer):
+        if not can_manage_note(serializer.instance, self.request.user):
+            raise PermissionDenied('Only the note author or staff may edit this note.')
+        data = serializer.validated_data
+        serializer.instance = update_note(
+            serializer.instance,
+            performed_by=self.request.user,
+            body=data.get('body'),
+            attachments=data.get('attachments'),
+            attachments_provided='attachments' in data,
+            ip_address=_client_ip(self.request),
+        )
+
+    def perform_destroy(self, instance):
+        if not can_manage_note(instance, self.request.user):
+            raise PermissionDenied('Only the note author or staff may delete this note.')
+        delete_note(
+            instance,
+            performed_by=self.request.user,
+            ip_address=_client_ip(self.request),
+        )
 
 
 class ActivityLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -434,19 +925,53 @@ def _client_ip(request):
     return None
 
 
+def _stage_timing_metrics(current_queryset, status_counts, *, history_queryset=None):
+    """Small, portable timing metrics without database-specific duration SQL."""
+    now = timezone.now()
+    current_totals = {}
+    total_current_days = 0
+    current_count = 0
+    for pipeline_status, entered_at in current_queryset.values_list('pipeline_status', 'current_stage_entered_at'):
+        days = max(0, (now - entered_at).total_seconds() / 86400) if entered_at else 0
+        total, count = current_totals.get(pipeline_status, (0, 0))
+        current_totals[pipeline_status] = (total + days, count + 1)
+        total_current_days += days
+        current_count += 1
+
+    for row in status_counts:
+        total, count = current_totals.get(row['pipeline_status'], (0, 0))
+        row['average_days_in_current_stage'] = round(total / count, 2) if count else 0
+
+    completed_totals = {}
+    history_source = history_queryset if history_queryset is not None else current_queryset
+    stage_events = DealStageEvent.objects.filter(
+        deal_id__in=history_source.values('pk'),
+        exited_at__isnull=False,
+    ).values_list('to_status', 'entered_at', 'exited_at')
+    for pipeline_status, entered_at, exited_at in stage_events:
+        days = max(0, (exited_at - entered_at).total_seconds() / 86400)
+        total, count = completed_totals.get(pipeline_status, (0, 0))
+        completed_totals[pipeline_status] = (total + days, count + 1)
+
+    return {
+        'average_days_in_current_stage': round(total_current_days / current_count, 2) if current_count else 0,
+        'average_stage_duration_days': [
+            {
+                'pipeline_status': pipeline_status,
+                'average_days': round(total / count, 2),
+                'completed_events': count,
+            }
+            for pipeline_status, (total, count) in sorted(completed_totals.items())
+        ],
+    }
+
+
 def _valid_ip(value):
     try:
         ip_address(value)
     except ValueError:
         return False
     return True
-
-
-def _uuid_filter_value(value, field_name):
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError) as exc:
-        raise DRFValidationError({field_name: 'Invalid UUID.'}) from exc
 
 
 def _int_filter_value(value, field_name):
@@ -456,14 +981,20 @@ def _int_filter_value(value, field_name):
         raise DRFValidationError({field_name: 'Invalid integer.'}) from exc
 
 
-def _is_staff_user(user):
-    return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))
-
-
-def _can_access_deal(user, deal):
-    if not getattr(user, 'is_authenticated', False):
-        return False
-    return _is_staff_user(user) or deal.assigned_analyst_id == user.id
+def _require_staff_unlinked_delete(
+    instance,
+    *,
+    user,
+    subject_label,
+    relation_name,
+    subject_plural=None,
+):
+    if not _is_staff_user(user):
+        raise PermissionDenied(f'Only staff may delete {subject_plural or f"{subject_label}s"}.')
+    if getattr(instance, relation_name).exists():
+        raise DRFValidationError({
+            'detail': f'This {subject_label} is linked to one or more deals and cannot be deleted.',
+        })
 
 
 def _filter_visibility_role(queryset, visibility_role):
@@ -473,17 +1004,63 @@ def _filter_visibility_role(queryset, visibility_role):
     return queryset.filter(pk__in=matching_ids)
 
 
-def _django_validation_response(exc):
-    if hasattr(exc, 'message_dict'):
-        return Response(exc.message_dict, status=status.HTTP_400_BAD_REQUEST)
-    return Response({'detail': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+def _next_document_version(deal, category, document_name):
+    return (
+        Document.objects.filter(
+            deal=deal,
+            category=category,
+            document_name=document_name,
+        ).aggregate(max_version=Max('version'))['max_version'] or 0
+    ) + 1
 
 
-def _property_integrity_response(address_normalized):
+def _build_upload_target(request, document) -> PresignedUpload:
+    content_type = document.content_type or 'application/octet-stream'
+    if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'local':
+        return PresignedUpload(
+            # Keep authenticated local blob traffic on the SPA/API origin. An
+            # absolute development URL points at :8000 while the SPA normally
+            # uses the :3000 proxy, which makes the frontend treat the target as
+            # external and (correctly) withhold its bearer token.
+            url=f'/api/documents/{document.pk}/blob/',
+            method='PUT',
+            headers={'Content-Type': content_type},
+            expires_in=0,
+        )
+    return get_document_storage().presign_upload(
+        document.file_url,
+        content_type,
+        document.file_size_bytes,
+        document.checksum_sha256,
+    )
+
+
+def _download_filename(document) -> str:
+    """Filename for Content-Disposition, appending the file extension only when
+    the document name does not already carry it (avoids `report.pdf.pdf`)."""
+    name = sanitize_filename(document.document_name)
+    ext = (document.file_type or '').lower().lstrip('.')
+    if ext and not name.lower().endswith(f'.{ext}'):
+        name = f'{name}.{ext}'
+    return name
+
+
+def _build_download_target(request, document) -> PresignedDownload:
+    content_type = document.content_type or 'application/octet-stream'
+    if getattr(settings, 'DOCUMENT_STORAGE_BACKEND', 'local') == 'local':
+        return PresignedDownload(
+            url=f'/api/documents/{document.pk}/blob/',
+            expires_in=0,
+        )
+    return get_document_storage().presign_download(document.file_url, _download_filename(document), content_type)
+
+
+def _property_integrity_response(address_normalized, user=None):
     existing_property = None
     if address_normalized:
         existing_property = Property.objects.filter(address_normalized=address_normalized).first()
     body = {'address_normalized': 'A property with this normalized address already exists.'}
-    if existing_property:
+    # Only reveal the UUID when the caller could already attach that property.
+    if existing_property and (user is None or _can_attach_property(user, existing_property)):
         body['existing_property'] = str(existing_property.pk)
     return Response(body, status=status.HTTP_400_BAD_REQUEST)

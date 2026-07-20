@@ -18,3 +18,5 @@ DATABASES = {
 PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 STATICFILES_DIRS = []
+
+DOCUMENT_STORAGE_BACKEND = 'local'

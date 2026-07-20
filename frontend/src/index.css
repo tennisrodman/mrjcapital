@@ -12,6 +12,7 @@
   --paper-elevated: #ffffff;
   --brass: #b8956a;
   --brass-light: #d4bc94;
+  --brass-ink: #6f532e;
   --slate: #5c6370;
   --border: #e8e4dc;
   --header-bg: #141820;
@@ -62,3 +63,14 @@
 .stagger-2 { animation-delay: 0.12s; }
 .stagger-3 { animation-delay: 0.19s; }
 .stagger-4 { animation-delay: 0.26s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .stagger-1,
+  .stagger-2,
+  .stagger-3,
+  .stagger-4 {
+    animation: none !important;
+    animation-delay: 0s !important;
+  }
+}

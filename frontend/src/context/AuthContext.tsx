@@ -1,5 +1,5 @@
 import { createContext, useState, useEffect, ReactNode } from 'react';
-import { apiRequest, endpoint, getAuthHeaders, setTokens, clearTokens, getAccessToken, getRefreshToken } from '../config/api';
+import { apiRequest, DEFAULT_HEADERS, endpoint, setTokens, clearTokens, getAccessToken, getRefreshToken } from '../config/api';
 
 interface User {
   username: string;
@@ -73,15 +73,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     try {
       if (isAuthenticated) {
-        // Use raw fetch to avoid apiRequest's implicit token-refresh-on-401 retry:
-        // if the access token has expired, apiRequest would exchange the old refresh
-        // token for a new one, then send the stale refresh token to logout — leaving
-        // the newly-issued refresh token valid. Reading the refresh token here (after
-        // any prior refresh) and bypassing the retry ensures the correct token is blacklisted.
+        // Logout is authorized by possession of the refresh token. Do not send the
+        // access token: an expired Authorization header would make DRF reject the
+        // request before the refresh token can be revoked.
         const refreshToken = getRefreshToken();
         await fetch(endpoint('api/auth/logout/'), {
           method: 'POST',
-          headers: getAuthHeaders(),
+          headers: DEFAULT_HEADERS,
           body: JSON.stringify({ refresh: refreshToken }),
         });
       }

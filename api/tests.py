@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import uuid
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
@@ -12,12 +13,27 @@ from django.db import connection, IntegrityError
 from django.test import RequestFactory, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from api.admin import ActivityLogAdmin, SponsorAdmin
 from api.fields import EncryptedTextField, _fernet
-from api.models import ActivityActionType, ActivityLog, Deal, Document, PipelineStatus, Property, Sponsor
+from api.models import (
+    ActivityActionType,
+    ActivityLog,
+    Broker,
+    Deal,
+    DealNote,
+    Document,
+    DocumentBlobDeletion,
+    DocumentStorageStatus,
+    Fund,
+    PipelineStatus,
+    Property,
+    ScreeningAssessment,
+    Sponsor,
+)
 from api.services import normalize_address
 
 
@@ -72,6 +88,43 @@ class AuthFlowTests(APITestCase):
         self.assertEqual(resp.data['username'], self.username)
         self.assertEqual(resp.data['email'], 'tester@example.com')
         self.assertIn('is_staff', resp.data)
+
+    def test_logout_revokes_refresh_without_access_authentication(self):
+        login = self.client.post(
+            reverse('login'),
+            {'username': self.username, 'password': self.password},
+            format='json',
+        )
+        refresh = login.data['tokens']['refresh']
+
+        logout = self.client.post(reverse('logout'), {'refresh': refresh}, format='json')
+
+        self.assertEqual(logout.status_code, status.HTTP_200_OK)
+        refreshed = self.client.post(reverse('token_refresh'), {'refresh': refresh}, format='json')
+        self.assertEqual(refreshed.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_ignores_a_stale_access_header_and_revokes_refresh(self):
+        login = self.client.post(
+            reverse('login'),
+            {'username': self.username, 'password': self.password},
+            format='json',
+        )
+        refresh = login.data['tokens']['refresh']
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer stale-or-malformed-access')
+
+        logout = self.client.post(reverse('logout'), {'refresh': refresh}, format='json')
+
+        self.assertEqual(logout.status_code, status.HTTP_200_OK)
+        self.client.credentials()
+        refreshed = self.client.post(reverse('token_refresh'), {'refresh': refresh}, format='json')
+        self.assertEqual(refreshed.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_requires_a_valid_refresh_token(self):
+        missing = self.client.post(reverse('logout'), {}, format='json')
+        invalid = self.client.post(reverse('logout'), {'refresh': 'not-a-token'}, format='json')
+
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_unknown_api_route_returns_json_404(self):
         resp = self.client.get('/api/does-not-exist/')
@@ -157,6 +210,96 @@ class DealSpineApiTests(APITestCase):
             requested_amount='2500000.00',
             details={'source_contact_name': 'Avery Sponsor'},
         )
+
+    def approve_for_quoting(self, deal):
+        return ScreeningAssessment.objects.create(
+            deal=deal,
+            version=1,
+            status=ScreeningAssessment.Status.FINALIZED,
+            decision=ScreeningAssessment.Decision.ADVANCE,
+            reviewer=self.user,
+            finalized_at=timezone.now(),
+            loan_amount='2000000.00',
+            as_is_value='3000000.00',
+            project_cost='2500000.00',
+            noi='250000.00',
+            stabilized_noi='300000.00',
+            annual_debt_service='180000.00',
+            occupancy='90.00',
+            proposed_rate='8.0000',
+            proposed_term_months=24,
+            exit_strategy='Refinance after stabilization.',
+            exit_cap_rate='5.5000',
+        )
+
+    def _upload_intent(self, deal, name, category, file_type='pdf', visibility_roles=None,
+                       size=32, content_type='application/pdf'):
+        payload = {
+            'deal': str(deal.pk),
+            'document_name': name,
+            'category': category,
+            'file_type': file_type,
+            'file_size_bytes': size,
+            'content_type': content_type,
+        }
+        if visibility_roles is not None:
+            payload['visibility_roles'] = visibility_roles
+        return self.client.post('/api/documents/upload-intent/', payload, format='json')
+
+    def _create_ready_document(self, deal, name, category, file_type='pdf', visibility_roles=None):
+        document_id = uuid.uuid4()
+        return Document.objects.create(
+            id=document_id,
+            deal=deal,
+            document_name=name,
+            category=category,
+            file_url=f'deals/{deal.pk}/{document_id}/v1/{file_type}-doc.{file_type}',
+            file_type=file_type,
+            content_type='application/pdf',
+            file_size_bytes=32,
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.user,
+            visibility_roles=visibility_roles or ['internal'],
+        )
+
+    def test_document_capabilities_match_execution_policy_for_analyst_and_staff(self):
+        deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Execution evidence', 'legal')
+
+        ordinary = self.client.get(f'/api/documents/{document.pk}/')
+        self.assertEqual(ordinary.status_code, status.HTTP_200_OK)
+        self.assertTrue(ordinary.data['can_edit'])
+        self.assertTrue(ordinary.data['can_delete'])
+        self.assertEqual(ordinary.data['edit_block_reason'], '')
+        self.assertEqual(ordinary.data['delete_block_reason'], '')
+
+        document.is_executed = True
+        document.save(update_fields=['is_executed'])
+        protected = self.client.get(f'/api/documents/{document.pk}/')
+        self.assertFalse(protected.data['can_edit'])
+        self.assertFalse(protected.data['can_delete'])
+        self.assertEqual(
+            protected.data['edit_block_reason'],
+            'Executed document metadata cannot be changed.',
+        )
+        self.assertEqual(
+            protected.data['delete_block_reason'],
+            'Only staff may delete executed documents.',
+        )
+
+        metadata_patch = self.client.patch(
+            f'/api/documents/{document.pk}/',
+            {'notes': 'Attempt to rewrite executed evidence'},
+            format='json',
+        )
+        self.assertEqual(metadata_patch.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('notes', metadata_patch.data)
+
+        self.client.force_authenticate(self.staff_user)
+        staff_view = self.client.get(f'/api/documents/{document.pk}/')
+        self.assertFalse(staff_view.data['can_edit'])
+        self.assertTrue(staff_view.data['can_delete'])
+        self.assertEqual(staff_view.data['delete_block_reason'], '')
 
     def test_non_staff_deal_access_is_scoped_to_assigned_analyst(self):
         own_deal = self.create_deal()
@@ -248,6 +391,299 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(deal.assigned_analyst, self.user)
         self.assertEqual(deal.deal_properties.get().property, self.property)
         self.assertEqual(resp.data['investment_category'], 'debt')
+        property_event = next(
+            event
+            for event in ActivityLog.objects.filter(deal=deal, action_type=ActivityActionType.FIELD_UPDATED)
+            if event.metadata.get('field') == 'property_ids'
+        )
+        self.assertIn('1 attached', property_event.description)
+        self.assertEqual(property_event.metadata['primary_property_id'], str(self.property.pk))
+
+    def test_create_sparse_deal_without_sponsor_or_properties(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Early First Look',
+                'investment_type': 'whole_loan_bridge',
+                'source_channel': 'internal_prospecting',
+                'requested_amount': '1000000.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        self.assertIsNone(deal.sponsor)
+        self.assertEqual(deal.deal_properties.count(), 0)
+        self.assertIsNone(resp.data['sponsor'])
+        self.assertEqual(resp.data['properties'], [])
+
+    def test_create_deal_with_nested_sponsor_broker_and_property(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Nested Intake Deal',
+                'investment_type': 'whole_loan_bridge',
+                'source_channel': 'broker',
+                'requested_amount': '3500000.00',
+                'sponsor': {
+                    'entity_name': 'Nested Sponsor LLC',
+                    'entity_type': 'llc',
+                    'primary_contact_name': 'Nora Sponsor',
+                    'primary_contact_email': 'nora@example.com',
+                },
+                'broker': {
+                    'company_name': 'Nested Capital Markets',
+                    'email': 'broker@example.com',
+                },
+                'properties': [
+                    {
+                        'address': '777 Nested Way',
+                        'city': 'Pasadena',
+                        'state': 'CA',
+                        'zip': '91101',
+                        'property_type': 'multifamily',
+                        'msa': 'Los Angeles-Long Beach-Anaheim',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        self.assertEqual(deal.sponsor.entity_name, 'Nested Sponsor LLC')
+        self.assertEqual(deal.broker.company_name, 'Nested Capital Markets')
+        self.assertEqual(deal.broker.contact_name, 'Nested Capital Markets')
+        self.assertEqual(deal.deal_properties.get().property.address, '777 Nested Way')
+
+    def test_create_deal_with_mixed_existing_and_new_properties(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Mixed Property Intake',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '4500000.00',
+                'properties': [
+                    str(self.property.pk),
+                    {
+                        'address': '888 Mixed Ave',
+                        'city': 'Glendale',
+                        'state': 'CA',
+                        'zip': '91203',
+                        'property_type': 'office',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        deal = Deal.objects.get(pk=resp.data['id'])
+        links = list(deal.deal_properties.order_by('-is_primary', 'property__address'))
+        self.assertEqual(len(links), 2)
+        self.assertEqual(links[0].property, self.property)
+        self.assertTrue(links[0].is_primary)
+        self.assertTrue(Property.objects.filter(address='888 Mixed Ave').exists())
+
+    def test_nested_property_duplicate_is_rejected(self):
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Duplicate Nested Property',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    {
+                        'address': '123 Main St',
+                        'city': 'Los Angeles',
+                        'state': 'CA',
+                        'zip': '90001',
+                        'property_type': 'multifamily',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('properties', resp.data)
+        self.assertFalse(Deal.objects.filter(name='Duplicate Nested Property').exists())
+
+    def test_non_staff_cannot_attach_another_analysts_property(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=None,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+        other_deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Steal Property Deal',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'property_ids': [str(self.property.pk)],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('property_ids', resp.data)
+        self.assertFalse(Deal.objects.filter(name='Steal Property Deal').exists())
+
+    def test_nested_property_duplicate_hides_inaccessible_existing_property_id(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=None,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+        other_deal.deal_properties.create(property=self.property, is_primary=True)
+
+        resp = self.client.post(
+            '/api/deals/',
+            {
+                'name': 'Duplicate Nested Property Hidden',
+                'investment_type': 'whole_loan_bridge',
+                'sponsor': str(self.sponsor.pk),
+                'source_channel': 'direct',
+                'requested_amount': '2500000.00',
+                'properties': [
+                    {
+                        'address': '123 Main St',
+                        'city': 'Los Angeles',
+                        'state': 'CA',
+                        'zip': '90001',
+                        'property_type': 'multifamily',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        nested = resp.data['properties']
+        detail = nested[0] if isinstance(nested, list) else nested[0] if 0 in nested else nested['0']
+        self.assertIn('address_normalized', detail)
+        self.assertNotIn('existing_property', detail)
+        self.assertFalse(Deal.objects.filter(name='Duplicate Nested Property Hidden').exists())
+
+    def test_nested_create_rolls_back_if_property_linking_fails(self):
+        with patch(
+            'api.services.deal_properties.DealProperty.objects.bulk_create',
+            side_effect=IntegrityError('bulk failed'),
+        ):
+            with self.assertRaises(IntegrityError):
+                self.client.post(
+                    '/api/deals/',
+                    {
+                        'name': 'Rollback Nested Intake',
+                        'investment_type': 'whole_loan_bridge',
+                        'source_channel': 'broker',
+                        'requested_amount': '2500000.00',
+                        'sponsor': {
+                            'entity_name': 'Rollback Sponsor LLC',
+                            'entity_type': 'llc',
+                            'primary_contact_name': 'Riley Rollback',
+                            'primary_contact_email': 'rollback@example.com',
+                        },
+                        'broker': {
+                            'company_name': 'Rollback Broker LLC',
+                            'email': 'rollback-broker@example.com',
+                        },
+                        'properties': [
+                            {
+                                'address': '999 Rollback Rd',
+                                'city': 'Burbank',
+                                'state': 'CA',
+                                'zip': '91501',
+                                'property_type': 'industrial',
+                            },
+                        ],
+                    },
+                    format='json',
+                )
+
+        self.assertFalse(Deal.objects.filter(name='Rollback Nested Intake').exists())
+        self.assertFalse(Sponsor.objects.filter(entity_name='Rollback Sponsor LLC').exists())
+        self.assertFalse(Broker.objects.filter(company_name='Rollback Broker LLC').exists())
+        self.assertFalse(Property.objects.filter(address='999 Rollback Rd').exists())
+
+    def test_nested_property_integrity_error_returns_validation_error(self):
+        with patch('api.serializers.Property.objects.create', side_effect=IntegrityError('duplicate key')):
+            resp = self.client.post(
+                '/api/deals/',
+                {
+                    'name': 'Race Duplicate Property',
+                    'investment_type': 'whole_loan_bridge',
+                    'sponsor': str(self.sponsor.pk),
+                    'source_channel': 'direct',
+                    'requested_amount': '2500000.00',
+                    'properties': [
+                        {
+                            'address': '999 Race Rd',
+                            'city': 'Burbank',
+                            'state': 'CA',
+                            'zip': '91501',
+                            'property_type': 'industrial',
+                        },
+                    ],
+                },
+                format='json',
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('properties', resp.data)
+        self.assertFalse(Deal.objects.filter(name='Race Duplicate Property').exists())
+
+    def test_patch_can_fill_empty_relationships_once(self):
+        broker = Broker.objects.create(
+            company_name='Fill Later Broker',
+            contact_name='Fill Later Broker',
+            email='fill-broker@example.com',
+        )
+        fund = Fund.objects.create(name='Fill Later Fund', status='forming')
+        deal = Deal.objects.create(
+            name='Fill Later Deal',
+            investment_type='whole_loan_bridge',
+            assigned_analyst=self.user,
+            source_channel='direct',
+            requested_amount='2500000.00',
+        )
+
+        fill = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {
+                'sponsor': str(self.sponsor.pk),
+                'broker': str(broker.pk),
+                'fund': str(fund.pk),
+            },
+            format='json',
+        )
+
+        self.assertEqual(fill.status_code, status.HTTP_200_OK)
+        deal.refresh_from_db()
+        self.assertEqual(deal.sponsor, self.sponsor)
+        self.assertEqual(deal.broker, broker)
+        self.assertEqual(deal.fund, fund)
+
+        remove = self.client.patch(f'/api/deals/{deal.pk}/', {'broker': None}, format='json')
+        self.assertEqual(remove.status_code, status.HTTP_400_BAD_REQUEST)
+        deal.refresh_from_db()
+        self.assertEqual(deal.broker, broker)
 
     def test_deal_rejects_duplicate_property_ids(self):
         resp = self.client.post(
@@ -321,6 +757,39 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(deal.name, '123 Main St Bridge')
         self.assertEqual(deal.deal_properties.count(), 1)
         self.assertEqual(deal.deal_properties.get().property, self.property)
+
+    def test_deal_property_replacement_records_membership_and_primary_change(self):
+        deal = self.create_deal()
+        deal.deal_properties.create(property=self.property, is_primary=True)
+        replacement = Property.objects.create(
+            address='901 Replacement Rd',
+            city='Burbank',
+            state='CA',
+            zip='91502',
+            address_normalized=normalize_address('901 Replacement Rd', 'Burbank', 'CA', '91502'),
+            property_type='office',
+        )
+
+        response = self.client.patch(
+            f'/api/deals/{deal.pk}/',
+            {'property_ids': [str(replacement.pk)]},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        event = next(
+            event
+            for event in ActivityLog.objects.filter(
+                deal=deal,
+                action_type=ActivityActionType.FIELD_UPDATED,
+            ).order_by('-performed_at')
+            if event.metadata.get('field') == 'property_ids'
+        )
+        self.assertEqual(event.metadata['attached_property_ids'], [str(replacement.pk)])
+        self.assertEqual(event.metadata['detached_property_ids'], [str(self.property.pk)])
+        self.assertEqual(event.metadata['previous_primary_property_id'], str(self.property.pk))
+        self.assertEqual(event.metadata['primary_property_id'], str(replacement.pk))
+        self.assertIn('primary changed to 901 Replacement Rd', event.description)
 
     def test_deal_patch_cannot_directly_change_status_fields(self):
         deal = self.create_deal()
@@ -421,6 +890,7 @@ class DealSpineApiTests(APITestCase):
             {'to_status': 'screening', 'reason': 'Start screening'},
             format='json',
         )
+        self.approve_for_quoting(deal)
         self.client.post(
             f'/api/deals/{deal.pk}/transition/',
             {'to_status': 'quoting', 'reason': 'Ready to quote'},
@@ -542,6 +1012,7 @@ class DealSpineApiTests(APITestCase):
             {'to_status': 'screening', 'reason': 'Start screening'},
             format='json',
         )
+        self.approve_for_quoting(deal)
         self.client.post(
             f'/api/deals/{deal.pk}/transition/',
             {'to_status': 'quoting', 'reason': 'Advance to quoting'},
@@ -559,14 +1030,88 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(log.new_value, 'raising')
         self.assertEqual(log.metadata['field'], 'syndication_status')
 
+    def test_dead_pipeline_transition_cancels_active_syndication_atomically(self):
+        deal = self.create_deal()
+        Deal.objects.filter(pk=deal.pk).update(
+            pipeline_status=PipelineStatus.QUOTING,
+            syndication_status='raising',
+        )
+
+        response = self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {'to_status': 'dead', 'reason': 'Sponsor withdrew'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['pipeline_status'], 'dead')
+        self.assertEqual(response.data['syndication_status'], 'cancelled')
+        cancellation = ActivityLog.objects.get(
+            deal=deal,
+            action_type=ActivityActionType.STATUS_CHANGE,
+            old_value='raising',
+            new_value='cancelled',
+        )
+        self.assertTrue(cancellation.metadata['automatic'])
+        self.assertEqual(cancellation.metadata['trigger_pipeline_status'], 'dead')
+
+    def test_exited_requires_active_syndication_to_be_resolved_without_override(self):
+        deal = self.create_deal()
+        Deal.objects.filter(pk=deal.pk).update(
+            pipeline_status=PipelineStatus.SERVICING,
+            syndication_status='raising',
+        )
+        self.client.force_authenticate(self.staff_user)
+
+        blocked = self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {
+                'to_status': 'exited',
+                'reason': 'Asset sold',
+                'override_readiness': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(blocked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            blocked.data['readiness']['blockers'],
+            ['syndication_resolution_required'],
+        )
+        self.assertFalse(blocked.data['readiness']['can_override'])
+        deal.refresh_from_db()
+        self.assertEqual(deal.pipeline_status, PipelineStatus.SERVICING)
+
+        cancelled = self.client.post(
+            f'/api/deals/{deal.pk}/transition-syndication/',
+            {'to_status': 'cancelled', 'reason': 'Fundraising ended before exit'},
+            format='json',
+        )
+        self.assertEqual(cancelled.status_code, status.HTTP_200_OK)
+
+        exited = self.client.post(
+            f'/api/deals/{deal.pk}/transition/',
+            {'to_status': 'exited', 'reason': 'Asset sold'},
+            format='json',
+        )
+        self.assertEqual(exited.status_code, status.HTTP_200_OK)
+        self.assertEqual(exited.data['syndication_status'], 'cancelled')
+
     def test_syndication_cannot_start_after_pipeline_status_closes(self):
         deal = self.create_deal()
+        self.approve_for_quoting(deal)
+        self.client.force_authenticate(self.staff_user)
         for to_status in ['screening', 'quoting', 'negotiating', 'signed', 'closing', 'closed']:
             self.client.post(
                 f'/api/deals/{deal.pk}/transition/',
-                {'to_status': to_status, 'reason': f'Advance to {to_status}'},
+                {
+                    'to_status': to_status,
+                    'reason': f'Advance to {to_status}',
+                    'override_readiness': True,
+                },
                 format='json',
             )
+        self.client.force_authenticate(self.user)
 
         resp = self.client.post(
             f'/api/deals/{deal.pk}/transition-syndication/',
@@ -579,6 +1124,7 @@ class DealSpineApiTests(APITestCase):
 
     def test_syndication_can_close_after_pipeline_moves_to_servicing(self):
         deal = self.create_deal()
+        self.approve_for_quoting(deal)
         for to_status in ['screening', 'quoting']:
             self.client.post(
                 f'/api/deals/{deal.pk}/transition/',
@@ -591,12 +1137,18 @@ class DealSpineApiTests(APITestCase):
                 {'to_status': to_status, 'reason': f'Advance syndication to {to_status}'},
                 format='json',
             )
+        self.client.force_authenticate(self.staff_user)
         for to_status in ['negotiating', 'signed', 'closing', 'closed', 'servicing']:
             self.client.post(
                 f'/api/deals/{deal.pk}/transition/',
-                {'to_status': to_status, 'reason': f'Advance to {to_status}'},
+                {
+                    'to_status': to_status,
+                    'reason': f'Advance to {to_status}',
+                    'override_readiness': True,
+                },
                 format='json',
             )
+        self.client.force_authenticate(self.user)
 
         resp = self.client.post(
             f'/api/deals/{deal.pk}/transition-syndication/',
@@ -876,31 +1428,41 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(len(filtered_results), 1)
         self.assertEqual(filtered_results[0]['id'], str(log.pk))
 
-    def test_document_create_writes_activity_log(self):
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_allocates_sequential_versions(self):
         deal = self.create_deal()
 
-        resp = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Offering memo',
-                'category': 'offering_memo',
-                'version': 1,
-                'file_url': 'deals/123/offering-memo.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal', 'investor'],
-            },
-            format='json',
+        first = self._upload_intent(deal, 'Offering memo', 'offering_memo')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data['document']['version'], 1)
+        started = ActivityLog.objects.get(
+            action_type=ActivityActionType.DOCUMENT_UPLOAD_STARTED,
+            metadata__document_id=first.data['document']['id'],
         )
+        self.assertIn('Document upload started', started.description)
+        self.assertEqual(started.metadata['version'], 1)
 
-        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
-        log = ActivityLog.objects.get(action_type=ActivityActionType.DOCUMENT_UPLOAD)
-        self.assertEqual(log.deal, deal)
-        self.assertEqual(log.performed_by, self.user)
-        self.assertEqual(log.metadata['category'], 'offering_memo')
+        second = self._upload_intent(deal, 'Offering memo', 'offering_memo')
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.data['document']['version'], 2)
 
-    def test_document_server_controls_version_and_blocks_unsafe_paths_and_deal_changes(self):
+        # A different (category, name) starts its own version sequence.
+        other = self._upload_intent(deal, 'Loan agreement', 'legal')
+        self.assertEqual(other.data['document']['version'], 1)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_rolls_back_if_audit_log_write_fails(self):
         deal = self.create_deal()
+
+        with patch('api.services.audit.ActivityLog.objects.create', side_effect=IntegrityError('audit failed')):
+            with self.assertRaises(IntegrityError):
+                self._upload_intent(deal, 'Untracked document', 'legal')
+
+        self.assertFalse(Document.objects.filter(document_name='Untracked document').exists())
+
+    def test_document_identity_fields_are_immutable_on_update(self):
+        deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Offering memo', 'offering_memo')
         other_deal = Deal.objects.create(
             name='Other Deal',
             investment_type='whole_loan_bridge',
@@ -910,149 +1472,80 @@ class DealSpineApiTests(APITestCase):
             requested_amount='1000000.00',
         )
 
-        unsafe = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Unsafe path',
-                'category': 'legal',
-                'file_url': '../secrets/legal.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
+        # deal / category / document_name are guarded and rejected with a 400.
+        for field, value in [
+            ('deal', str(other_deal.pk)),
+            ('category', 'legal'),
+            ('document_name', 'Renamed'),
+        ]:
+            resp = self.client.patch(
+                f'/api/documents/{document.pk}/',
+                {field: value},
+                format='json',
+            )
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, field)
+            self.assertIn(field, resp.data, field)
+
+        # file_url is read-only, so a change attempt is silently ignored (not applied).
+        original_url = document.file_url
+        ignored = self.client.patch(
+            f'/api/documents/{document.pk}/',
+            {'file_url': f'deals/{other_deal.pk}/sneaky/secret.pdf'},
             format='json',
         )
-        self.assertEqual(unsafe.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('file_url', unsafe.data)
+        self.assertEqual(ignored.status_code, status.HTTP_200_OK)
 
-        first = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Offering memo',
-                'category': 'offering_memo',
-                'version': 99,
-                'file_url': 'deals/123/offering-memo-v1.pdf',
-                'file_type': 'pdf',
-                'is_executed': True,
-                'visibility_roles': ['internal'],
-            },
-            format='json',
-        )
-        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(first.data['version'], 1)
-        self.assertFalse(first.data['is_executed'])
+        document.refresh_from_db()
+        self.assertEqual(document.file_url, original_url)
+        self.assertEqual(document.category, 'offering_memo')
+        self.assertEqual(document.document_name, 'Offering memo')
 
-        second = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Offering memo',
-                'category': 'offering_memo',
-                'file_url': 'deals/123/offering-memo-v2.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
-            format='json',
-        )
-        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(second.data['version'], 2)
-
-        change_deal = self.client.patch(
-            f'/api/documents/{first.data["id"]}/',
-            {'deal': str(other_deal.pk)},
-            format='json',
-        )
-        self.assertEqual(change_deal.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_document_create_rolls_back_if_audit_log_write_fails(self):
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_complete_rolls_back_if_audit_log_write_fails(self):
         deal = self.create_deal()
+        content = b'%PDF-1.4 atomic complete'
+        intent = self._upload_intent(deal, 'Atomic document', 'legal', size=len(content))
+        doc_id = intent.data['document']['id']
+        self.client.put(
+            f'/api/documents/{doc_id}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
 
-        with patch('api.viewsets.ActivityLog.objects.create', side_effect=IntegrityError('audit failed')):
+        with patch('api.services.audit.ActivityLog.objects.create', side_effect=IntegrityError('audit failed')):
             with self.assertRaises(IntegrityError):
-                self.client.post(
-                    '/api/documents/',
-                    {
-                        'deal': str(deal.pk),
-                        'document_name': 'Atomic document',
-                        'category': 'legal',
-                        'file_url': 'deals/123/atomic.pdf',
-                        'file_type': 'pdf',
-                        'visibility_roles': ['internal'],
-                    },
-                    format='json',
-                )
+                self.client.post(f'/api/documents/{doc_id}/complete/', {}, format='json')
 
-        self.assertFalse(Document.objects.filter(document_name='Atomic document').exists())
+        # The status flip and the audit write share one transaction: neither lands.
+        document = Document.objects.get(pk=doc_id)
+        self.assertEqual(document.storage_status, DocumentStorageStatus.PENDING)
 
     def test_deal_delete_is_blocked_when_documents_exist(self):
         deal = self.create_deal()
-        self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Executed closing package',
-                'category': 'closing_docs',
-                'version': 1,
-                'file_url': 'deals/123/closing.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
-            format='json',
-        )
+        self._create_ready_document(deal, 'Executed closing package', 'closing_docs')
 
         resp = self.client.delete(f'/api/deals/{deal.pk}/')
 
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertTrue(Deal.objects.filter(pk=deal.pk).exists())
 
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
     def test_document_visibility_roles_are_validated_and_filterable(self):
         deal = self.create_deal()
 
-        invalid = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Bad visibility doc',
-                'category': 'legal',
-                'version': 1,
-                'file_url': 'deals/123/legal.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['public'],
-            },
-            format='json',
+        invalid = self._upload_intent(
+            deal, 'Bad visibility doc', 'legal', visibility_roles=['public'],
         )
         self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
 
-        investor_doc = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Investor package',
-                'category': 'investor_docs',
-                'version': 1,
-                'file_url': 'deals/123/investor.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal', 'investor'],
-            },
-            format='json',
+        self._create_ready_document(
+            deal, 'Investor package', 'investor_docs', visibility_roles=['internal', 'investor'],
         )
-        self.assertEqual(investor_doc.status_code, status.HTTP_201_CREATED)
-        internal_doc = self.client.post(
-            '/api/documents/',
-            {
-                'deal': str(deal.pk),
-                'document_name': 'Internal memo',
-                'category': 'legal',
-                'version': 1,
-                'file_url': 'deals/123/internal.pdf',
-                'file_type': 'pdf',
-                'visibility_roles': ['internal'],
-            },
-            format='json',
+        self._create_ready_document(
+            deal, 'Internal memo', 'legal', visibility_roles=['internal'],
         )
-        self.assertEqual(internal_doc.status_code, status.HTTP_201_CREATED)
 
+        # Non-staff analysts can only ever see the internal slice.
         filtered = self.client.get('/api/documents/?visibility_role=investor')
         self.assertEqual(filtered.status_code, status.HTTP_200_OK)
         self.assertEqual(response_results(filtered), [])
@@ -1063,6 +1556,408 @@ class DealSpineApiTests(APITestCase):
         filtered_results = response_results(staff_filtered)
         self.assertEqual(len(filtered_results), 1)
         self.assertEqual(filtered_results[0]['document_name'], 'Investor package')
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_complete_and_download_flow(self):
+        deal = self.create_deal()
+        content = b'%PDF-1.4 test document bytes'
+
+        intent = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Offering memo',
+                'category': 'offering_memo',
+                'file_type': 'pdf',
+                'content_type': 'application/pdf',
+                'file_size_bytes': len(content),
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(intent.status_code, status.HTTP_201_CREATED)
+        document = intent.data['document']
+        self.assertEqual(document['storage_status'], 'pending')
+        self.assertTrue(document['file_url'].startswith(f'deals/{deal.pk}/'))
+        self.assertEqual(
+            intent.data['upload_url'],
+            f'/api/documents/{document["id"]}/blob/',
+        )
+
+        upload = self.client.put(
+            f'/api/documents/{document["id"]}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
+        self.assertEqual(upload.status_code, status.HTTP_200_OK)
+
+        complete = self.client.post(f'/api/documents/{document["id"]}/complete/', {}, format='json')
+        self.assertEqual(complete.status_code, status.HTTP_200_OK)
+        self.assertEqual(complete.data['storage_status'], 'ready')
+        duplicate_complete = self.client.post(
+            f'/api/documents/{document["id"]}/complete/',
+            {},
+            format='json',
+        )
+        self.assertEqual(duplicate_complete.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(duplicate_complete.data['detail'], 'Document upload is not pending.')
+
+        log = ActivityLog.objects.filter(
+            action_type=ActivityActionType.DOCUMENT_UPLOAD,
+            metadata__document_id=document['id'],
+        )
+        self.assertEqual(log.count(), 1)
+        self.assertEqual(
+            ActivityLog.objects.filter(
+                action_type=ActivityActionType.DOCUMENT_UPLOAD_STARTED,
+                metadata__document_id=document['id'],
+            ).count(),
+            1,
+        )
+
+        listed = self.client.get(f'/api/documents/?deal={deal.pk}')
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response_results(listed)), 1)
+
+        download = self.client.get(f'/api/documents/{document["id"]}/download/')
+        self.assertEqual(download.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            download.data['download_url'],
+            f'/api/documents/{document["id"]}/blob/',
+        )
+
+        blob = self.client.get(f'/api/documents/{document["id"]}/blob/')
+        self.assertEqual(blob.status_code, status.HTTP_200_OK)
+        self.assertEqual(blob.content, content)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_blob_put_verifies_declared_checksum(self):
+        deal = self.create_deal()
+        content = b'%PDF-1.4 checksummed bytes'
+        wrong_checksum = hashlib.sha256(b'different bytes').hexdigest()
+
+        intent = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Checksum doc',
+                'category': 'offering_memo',
+                'file_type': 'pdf',
+                'content_type': 'application/pdf',
+                'file_size_bytes': len(content),
+                'checksum_sha256': wrong_checksum,
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(intent.status_code, status.HTTP_201_CREATED)
+        document_id = intent.data['document']['id']
+
+        rejected = self.client.put(
+            f'/api/documents/{document_id}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        self.assertEqual(Document.objects.get(pk=document_id).storage_status, 'pending')
+
+        # A matching declared checksum is accepted and stored.
+        Document.objects.filter(pk=document_id).update(
+            checksum_sha256=hashlib.sha256(content).hexdigest()
+        )
+        accepted = self.client.put(
+            f'/api/documents/{document_id}/blob/',
+            data=content,
+            content_type='application/pdf',
+        )
+        self.assertEqual(accepted.status_code, status.HTTP_200_OK)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='r2')
+    def test_r2_upload_intent_requires_a_valid_sha256(self):
+        deal = self.create_deal()
+
+        missing = self._upload_intent(deal, 'Missing checksum', 'legal')
+        malformed = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Malformed checksum',
+                'category': 'legal',
+                'file_type': 'pdf',
+                'file_size_bytes': 12,
+                'checksum_sha256': 'not-a-digest',
+            },
+            format='json',
+        )
+
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('checksum_sha256', missing.data)
+        self.assertEqual(malformed.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('checksum_sha256', malformed.data)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='r2')
+    def test_complete_rejects_blob_with_unverified_checksum(self):
+        from api.services.storage import ObjectMeta
+
+        deal = self.create_deal()
+        expected = hashlib.sha256(b'expected').hexdigest()
+        document = Document.objects.create(
+            deal=deal,
+            document_name='R2 integrity',
+            category='legal',
+            file_url=f'deals/{deal.pk}/{uuid.uuid4()}/v1/integrity.pdf',
+            file_type='pdf',
+            content_type='application/pdf',
+            file_size_bytes=8,
+            checksum_sha256=expected,
+            storage_status=DocumentStorageStatus.PENDING,
+            uploaded_by=self.user,
+            visibility_roles=['internal'],
+        )
+        fake_storage = type('FakeStorage', (), {
+            'inspect_object': lambda _self, _key, _expected_size=None: ObjectMeta(
+                size=8,
+                content_type='application/pdf',
+                etag='fake',
+                checksum_sha256=hashlib.sha256(b'tampered').hexdigest(),
+            ),
+        })()
+
+        with patch('api.viewsets.get_document_storage', return_value=fake_storage):
+            response = self.client.post(
+                f'/api/documents/{document.pk}/complete/',
+                {},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        document.refresh_from_db()
+        self.assertEqual(document.storage_status, DocumentStorageStatus.PENDING)
+
+    def test_r2_presign_binds_exact_size_checksum_and_single_write(self):
+        from api.services.storage import R2DocumentStorage
+
+        captured = {}
+
+        class FakeClient:
+            def generate_presigned_url(self, operation, *, Params, ExpiresIn):
+                captured.update(operation=operation, params=Params, expires=ExpiresIn)
+                return 'https://r2.example/upload'
+
+        storage = R2DocumentStorage.__new__(R2DocumentStorage)
+        storage.bucket = 'documents'
+        storage.client = FakeClient()
+        checksum = hashlib.sha256(b'hello world').hexdigest()
+
+        target = storage.presign_upload('deal/key', 'application/pdf', 11, checksum)
+
+        self.assertEqual(captured['operation'], 'put_object')
+        self.assertEqual(captured['params']['ContentLength'], 11)
+        self.assertEqual(captured['params']['IfNoneMatch'], '*')
+        self.assertEqual(
+            captured['params']['ChecksumSHA256'],
+            base64.b64encode(bytes.fromhex(checksum)).decode('ascii'),
+        )
+        self.assertEqual(target.headers['If-None-Match'], '*')
+        self.assertEqual(
+            target.headers['x-amz-checksum-sha256'],
+            captured['params']['ChecksumSHA256'],
+        )
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_document_upload_intent_rejects_oversized_file(self):
+        deal = self.create_deal()
+        resp = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Huge file',
+                'category': 'financials',
+                'file_type': 'pdf',
+                'file_size_bytes': 200 * 1024 * 1024,
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_document_direct_create_is_blocked(self):
+        deal = self.create_deal()
+        resp = self.client.post(
+            '/api/documents/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Blocked',
+                'category': 'legal',
+                'file_type': 'pdf',
+                'visibility_roles': ['internal'],
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(Document.objects.filter(document_name='Blocked').exists())
+
+    def test_document_details_rejects_sensitive_identifiers(self):
+        deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Sensitive details doc', 'legal')
+        resp = self.client.patch(
+            f'/api/documents/{document.pk}/',
+            {'details': {'notes': ['Sponsor SSN is 123-45-6789']}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('details', resp.data)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_non_staff_upload_intent_forces_internal_visibility(self):
+        deal = self.create_deal()
+        resp = self.client.post(
+            '/api/documents/upload-intent/',
+            {
+                'deal': str(deal.pk),
+                'document_name': 'Investor only memo',
+                'category': 'investor_docs',
+                'file_type': 'pdf',
+                'file_size_bytes': 128,
+                'visibility_roles': ['investor'],
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        document = Document.objects.get(pk=resp.data['document']['id'])
+        self.assertIn('internal', document.visibility_roles)
+        # The non-staff analyst can still reach their own doc via complete/blob.
+        self.assertEqual(document.visibility_roles, ['investor', 'internal'])
+
+    def test_upload_intent_for_inaccessible_deal_returns_404(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=self.sponsor,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+
+        resp = self._upload_intent(other_deal, 'Should not upload', 'legal')
+
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertFalse(Document.objects.filter(deal=other_deal).exists())
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_blob_for_inaccessible_document_returns_404(self):
+        other_deal = Deal.objects.create(
+            name='Other Analyst Deal',
+            investment_type='whole_loan_bridge',
+            sponsor=self.sponsor,
+            assigned_analyst=self.other_user,
+            source_channel='direct',
+            requested_amount='1000000.00',
+        )
+        document = self._create_ready_document(other_deal, 'Secret memo', 'legal')
+
+        resp = self.client.get(f'/api/documents/{document.pk}/blob/')
+
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_cleanup_stale_pending_documents_sweeps_old_rows_and_blobs(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from api.tasks import cleanup_stale_pending_documents
+        from api.services.storage import get_document_storage
+
+        deal = self.create_deal()
+        stale = Document.objects.create(
+            deal=deal,
+            document_name='Abandoned',
+            category='legal',
+            version=1,
+            file_url='deals/abc/stale/v1/abandoned.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.PENDING,
+            uploaded_by=self.user,
+        )
+        Document.objects.filter(pk=stale.pk).update(
+            uploaded_date=timezone.now() - timedelta(hours=48)
+        )
+        fresh = Document.objects.create(
+            deal=deal,
+            document_name='Fresh',
+            category='legal',
+            version=2,
+            file_url='deals/abc/fresh/v2/fresh.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.PENDING,
+            uploaded_by=self.user,
+        )
+        storage = get_document_storage()
+        storage.write_object(stale.file_url, b'stale', 'application/pdf')
+        storage.write_object(fresh.file_url, b'fresh', 'application/pdf')
+
+        deleted = cleanup_stale_pending_documents()
+
+        self.assertEqual(deleted, 1)
+        self.assertFalse(Document.objects.filter(pk=stale.pk).exists())
+        self.assertTrue(Document.objects.filter(pk=fresh.pk).exists())
+        self.assertIsNotNone(storage.head_object(stale.file_url))
+        self.assertIsNotNone(storage.head_object(fresh.file_url))
+        deletion = DocumentBlobDeletion.objects.get(document_id=stale.pk)
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.PENDING)
+        from api.tasks import process_document_blob_deletions
+        result = process_document_blob_deletions()
+        self.assertEqual(result, {'completed': 1, 'failed': 0})
+        self.assertIsNone(storage.head_object(stale.file_url))
+        abandoned = ActivityLog.objects.get(
+            action_type=ActivityActionType.DOCUMENT_UPLOAD_ABANDONED,
+            metadata__document_id=str(stale.pk),
+        )
+        self.assertIn('expired', abandoned.description)
+        self.assertIsNone(abandoned.performed_by)
+
+    @override_settings(DOCUMENT_STORAGE_BACKEND='local')
+    def test_failed_blob_delete_is_persisted_and_retried(self):
+        from api.services.documents import process_pending_blob_deletions
+        from api.services.storage import get_document_storage
+
+        deal = self.create_deal()
+        document = self._create_ready_document(deal, 'Durable delete', 'legal')
+        storage = get_document_storage()
+        storage.write_object(document.file_url, b'durable', 'application/pdf')
+
+        response = self.client.delete(f'/api/documents/{document.pk}/')
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Document.objects.filter(pk=document.pk).exists())
+        deletion = DocumentBlobDeletion.objects.get(document_id=document.pk)
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.PENDING)
+        self.assertTrue(ActivityLog.objects.filter(
+            action_type=ActivityActionType.DOCUMENT_DELETE_PENDING,
+            metadata__document_id=str(document.pk),
+        ).exists())
+
+        with patch.object(storage, 'delete_object', side_effect=RuntimeError('R2 unavailable')):
+            failed = process_pending_blob_deletions(storage=storage)
+        self.assertEqual(failed, {'completed': 0, 'failed': 1})
+        deletion.refresh_from_db()
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.PENDING)
+        self.assertEqual(deletion.attempt_count, 1)
+        self.assertIn('R2 unavailable', deletion.last_error)
+
+        deletion.next_attempt_at = timezone.now()
+        deletion.save(update_fields=['next_attempt_at'])
+        completed = process_pending_blob_deletions(storage=storage)
+        self.assertEqual(completed, {'completed': 1, 'failed': 0})
+        deletion.refresh_from_db()
+        self.assertEqual(deletion.status, DocumentBlobDeletion.Status.COMPLETED)
+        self.assertIsNone(storage.head_object(document.file_url))
+        self.assertTrue(ActivityLog.objects.filter(
+            action_type=ActivityActionType.DOCUMENT_DELETED,
+            metadata__document_id=str(document.pk),
+        ).exists())
+
+    def test_document_default_order_is_stable_for_pagination(self):
+        self.assertEqual(Document._meta.ordering, ['deal', 'category', '-version', 'id'])
 
     def test_activity_logs_are_read_only_via_api(self):
         ActivityLog.objects.create(
@@ -1211,8 +2106,8 @@ class DealSpineApiTests(APITestCase):
 
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data['active_deals'], 1)
-        self.assertEqual(str(resp.data['pipeline_value']), '2500000')
-        self.assertEqual(str(resp.data['gross_pipeline_value']), '3000000')
+        self.assertEqual(resp.data['pipeline_value'], '2500000.00')
+        self.assertEqual(resp.data['gross_pipeline_value'], '3000000.00')
         self.assertEqual(
             {row['pipeline_status']: row['count'] for row in resp.data['by_pipeline_status']},
             {'dead': 1, 'sourced': 1},
@@ -1253,6 +2148,339 @@ class DealSpineApiTests(APITestCase):
         self.assertEqual(response_results(broker_filter)[0]['company_name'], 'Metro Capital Markets')
         self.assertEqual(fund_filter.status_code, status.HTTP_200_OK)
         self.assertEqual(response_results(fund_filter)[0]['name'], 'MRJ Capital Fund I')
+
+
+class DealNoteModelTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('note_author', password='pw')
+        self.deal = Deal.objects.create(
+            name='Note Model Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.user,
+        )
+
+    def test_note_is_deleted_when_its_deal_is_deleted(self):
+        DealNote.objects.create(deal=self.deal, author=self.user, body='hello')
+        self.assertEqual(DealNote.objects.count(), 1)
+        self.deal.delete()
+        self.assertEqual(DealNote.objects.count(), 0)
+
+    def test_note_accepts_same_deal_document_attachment(self):
+        doc = Document.objects.create(
+            id=uuid.uuid4(),
+            deal=self.deal,
+            document_name='OM',
+            category='offering_memo',
+            file_url='deals/x/om.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.user,
+            visibility_roles=['internal'],
+        )
+        note = DealNote.objects.create(deal=self.deal, author=self.user, body='see OM')
+        note.attachments.add(doc)
+        self.assertEqual(list(note.attachments.all()), [doc])
+        self.assertEqual(list(doc.deal_notes.all()), [note])
+
+
+class DealNoteServiceTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('svc_staff', password='pw', is_staff=True)
+        self.deal = Deal.objects.create(
+            name='Service Note Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.user,
+        )
+
+    def test_create_note_writes_note_and_activity_log(self):
+        from api.services.notes import create_note
+
+        note = create_note(
+            deal=self.deal,
+            author=self.user,
+            body='Needs updated appraisal before quoting.',
+            attachments=[],
+            visibility_roles=None,
+            ip_address='203.0.113.5',
+        )
+
+        self.assertEqual(note.visibility_roles, ['internal'])
+        log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
+        self.assertEqual(log.deal, self.deal)
+        self.assertEqual(log.performed_by, self.user)
+        self.assertEqual(log.ip_address, '203.0.113.5')
+        self.assertEqual(log.metadata['subject_model'], 'deal_note')
+        self.assertEqual(log.metadata['subject_id'], str(note.id))
+
+    def test_create_note_is_atomic_when_logging_fails(self):
+        from unittest.mock import patch
+
+        from api.services.notes import create_note
+
+        with patch('api.services.notes.log_note_added', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                create_note(
+                    deal=self.deal,
+                    author=self.user,
+                    body='rolls back',
+                    attachments=[],
+                    visibility_roles=None,
+                    ip_address=None,
+                )
+        self.assertEqual(DealNote.objects.count(), 0)
+        self.assertEqual(ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0)
+
+    def test_create_note_rejects_cross_deal_attachment(self):
+        from api.services.notes import create_note
+
+        other_deal = Deal.objects.create(
+            name='Other Service Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='500000.00',
+            assigned_analyst=self.user,
+        )
+        doc = Document.objects.create(
+            id=uuid.uuid4(),
+            deal=other_deal,
+            document_name='OM',
+            category='offering_memo',
+            file_url='deals/other/om.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.user,
+            visibility_roles=['internal'],
+        )
+        with self.assertRaises(ValueError):
+            create_note(
+                deal=self.deal,
+                author=self.user,
+                body='cross-deal attach',
+                attachments=[doc],
+                visibility_roles=None,
+                ip_address=None,
+            )
+        self.assertEqual(DealNote.objects.count(), 0)
+        self.assertEqual(ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0)
+
+    def test_update_note_rolls_back_when_audit_logging_fails(self):
+        from api.services.notes import update_note
+
+        note = DealNote.objects.create(deal=self.deal, author=self.user, body='before')
+        with patch('api.services.notes.log_note_updated', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                update_note(note, performed_by=self.user, body='after')
+
+        note.refresh_from_db()
+        self.assertEqual(note.body, 'before')
+
+    def test_delete_note_rolls_back_when_audit_logging_fails(self):
+        from api.services.notes import delete_note
+
+        note = DealNote.objects.create(deal=self.deal, author=self.user, body='keep')
+        with patch('api.services.notes.log_note_deleted', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                delete_note(note, performed_by=self.user)
+
+        self.assertTrue(DealNote.objects.filter(pk=note.pk).exists())
+
+
+class DealNoteApiTests(APITestCase):
+    def setUp(self):
+        self.analyst = User.objects.create_user('note_analyst', password='pw')
+        self.other_analyst = User.objects.create_user('other_note_analyst', password='pw')
+        self.staff = User.objects.create_user('note_staff', password='pw', is_staff=True)
+        self.deal = Deal.objects.create(
+            name='Notes API Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='1000000.00',
+            assigned_analyst=self.analyst,
+        )
+        self.other_deal = Deal.objects.create(
+            name='Other Notes Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='500000.00',
+            assigned_analyst=self.analyst,
+        )
+        self.foreign_deal = Deal.objects.create(
+            name='Foreign Notes Deal',
+            investment_type='whole_loan_bridge',
+            source_channel='direct',
+            requested_amount='750000.00',
+            assigned_analyst=self.other_analyst,
+        )
+
+    def _ready_doc(self, deal):
+        return Document.objects.create(
+            id=uuid.uuid4(),
+            deal=deal,
+            document_name='OM',
+            category='offering_memo',
+            file_url=f'deals/{deal.pk}/om.pdf',
+            file_type='pdf',
+            storage_status=DocumentStorageStatus.READY,
+            uploaded_by=self.staff,
+            visibility_roles=['internal'],
+        )
+
+    def test_staff_creates_note_sets_author_and_logs_activity(self):
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'Call sponsor Monday.'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data['author'], self.staff.pk)
+        self.assertEqual(resp.data['visibility_roles'], ['internal'])
+        self.assertTrue(resp.data['can_edit'])
+        self.assertTrue(resp.data['can_delete'])
+        log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
+        self.assertEqual(log.metadata['subject_id'], resp.data['id'])
+
+    def test_assigned_analyst_can_create_and_list_internal_notes(self):
+        self.client.force_authenticate(self.analyst)
+        create = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'Analyst collaboration note'},
+            format='json',
+        )
+        self.assertEqual(create.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(create.data['can_edit'])
+        listing = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['body'] for row in response_results(listing)], ['Analyst collaboration note'])
+
+    def test_analyst_cannot_access_notes_for_an_unassigned_deal(self):
+        DealNote.objects.create(deal=self.foreign_deal, author=self.other_analyst, body='private')
+        self.client.force_authenticate(self.analyst)
+
+        create = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.foreign_deal.pk), 'body': 'should not create'},
+            format='json',
+        )
+        listing = self.client.get(f'/api/deal-notes/?deal={self.foreign_deal.pk}')
+
+        self.assertEqual(create.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response_results(listing), [])
+
+    def test_notes_are_filtered_by_deal(self):
+        DealNote.objects.create(deal=self.deal, author=self.staff, body='keep')
+        DealNote.objects.create(deal=self.other_deal, author=self.staff, body='drop')
+        self.client.force_authenticate(self.staff)
+        resp = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['body'] for row in response_results(resp)], ['keep'])
+
+    def test_empty_body_is_rejected(self):
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': '   '},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('body', resp.data)
+
+    def test_cross_deal_attachment_is_rejected(self):
+        doc = self._ready_doc(self.other_deal)
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'see doc', 'attachments': [str(doc.id)]},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('attachments', resp.data)
+
+    def test_same_deal_attachment_is_accepted(self):
+        doc = self._ready_doc(self.deal)
+        self.client.force_authenticate(self.staff)
+        resp = self.client.post(
+            '/api/deal-notes/',
+            {'deal': str(self.deal.pk), 'body': 'see doc', 'attachments': [str(doc.id)]},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data['attachments'], [str(doc.id)])
+        log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_ADDED)
+        self.assertEqual(log.metadata['attachment_ids'], [str(doc.id)])
+
+    def test_author_username_is_present_as_null_when_author_absent(self):
+        # author is SET_NULL on user deletion; the key must still be emitted
+        # (as null) so the response shape is stable and matches the Demo mock.
+        DealNote.objects.create(deal=self.deal, author=None, body='orphaned note')
+        self.client.force_authenticate(self.staff)
+        resp = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        row = response_results(resp)[0]
+        self.assertIn('author_username', row)
+        self.assertIsNone(row['author_username'])
+        self.assertIsNone(row['author'])
+
+    def test_staff_can_edit_body_but_not_deal(self):
+        note = DealNote.objects.create(deal=self.deal, author=self.staff, body='draft')
+        self.client.force_authenticate(self.staff)
+        edit = self.client.patch(
+            f'/api/deal-notes/{note.pk}/', {'body': 'final'}, format='json'
+        )
+        self.assertEqual(edit.status_code, status.HTTP_200_OK)
+        self.assertEqual(edit.data['body'], 'final')
+        self.assertEqual(
+            ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).count(), 0
+        )
+        updated_log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_UPDATED)
+        self.assertEqual(updated_log.metadata['subject_id'], str(note.pk))
+        self.assertEqual(updated_log.metadata['changed_fields'], ['body'])
+        move = self.client.patch(
+            f'/api/deal-notes/{note.pk}/', {'deal': str(self.other_deal.pk)}, format='json'
+        )
+        self.assertEqual(move.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_staff_can_delete_note_and_audit_row_remains(self):
+        from api.services.notes import log_note_added
+
+        note = DealNote.objects.create(deal=self.deal, author=self.staff, body='temp')
+        log_note_added(note, self.staff, None)
+        self.client.force_authenticate(self.staff)
+        resp = self.client.delete(f'/api/deal-notes/{note.pk}/')
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(DealNote.objects.filter(pk=note.pk).exists())
+        self.assertTrue(
+            ActivityLog.objects.filter(action_type=ActivityActionType.NOTE_ADDED).exists()
+        )
+        deleted_log = ActivityLog.objects.get(action_type=ActivityActionType.NOTE_DELETED)
+        self.assertEqual(deleted_log.metadata['subject_id'], str(note.pk))
+
+    def test_assigned_analyst_can_only_manage_their_own_notes(self):
+        staff_note = DealNote.objects.create(deal=self.deal, author=self.staff, body='Staff note')
+        own_note = DealNote.objects.create(deal=self.deal, author=self.analyst, body='Own note')
+        self.client.force_authenticate(self.analyst)
+
+        listing = self.client.get(f'/api/deal-notes/?deal={self.deal.pk}')
+        capabilities = {row['id']: row for row in response_results(listing)}
+        self.assertFalse(capabilities[str(staff_note.pk)]['can_edit'])
+        self.assertFalse(capabilities[str(staff_note.pk)]['can_delete'])
+        self.assertTrue(capabilities[str(own_note.pk)]['can_edit'])
+
+        blocked_edit = self.client.patch(
+            f'/api/deal-notes/{staff_note.pk}/', {'body': 'No'}, format='json'
+        )
+        blocked_delete = self.client.delete(f'/api/deal-notes/{staff_note.pk}/')
+        own_edit = self.client.patch(
+            f'/api/deal-notes/{own_note.pk}/', {'body': 'Own note updated'}, format='json'
+        )
+
+        self.assertEqual(blocked_edit.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(blocked_delete.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(own_edit.status_code, status.HTTP_200_OK)
 
 
 def response_results(response):

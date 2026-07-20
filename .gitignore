@@ -21,17 +21,20 @@ db.sqlite3
 # Build artifacts
 build/
 frontend/build/
+output/
 
 # Node
 frontend/node_modules/
 frontend/.eslintcache
+
+# Local documentation
+docs/
 
 # Editor
 .DS_Store
 .idea/
 .vscode/
 .cursor/
-docs/
 *.swp
 *.swo
 
@@ -43,3 +46,4 @@ docs/
 
 # Test caches
 .pytest_cache/
+tmp/

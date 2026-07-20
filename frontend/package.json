@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.13.0",
+    "node": ">=24.18.0",
     "npm": ">=10.0.0"
   },
   "scripts": {
     "dev": "vite",
     "start": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-entry-bundle.mjs",
     "preview": "vite preview",
     "test": "vitest",
     "typecheck": "tsc --noEmit",

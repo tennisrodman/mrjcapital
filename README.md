@@ -1,6 +1,6 @@
 # MRJ Capital
 
-Full-stack Django + React application for MRJ Capital LLC. The scaffold includes JWT authentication, a React SPA shell, Celery background job plumbing, and Railway deployment configuration.
+Full-stack deal workflow for MRJ Capital LLC. It covers debt-deal intake, screening, versioned quotes, closing checklists, document evidence, internal notes/activity, and pipeline/syndication lifecycle management.
 
 ## Stack
 
@@ -14,8 +14,9 @@ Full-stack Django + React application for MRJ Capital LLC. The scaffold includes
 ## Layout
 
 ```
-api/               Django app: auth endpoints + catchall 404
+api/               Django domain models, services, policies, serializers, viewsets, and tests
 frontend/          Vite React SPA; built into ../build/ and served by Django in production
+shared/            Versioned workflow seed manifest and lifecycle contracts
 scripts/           Python utilities importable from Django management commands
 mrj/               Django project: settings, urls, wsgi, celery
 build.sh           Builds the frontend, stages it into build/, runs collectstatic
@@ -24,11 +25,11 @@ setup.sh           One-shot local setup (pip + npm + optional DB create + superu
 dev.sh             tmux-based dev loop: Django + Vite + Celery side by side
 ```
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for topology and auth details.
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for system boundaries and [SYSTEM_REVIEW.md](./SYSTEM_REVIEW.md) for the staged remediation record.
 
 ## Local setup
 
-Requirements: Python 3.12+, Node 22+, Postgres, Redis, tmux (for `dev.sh`).
+Requirements: Python 3.12+, Node 24.18.0+, Postgres, Redis, tmux (for `dev.sh`).
 
 ```bash
 cp .env.example .env    # edit values
@@ -38,11 +39,44 @@ cp .env.example .env    # edit values
 
 `setup.sh --with-db` seeds a superuser when `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_EMAIL` / `DJANGO_SUPERUSER_PASSWORD` are set in `.env`.
 
-## Demo / Live data
+## Development data
 
-The frontend has a Demo/Live toggle in the header and on the login page. Demo uses the in-memory mock API seeded from `shared/demo_seed.json`; Live uses the Django `/api/` endpoints through `frontend/src/config/api.ts`.
+The frontend always uses the Django API. The former browser-only Demo mode was removed so normal UI use exercises the same persistence, permissions, audit, upload, and readiness boundaries as normal API operation. The automated frontend suite is component-level; it does not replace a literal browser walkthrough.
 
-`frontend/.env.example` documents `VITE_USE_MOCKS`, which only sets the default mode for a fresh browser. The toggle persists the chosen mode in `localStorage` and clears the local browser session when switching.
+For coherent development examples, use the guarded service-driven workflow seed. It requires `DEBUG=True`, local document storage, and an existing staff actor:
+
+```bash
+source .venv/bin/activate
+
+# Exercise Sourced through Exited, including expected readiness failures.
+# Database writes and the evidence blob are rolled back by default.
+python manage.py exercise_deal_lifecycle --actor tchen
+
+# Persist an append-only, idempotent development matrix for UI inspection.
+python manage.py seed_development_scenarios --actor tchen
+
+# Or seed selected stages only; --target may be repeated.
+python manage.py seed_development_scenarios --actor tchen --target screening --target closing
+```
+
+The durable scenarios are declared in `shared/workflow_seed.v1.json`, start at Sourced, and use screening, quote, transition, syndication, document, and closing services. They create real local evidence with verified size and SHA-256 checksums. Scenario history is intentionally append-only; there is no rebuild command that bypasses protected screening, quote, or closing evidence.
+
+For the richer pipeline-board dataset used by the team, use the production-safe
+showcase command. It defaults to a transactional dry run and is safe to rerun:
+
+```bash
+# Preview all inserts and validations; no rows are committed.
+python manage.py seed_showcase_data --actor tchen --dry-run
+
+# Commit after reviewing the JSON summary.
+python manage.py seed_showcase_data --actor tchen --apply
+```
+
+The versioned source is `shared/showcase_seed.v1.json`. It contains 14 deals,
+15 properties, 6 sponsors, 4 brokers, and 2 funds, with deals distributed from
+Sourced through Exited plus On Hold and Dead. Deterministic identities make
+repeat applications no-ops. The command never updates or deletes existing
+business data; a conflicting identity aborts and rolls back the entire run.
 
 ## Local MCP server
 
@@ -91,6 +125,12 @@ Deal detail policy: `mrj_get_deal` omits `Deal.details` by default; callers can 
 | `CORS_ALLOWED_ORIGINS` | Comma-separated origins with `https://`. |
 | `DJANGO_SUPERUSER_*` | Auto superuser on `setup.sh --with-db`. |
 | `MRJ_MCP_USER_ID`, `MRJ_MCP_USERNAME` | Local MCP staff user selector. `MRJ_MCP_USER_ID` takes precedence. |
+| `DOCUMENT_STORAGE_BACKEND` | `local` for development/tests or `r2` for Cloudflare R2. |
+| `DOCUMENT_MAX_UPLOAD_BYTES` | Server-enforced document upload limit; default 50 MB. |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` | Required when document storage uses R2. |
+| `R2_PRESIGN_UPLOAD_EXPIRY`, `R2_PRESIGN_DOWNLOAD_EXPIRY`, `R2_PRESIGN_DELETE_SAFETY_SKEW` | Signed URL TTLs and the deletion replay-safety margin. |
+
+For browser uploads, the R2 bucket CORS policy must allow `PUT` from the SPA origin and the signed request headers `Content-Type`, `x-amz-checksum-sha256`, and `If-None-Match`. R2 upload intents bind the exact file length and checksum, so clients must use the returned method and headers unchanged.
 
 ## Testing
 
@@ -99,7 +139,15 @@ source .venv/bin/activate
 pip install -r requirements-dev.txt
 python manage.py test api --settings=mrj.settings.test
 # or: pytest api/
+
+cd frontend
+npm test -- --run
+npm run typecheck
+npm run lint
+npm run build   # includes the production entry-bundle budget check
 ```
+
+The fast local checkpoint uses in-memory SQLite. CI also provisions PostgreSQL and runs the production-database contract/concurrency modules with `mrj.settings.test_postgres`.
 
 ## Deploying to Railway
 

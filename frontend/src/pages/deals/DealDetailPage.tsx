@@ -2,36 +2,64 @@ import { useContext, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  ArrowRightLeft,
   Building2,
   CalendarDays,
   CheckCircle2,
   Clock,
+  Download,
   FileText,
+  Globe2,
   Landmark,
-  Layers,
   Mail,
   MapPin,
   Pencil,
   Phone,
   Star,
+  Trash2,
+  Upload,
   UserRound,
 } from 'lucide-react';
+import { DocumentUploadDialog } from '@/components/deals/DocumentUploadDialog';
+import { DealContactsPanel } from '@/components/deals/DealContactsPanel';
+import { DealNotesPanel } from '@/components/deals/DealNotesPanel';
+import { DealWorkflowNavigation } from '@/components/deals/DealWorkflowNavigation';
 import { AuthContext } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Panel, Field } from '@/components/deals/Panel';
 import { InvestmentChip, PipelineBadge, SyndicationBadge } from '@/components/deals/StatusBadge';
 import { TransitionDialog } from '@/components/deals/TransitionDialog';
+import { StageHistoryPanel } from '@/components/deals/StageHistoryPanel';
 import { EmptyState, ErrorState, Spinner } from '@/components/deals/States';
-import { useDeal, useDealActivity, useDealDocuments } from '@/lib/api/deals';
+import { useClosingPackage } from '@/lib/api/closing';
+import {
+  useAllowedTransitions,
+  useDeal,
+  useDealActivity,
+  useDealDocuments,
+  useDealStageHistory,
+} from '@/lib/api/deals';
+import {
+  formatFileSize,
+  useDeleteDocument,
+  useDownloadDocument,
+  useUpdateDocumentMetadata,
+} from '@/lib/api/documents';
+import { useDealNotes } from '@/lib/api/notes';
+import { apiErrorMessage } from '@/lib/apiError';
 import {
   DOCUMENT_CATEGORY_LABELS,
+  DEAL_PROFILE_LABELS,
+  DEAL_PURPOSE_LABELS,
   INVESTMENT_CATEGORY_LABELS,
   PIPELINE_STATUS_LABELS,
   PROPERTY_TYPE_LABELS,
   RELATIONSHIP_RATING_LABELS,
   SOURCE_CHANNEL_LABELS,
+  SPONSOR_ENTITY_TYPE_LABELS,
   formatCurrency,
   formatDate,
   formatDateTime,
@@ -45,8 +73,12 @@ export default function DealDetailPage() {
 
   const dealQuery = useDeal(id);
   const documentsQuery = useDealDocuments(id);
+  const stageHistoryQuery = useDealStageHistory(id);
   const activityQuery = useDealActivity(id, isStaff);
+  const notesQuery = useDealNotes(id);
+  const allowedTransitionsQuery = useAllowedTransitions(id, true);
   const [openDialog, setOpenDialog] = useState<'pipeline' | 'syndication' | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   if (dealQuery.isLoading) return <Spinner label="Loading deal…" />;
 
@@ -70,6 +102,8 @@ export default function DealDetailPage() {
       <BackLink />
       <DealHeader
         deal={deal}
+        allowedTransitions={allowedTransitionsQuery.data}
+        transitionsLoading={allowedTransitionsQuery.isLoading}
         onMoveStage={() => setOpenDialog('pipeline')}
         onSyndication={() => setOpenDialog('syndication')}
       />
@@ -91,28 +125,48 @@ export default function DealDetailPage() {
         <div className="animate-fade-up stagger-2 space-y-6">
           <OverviewPanel deal={deal} />
           <PropertiesPanel deal={deal} />
+          <DealContactsPanel dealId={deal.id} />
           <DocumentsPanel
+            dealId={deal.id}
             documents={documentsQuery.data ?? []}
             isLoading={documentsQuery.isLoading}
             isError={documentsQuery.isError}
+            onUpload={() => setUploadOpen(true)}
           />
         </div>
 
         <aside className="animate-fade-up stagger-3 space-y-6">
+          <StageHistoryPanel
+            events={stageHistoryQuery.data ?? []}
+            isLoading={stageHistoryQuery.isLoading}
+            isError={stageHistoryQuery.isError}
+            onRetry={() => void stageHistoryQuery.refetch()}
+          />
           <SponsorPanel deal={deal} />
           <BrokerPanel deal={deal} />
+          <DealNotesPanel
+            dealId={deal.id}
+            notes={notesQuery.data ?? []}
+            isLoading={notesQuery.isLoading}
+            isError={notesQuery.isError}
+            onRetry={() => void notesQuery.refetch()}
+            documents={documentsQuery.data ?? []}
+          />
           {isStaff ? (
-            <ActivityPanel
-              entries={activityQuery.data ?? []}
-              isLoading={activityQuery.isLoading}
-            />
+              <ActivityPanel
+                entries={activityQuery.data ?? []}
+                isLoading={activityQuery.isLoading}
+                isError={activityQuery.isError}
+                onRetry={() => void activityQuery.refetch()}
+              />
           ) : null}
         </aside>
       </div>
+
+      <DocumentUploadDialog deal={deal} open={uploadOpen} onOpenChange={setUploadOpen} />
     </div>
   );
 }
-
 function BackLink() {
   return (
     <Link
@@ -127,13 +181,21 @@ function BackLink() {
 
 function DealHeader({
   deal,
+  allowedTransitions,
+  transitionsLoading,
   onMoveStage,
   onSyndication,
 }: {
   deal: Deal;
+  allowedTransitions: ReturnType<typeof useAllowedTransitions>['data'];
+  transitionsLoading: boolean;
   onMoveStage: () => void;
   onSyndication: () => void;
 }) {
+  const closingPackageQuery = useClosingPackage(deal.id);
+  const showClosingLink =
+    ['signed', 'closing'].includes(deal.pipeline_status) || Boolean(closingPackageQuery.data);
+
   return (
     <header className="animate-fade-up flex flex-col gap-5 border-b border-[var(--border)] pb-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -147,7 +209,7 @@ function DealHeader({
               </span>
             ) : null}
           </div>
-          <h1 className="font-display mt-3 text-3xl font-medium tracking-tight text-[var(--ink)]">
+          <h1 className="font-display mt-3 break-words text-3xl font-medium text-[var(--ink)]">
             {deal.name}
           </h1>
           <div className="mt-2">
@@ -165,22 +227,14 @@ function DealHeader({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={onMoveStage}>
-          <ArrowRightLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Move stage
-        </Button>
-        <Button type="button" variant="outline" onClick={onSyndication}>
-          <Layers className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Syndication
-        </Button>
-        <Button type="button" variant="outline" asChild>
-          <Link to={`/deals/${deal.id}/edit`}>
-            <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Edit deal
-          </Link>
-        </Button>
-      </div>
+      <DealWorkflowNavigation
+        deal={deal}
+        allowedTransitions={allowedTransitions}
+        transitionsLoading={transitionsLoading}
+        showClosingLink={showClosingLink}
+        onMoveStage={onMoveStage}
+        onSyndication={onSyndication}
+      />
     </header>
   );
 }
@@ -194,8 +248,28 @@ function OverviewPanel({ deal }: { deal: Deal }) {
         <Field label="Sourced">{formatDate(deal.source_date)}</Field>
         <Field label="Fund">{deal.fund_detail?.name ?? 'Unassigned'}</Field>
         <Field label="Analyst">{deal.assigned_analyst_detail?.username ?? 'Unassigned'}</Field>
+        <Field label="Stage age">{deal.days_in_current_stage} days</Field>
+        <Field label="Stage entered">{formatDateTime(deal.current_stage_entered_at)}</Field>
         <Field label="Created">{formatDate(deal.created_at)}</Field>
+        <Field label="Purpose">{deal.purpose ? DEAL_PURPOSE_LABELS[deal.purpose] : '—'}</Field>
+        <Field label="Profile">{deal.profile ? DEAL_PROFILE_LABELS[deal.profile] : '—'}</Field>
+        <Field label="Estimated value">
+          {typeof deal.estimated_value === 'string' ? formatCurrency(deal.estimated_value) : '—'}
+        </Field>
+        <Field label="Renovation budget">
+          {typeof deal.renovation_budget === 'string' ? formatCurrency(deal.renovation_budget) : '—'}
+        </Field>
       </dl>
+      {deal.description ? (
+        <div className="mt-5 border-t border-[var(--border)] pt-4">
+          <p className="text-[0.7rem] font-medium uppercase tracking-[0.1em] text-[var(--slate)]">
+            Description
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--ink-muted)]">
+            {deal.description}
+          </p>
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -208,45 +282,63 @@ function PropertiesPanel({ deal }: { deal: Deal }) {
         <p className="text-sm text-[var(--slate)]">No properties linked to this deal.</p>
       ) : (
         <ul className="divide-y divide-[var(--border)]">
-          {properties.map(({ id, property, is_primary }) => (
-            <li key={id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--paper)] text-[var(--brass)]">
-                <MapPin className="h-4 w-4" strokeWidth={1.75} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate font-medium text-[var(--ink)]">{property.address}</p>
-                  {is_primary ? (
-                    <Badge className="border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]">
-                      <Star className="h-3 w-3 fill-current" strokeWidth={0} />
-                      Primary
-                    </Badge>
+          {properties.map(({ id, property, is_primary }) => {
+            const facts = propertyFacts(property);
+            return (
+              <li key={id} className="flex flex-wrap items-start gap-3 py-3 first:pt-0 last:pb-0">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--paper)] text-[var(--brass)]">
+                  <MapPin className="h-4 w-4" strokeWidth={1.75} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate font-medium text-[var(--ink)]">{property.address}</p>
+                    {is_primary ? (
+                      <Badge className="border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]">
+                        <Star className="h-3 w-3 fill-current" strokeWidth={0} />
+                        Primary
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <p className="mt-0.5 text-sm text-[var(--slate)]">
+                    {[property.city, property.state, property.zip].filter(Boolean).join(', ')}
+                  </p>
+                  {facts.length > 0 ? (
+                    <p className="mt-1 text-xs text-[var(--slate)]">{facts.join(' · ')}</p>
                   ) : null}
                 </div>
-                <p className="mt-0.5 text-sm text-[var(--slate)]">
-                  {[property.city, property.state, property.zip].filter(Boolean).join(', ')}
-                </p>
-              </div>
-              <span className="shrink-0 text-xs text-[var(--slate)]">
-                {PROPERTY_TYPE_LABELS[property.property_type]}
-              </span>
-            </li>
-          ))}
+                <span className="max-w-full shrink-0 break-words text-xs text-[var(--slate)]">
+                  {PROPERTY_TYPE_LABELS[property.property_type]}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Panel>
   );
 }
 
-function DocumentsPanel({
+export function DocumentsPanel({
+  dealId,
   documents,
   isLoading,
   isError,
+  onUpload,
 }: {
+  dealId: string;
   documents: DealDocument[];
   isLoading: boolean;
   isError: boolean;
+  onUpload: () => void;
 }) {
+  const download = useDownloadDocument();
+  const updateDocument = useUpdateDocumentMetadata(dealId);
+  const deleteDocument = useDeleteDocument(dealId);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [subcategory, setSubcategory] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [notes, setNotes] = useState('');
   const grouped = useMemo(() => {
     const map = new Map<DocumentCategory, DealDocument[]>();
     for (const doc of documents) {
@@ -258,7 +350,16 @@ function DocumentsPanel({
   }, [documents]);
 
   return (
-    <Panel title="Documents" count={documents.length}>
+    <Panel
+      title="Documents"
+      count={documents.length}
+      action={
+        <Button type="button" variant="outline" size="sm" onClick={onUpload}>
+          <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Upload
+        </Button>
+      }
+    >
       {isLoading ? (
         <p className="text-sm text-[var(--slate)]">Loading documents…</p>
       ) : isError ? (
@@ -276,7 +377,7 @@ function DocumentsPanel({
                 {docs.map((doc) => (
                   <li
                     key={doc.id}
-                    className="flex items-center gap-3 rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2"
+                    className="flex flex-wrap items-center gap-3 rounded-sm border border-[var(--border)] bg-[var(--paper)] px-3 py-2"
                   >
                     <FileText className="h-4 w-4 shrink-0 text-[var(--slate)]" strokeWidth={1.75} />
                     <div className="min-w-0 flex-1">
@@ -288,20 +389,119 @@ function DocumentsPanel({
                       </p>
                       <p className="text-xs text-[var(--slate)]">
                         {doc.file_type?.toUpperCase() || 'FILE'}
+                        {doc.file_size_bytes ? ` · ${formatFileSize(doc.file_size_bytes)}` : ''}
                         {doc.expiry_date ? ` · expires ${formatDate(doc.expiry_date)}` : ''}
                       </p>
+                      {!doc.can_delete && doc.delete_block_reason ? (
+                        <p className="mt-0.5 text-xs text-[var(--slate)]">
+                          {doc.delete_block_reason}
+                        </p>
+                      ) : null}
                     </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={download.isPending}
+                      onClick={() => {
+                        setDownloadError(null);
+                        download.mutate(doc, {
+                          onError: (err) =>
+                            setDownloadError(
+                              `Couldn't download ${doc.document_name}: ${apiErrorMessage(err)}`,
+                            ),
+                        });
+                      }}
+                    >
+                      <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      Download
+                    </Button>
+                    {doc.can_edit ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEditingId(editingId === doc.id ? null : doc.id);
+                          setSubcategory(doc.subcategory ?? '');
+                          setExpiryDate(doc.expiry_date ?? '');
+                          setNotes(doc.notes ?? '');
+                        }}
+                        aria-label={`Edit ${doc.document_name}`}
+                      >
+                        <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={deleteDocument.isPending || !doc.can_delete}
+                      title={doc.delete_block_reason || undefined}
+                      onClick={() => {
+                        if (!window.confirm(`Delete ${doc.document_name}? This cannot be undone.`)) return;
+                        setDownloadError(null);
+                        deleteDocument.mutate(doc.id, {
+                          onError: (error) => setDownloadError(apiErrorMessage(error, 'Could not delete document.')),
+                        });
+                      }}
+                      aria-label={
+                        doc.can_delete
+                          ? `Delete ${doc.document_name}`
+                          : `Cannot delete ${doc.document_name}: ${doc.delete_block_reason}`
+                      }
+                    >
+                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    </Button>
                     {doc.is_executed ? (
                       <Badge className="border-[var(--brass)]/40 bg-[var(--brass)]/12 text-[var(--ink)]">
                         <CheckCircle2 className="h-3 w-3" strokeWidth={2} />
                         Executed
                       </Badge>
                     ) : null}
+                    {editingId === doc.id ? (
+                      <div className="grid w-full gap-3 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
+                        <FormField label="Subcategory" htmlFor={`doc-subcategory-${doc.id}`} hint="Optional">
+                          <Input id={`doc-subcategory-${doc.id}`} value={subcategory} onChange={(event) => setSubcategory(event.target.value)} />
+                        </FormField>
+                        <FormField label="Expiry date" htmlFor={`doc-expiry-${doc.id}`} hint="Optional">
+                          <Input id={`doc-expiry-${doc.id}`} type="date" value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} />
+                        </FormField>
+                        <FormField label="Notes" htmlFor={`doc-notes-${doc.id}`} className="sm:col-span-2">
+                          <Textarea id={`doc-notes-${doc.id}`} rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} />
+                        </FormField>
+                        <div className="flex justify-end gap-2 sm:col-span-2">
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={updateDocument.isPending}
+                            onClick={() => updateDocument.mutate(
+                              {
+                                documentId: doc.id,
+                                payload: {
+                                  subcategory: subcategory.trim(),
+                                  expiry_date: expiryDate || null,
+                                  notes: notes.trim(),
+                                },
+                              },
+                              {
+                                onSuccess: () => setEditingId(null),
+                                onError: (error) => setDownloadError(apiErrorMessage(error, 'Could not update document.')),
+                              },
+                            )}
+                          >
+                            {updateDocument.isPending ? 'Saving…' : 'Save metadata'}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
             </div>
           ))}
+          {downloadError ? <p className="text-sm text-red-600">{downloadError}</p> : null}
         </div>
       )}
     </Panel>
@@ -323,7 +523,7 @@ function SponsorPanel({ deal }: { deal: Deal }) {
             <div className="min-w-0">
               <p className="font-medium text-[var(--ink)]">{sponsor.entity_name}</p>
               <p className="text-xs uppercase tracking-wide text-[var(--slate)]">
-                {sponsor.entity_type}
+                {SPONSOR_ENTITY_TYPE_LABELS[sponsor.entity_type]}
               </p>
             </div>
           </div>
@@ -341,11 +541,46 @@ function SponsorPanel({ deal }: { deal: Deal }) {
             {sponsor.primary_contact_phone ? (
               <ContactRow icon={Phone} value={sponsor.primary_contact_phone} />
             ) : null}
+            {sponsor.website ? (
+              <ContactRow icon={Globe2} value={sponsor.website} href={sponsor.website} />
+            ) : null}
           </div>
+
+          <dl className="grid grid-cols-2 gap-3 border-t border-[var(--border)] pt-3">
+            <Field label="Experience">
+              {typeof sponsor.years_experience === 'number' ? `${sponsor.years_experience} years` : '—'}
+            </Field>
+            <Field label="Completed projects">
+              {typeof sponsor.completed_projects === 'number'
+                ? sponsor.completed_projects.toLocaleString()
+                : '—'}
+            </Field>
+            <Field label="Bankruptcy history">
+              {typeof sponsor.bankruptcy_history === 'boolean'
+                ? sponsor.bankruptcy_history
+                  ? 'Yes'
+                  : 'No'
+                : 'Unknown'}
+            </Field>
+          </dl>
         </div>
       )}
     </Panel>
   );
+}
+
+function propertyFacts(property: Deal['properties'][number]['property']): string[] {
+  return [
+    property.subtype,
+    typeof property.units === 'number' ? `${property.units.toLocaleString()} units` : '',
+    typeof property.rentable_square_feet === 'number'
+      ? `${property.rentable_square_feet.toLocaleString()} rentable sf`
+      : '',
+    typeof property.year_built === 'number' ? `Built ${property.year_built}` : '',
+    typeof property.year_renovated === 'number' ? `Renovated ${property.year_renovated}` : '',
+    property.county ? `${property.county} County` : '',
+    property.msa,
+  ].filter((fact): fact is string => Boolean(fact));
 }
 
 function BrokerPanel({ deal }: { deal: Deal }) {
@@ -404,14 +639,29 @@ function ContactRow({
 function ActivityPanel({
   entries,
   isLoading,
+  isError,
+  onRetry,
 }: {
   entries: ActivityLogEntry[];
   isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
 }) {
   if (isLoading) {
     return (
       <Panel title="Activity">
         <p className="text-sm text-[var(--slate)]">Loading activity…</p>
+      </Panel>
+    );
+  }
+  if (isError) {
+    return (
+      <Panel title="Activity">
+        <ErrorState
+          title="Activity unavailable"
+          message="The audit timeline could not be loaded."
+          onRetry={onRetry}
+        />
       </Panel>
     );
   }

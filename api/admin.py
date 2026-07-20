@@ -1,7 +1,29 @@
 from django.contrib import admin
 from django.conf import settings
 
-from api.models import ActivityLog, Broker, Deal, DealProperty, Document, Fund, Property, Sponsor
+from api.models import (
+    ActivityLog,
+    Broker,
+    ClosingChecklistGeneration,
+    ClosingPackage,
+    ConditionPrecedent,
+    Contact,
+    DDChecklistItem,
+    DDTemplate,
+    DDTemplateItem,
+    Deal,
+    DealContact,
+    DealNote,
+    DealProperty,
+    DealStageEvent,
+    Document,
+    DocumentBlobDeletion,
+    Fund,
+    Property,
+    Quote,
+    ScreeningAssessment,
+    Sponsor,
+)
 
 
 class DealPropertyInline(admin.TabularInline):
@@ -9,24 +31,56 @@ class DealPropertyInline(admin.TabularInline):
     extra = 0
 
 
+class CreateOrReadOnlyAdmin(admin.ModelAdmin):
+    """Allow prototype seeding, but route every later mutation through audited APIs."""
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class FullyReadOnlyAdmin(CreateOrReadOnlyAdmin):
+    def has_add_permission(self, request):
+        return False
+
+
 @admin.register(Deal)
 class DealAdmin(admin.ModelAdmin):
     list_display = ['name', 'investment_type', 'pipeline_status', 'syndication_status', 'requested_amount', 'source_date']
     list_filter = ['investment_type', 'pipeline_status', 'syndication_status', 'source_channel']
     search_fields = ['name', 'sponsor__entity_name', 'broker__company_name']
-    readonly_fields = ['created_at', 'updated_at', 'investment_category']
+    readonly_fields = [
+        'pipeline_status',
+        'syndication_status',
+        'paused_from_status',
+        'current_stage_entered_at',
+        'created_at',
+        'updated_at',
+        'investment_category',
+    ]
     inlines = [DealPropertyInline]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Property)
-class PropertyAdmin(admin.ModelAdmin):
+class PropertyAdmin(CreateOrReadOnlyAdmin):
     list_display = ['address', 'city', 'state', 'property_type', 'msa']
     list_filter = ['state', 'property_type']
     search_fields = ['address', 'address_normalized', 'city', 'msa']
 
 
 @admin.register(Sponsor)
-class SponsorAdmin(admin.ModelAdmin):
+class SponsorAdmin(CreateOrReadOnlyAdmin):
     list_display = ['entity_name', 'entity_type', 'primary_contact_name', 'primary_contact_email', 'relationship_rating']
     list_filter = ['entity_type', 'relationship_rating']
     search_fields = ['entity_name', 'primary_contact_name', 'primary_contact_email']
@@ -34,24 +88,64 @@ class SponsorAdmin(admin.ModelAdmin):
 
 
 @admin.register(Broker)
-class BrokerAdmin(admin.ModelAdmin):
+class BrokerAdmin(CreateOrReadOnlyAdmin):
     list_display = ['company_name', 'contact_name', 'email', 'status']
     list_filter = ['status']
     search_fields = ['company_name', 'contact_name', 'email']
 
 
 @admin.register(Fund)
-class FundAdmin(admin.ModelAdmin):
+class FundAdmin(CreateOrReadOnlyAdmin):
     list_display = ['name', 'status']
     list_filter = ['status']
     search_fields = ['name']
 
 
 @admin.register(Document)
-class DocumentAdmin(admin.ModelAdmin):
-    list_display = ['document_name', 'deal', 'category', 'version', 'uploaded_date', 'is_executed', 'expiry_date']
-    list_filter = ['category', 'is_executed']
+class DocumentAdmin(FullyReadOnlyAdmin):
+    list_display = ['document_name', 'deal', 'category', 'version', 'storage_status', 'uploaded_date', 'is_executed', 'expiry_date']
+    list_filter = ['category', 'storage_status', 'is_executed']
     search_fields = ['document_name', 'deal__name']
+
+
+@admin.register(DocumentBlobDeletion)
+class DocumentBlobDeletionAdmin(admin.ModelAdmin):
+    list_display = [
+        'document_name',
+        'deal',
+        'reason',
+        'status',
+        'attempt_count',
+        'requested_at',
+        'completed_at',
+    ]
+    list_filter = ['status', 'reason', 'requested_at']
+    search_fields = ['document_name', 'storage_key', 'deal__name']
+    readonly_fields = [
+        'deal',
+        'document_id',
+        'document_name',
+        'storage_key',
+        'reason',
+        'status',
+        'requested_by',
+        'requested_ip',
+        'requested_at',
+        'completed_at',
+        'attempt_count',
+        'last_attempt_at',
+        'next_attempt_at',
+        'last_error',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ActivityLog)
@@ -92,3 +186,176 @@ class ActivityLogAdmin(admin.ModelAdmin):
         if settings.AUDIT_LOG_ADMIN_IMMUTABLE:
             actions.pop('delete_selected', None)
         return actions
+
+
+@admin.register(DealNote)
+class DealNoteAdmin(FullyReadOnlyAdmin):
+    list_display = ['deal', 'author', 'created_at', 'updated_at']
+    search_fields = ['deal__name', 'body']
+    filter_horizontal = ['attachments']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(Contact)
+class ContactAdmin(CreateOrReadOnlyAdmin):
+    list_display = ['full_name', 'company_name', 'email', 'phone', 'created_by', 'updated_at']
+    search_fields = ['full_name', 'company_name', 'email', 'phone']
+
+
+@admin.register(DealContact)
+class DealContactAdmin(FullyReadOnlyAdmin):
+    list_display = ['deal', 'contact', 'role', 'is_primary', 'updated_at']
+    list_filter = ['role', 'is_primary']
+    search_fields = ['deal__name', 'contact__full_name', 'contact__company_name']
+
+
+@admin.register(ScreeningAssessment)
+class ScreeningAssessmentAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'version', 'status', 'decision', 'quick_score', 'reviewer', 'updated_at']
+    list_filter = ['status', 'decision']
+    search_fields = ['deal__name', 'notes', 'equity_summary']
+    readonly_fields = [
+        'version',
+        'status',
+        'reviewer',
+        'finalized_at',
+        'ltv_as_is',
+        'ltv_stabilized',
+        'ltc',
+        'dscr',
+        'debt_yield',
+        'quick_score',
+        'created_at',
+        'updated_at',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Quote)
+class QuoteAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'version', 'status', 'is_counter', 'loan_amount', 'interest_rate', 'updated_at']
+    list_filter = ['status', 'is_counter', 'rate_type']
+    search_fields = ['deal__name', 'notes', 'equity_summary']
+    readonly_fields = [
+        'version',
+        'status',
+        'is_counter',
+        'created_by',
+        'sent_at',
+        'signed_at',
+        'withdrawn_at',
+        'origination_fee_amount',
+        'initial_funding_amount',
+        'created_at',
+        'updated_at',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DealStageEvent)
+class DealStageEventAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'from_status', 'to_status', 'entered_at', 'exited_at', 'performed_by']
+    list_filter = ['to_status', 'entered_at']
+    search_fields = ['deal__name', 'reason']
+    readonly_fields = [
+        'deal',
+        'from_status',
+        'to_status',
+        'entered_at',
+        'exited_at',
+        'performed_by',
+        'reason',
+        'is_override',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class DDTemplateItemInline(admin.TabularInline):
+    model = DDTemplateItem
+    extra = 0
+    can_delete = False
+    readonly_fields = [
+        'sort_order',
+        'kind',
+        'title',
+        'description',
+        'default_days_before_target_close',
+    ]
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DDTemplate)
+class DDTemplateAdmin(admin.ModelAdmin):
+    list_display = ['key', 'name', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['key', 'name']
+    readonly_fields = ['key', 'name', 'description']
+    inlines = [DDTemplateItemInline]
+    fields = ['key', 'name', 'description', 'is_active']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class ReadOnlyClosingAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ClosingPackage)
+class ClosingPackageAdmin(ReadOnlyClosingAdmin):
+    list_display = ['deal', 'target_close_date', 'updated_at']
+    search_fields = ['deal__name']
+
+
+@admin.register(ClosingChecklistGeneration)
+class ClosingChecklistGenerationAdmin(ReadOnlyClosingAdmin):
+    list_display = ['package', 'version', 'template_key', 'is_current', 'generated_at']
+    list_filter = ['is_current']
+
+
+@admin.register(DDChecklistItem)
+class DDChecklistItemAdmin(ReadOnlyClosingAdmin):
+    list_display = ['title', 'status', 'due_date', 'generation']
+    list_filter = ['status']
+
+
+@admin.register(ConditionPrecedent)
+class ConditionPrecedentAdmin(ReadOnlyClosingAdmin):
+    list_display = ['title', 'status', 'due_date', 'generation']
+    list_filter = ['status']

@@ -149,4 +149,31 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'api.tasks.heartbeat',
         'schedule': 60.0,
     },
+    'cleanup-stale-pending-documents': {
+        'task': 'api.tasks.cleanup_stale_pending_documents',
+        'schedule': 3600.0,
+    },
+    'process-document-blob-deletions': {
+        'task': 'api.tasks.process_document_blob_deletions',
+        'schedule': 60.0,
+    },
 }
+
+DOCUMENT_STORAGE_BACKEND = os.environ.get('DOCUMENT_STORAGE_BACKEND', 'local')
+DOCUMENT_MAX_UPLOAD_BYTES = int(os.environ.get('DOCUMENT_MAX_UPLOAD_BYTES', str(50 * 1024 * 1024)))
+
+# Local-backend uploads land in a single in-memory request body, so Django's
+# default 2.5 MB in-memory request cap would reject anything larger long before
+# DOCUMENT_MAX_UPLOAD_BYTES applies. Keep the two in lockstep (plus a small
+# margin for headers) so the document cap is the single source of truth.
+DATA_UPLOAD_MAX_MEMORY_SIZE = DOCUMENT_MAX_UPLOAD_BYTES + 5 * 1024 * 1024
+R2_ACCOUNT_ID = os.environ.get('R2_ACCOUNT_ID', '')
+R2_ACCESS_KEY_ID = os.environ.get('R2_ACCESS_KEY_ID', '')
+R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY', '')
+R2_BUCKET_NAME = os.environ.get('R2_BUCKET_NAME', '')
+R2_PRESIGN_UPLOAD_EXPIRY = int(os.environ.get('R2_PRESIGN_UPLOAD_EXPIRY', '3600'))
+R2_PRESIGN_DOWNLOAD_EXPIRY = int(os.environ.get('R2_PRESIGN_DOWNLOAD_EXPIRY', '900'))
+R2_PRESIGN_DELETE_SAFETY_SKEW = int(
+    os.environ.get('R2_PRESIGN_DELETE_SAFETY_SKEW', '60')
+)
+DOCUMENT_PENDING_MAX_AGE_HOURS = int(os.environ.get('DOCUMENT_PENDING_MAX_AGE_HOURS', '24'))

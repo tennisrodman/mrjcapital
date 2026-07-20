@@ -1,4 +1,3 @@
-import { MOCKS_ENABLED, mockApiRequest } from '@/mocks';
 import { ApiError } from '@/lib/apiError';
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from './authKeys';
 
@@ -80,8 +79,6 @@ const refreshAccessToken = async (): Promise<string> => {
 };
 
 export const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
-  if (MOCKS_ENABLED) return mockApiRequest<T>(path, options);
-
   const url = endpoint(path);
   let fetchOptions: RequestInit = {
     mode: 'cors',
